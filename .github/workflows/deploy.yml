@@ -26,6 +26,16 @@ jobs:
     - name: Configure Docker Auth
       run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
+    - name: Ensure Artifact Registry Exists
+      run: |
+        if ! gcloud artifacts repositories describe ${{ env.REPO_NAME }} --project ${{ env.PROJECT_ID }} --location ${{ env.REGION }} > /dev/null 2>&1; then
+          gcloud artifacts repositories create ${{ env.REPO_NAME }} \
+            --repository-format=docker \
+            --location=${{ env.REGION }} \
+            --description="Docker repository for Agent images" \
+            --project=${{ env.PROJECT_ID }}
+        fi
+
     # --- Daily Agent ---
     - name: Build Daily Agent
       run: |
