@@ -26,6 +26,8 @@ service-account.json
 sources.json
 candidates.json
 user_candidates.json
+setup_gh_auth.sh
+gcp_key.json
 
 # Logs
 *.log

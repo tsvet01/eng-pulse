@@ -1,0 +1,91 @@
+name: Deploy
+
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  PROJECT_ID: tsvet01
+  REGION: us-central1
+  REPO_NAME: agent-repo
+  
+jobs:
+  deploy-agents:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Google Auth
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+
+    - name: Configure Docker Auth
+      run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+    # --- Daily Agent ---
+    - name: Build Daily Agent
+      run: |
+        cd se-daily-agent
+        docker build --platform linux/amd64 -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:latest .
+    
+    - name: Push Daily Agent
+      run: docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:latest
+
+    - name: Deploy Daily Agent Job
+      run: |
+        gcloud run jobs deploy se-daily-agent-job \
+          --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:latest \
+          --region ${{ env.REGION }} \
+          --project ${{ env.PROJECT_ID }} \
+          --set-env-vars GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }} \
+          --task-timeout 5m
+
+    # --- Explorer Agent ---
+    - name: Build Explorer Agent
+      run: |
+        cd se-explorer-agent
+        docker build --platform linux/amd64 -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-explorer-agent:latest .
+
+    - name: Push Explorer Agent
+      run: docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-explorer-agent:latest
+
+    - name: Deploy Explorer Agent Job
+      run: |
+        gcloud run jobs deploy se-explorer-agent-job \
+          --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-explorer-agent:latest \
+          --region ${{ env.REGION }} \
+          --project ${{ env.PROJECT_ID }} \
+          --set-env-vars GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }} \
+          --task-timeout 30m
+
+  deploy-notifier:
+    runs-on: ubuntu-latest
+    needs: deploy-agents # Optional, can run in parallel
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Google Auth
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+
+    - name: Deploy Notifier Function
+      run: |
+        cd se-daily-notifier
+        gcloud functions deploy se-daily-notifier \
+          --gen2 \
+          --runtime=python311 \
+          --region=${{ env.REGION }} \
+          --source=. \
+          --entry-point=send_summary_email \
+          --trigger-event-filters="type=google.cloud.storage.object.v1.finalized" \
+          --trigger-event-filters="bucket=${{ env.PROJECT_ID }}-agent-brain" \
+          --set-env-vars "GMAIL_USER=atsvetkov@gmail.com,DEST_EMAIL=anton.tsvetkov@gmail.com,GMAIL_APP_PASSWORD=${{ secrets.GMAIL_APP_PASSWORD }}" \
+          --project ${{ env.PROJECT_ID }}
