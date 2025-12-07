@@ -1,0 +1,31 @@
+# Rust
+target/
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# Mac
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# Secrets & Local Config (IMPORTANT)
+.env
+*.env
+credentials.json
+service-account.json
+sources.json
+candidates.json
+user_candidates.json
+
+# Logs
+*.log
