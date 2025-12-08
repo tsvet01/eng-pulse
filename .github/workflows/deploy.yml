@@ -26,24 +26,11 @@ jobs:
     - name: Configure Docker Auth
       run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
-    - name: Ensure Artifact Registry Exists
-      run: |
-        if ! gcloud artifacts repositories describe ${{ env.REPO_NAME }} --project ${{ env.PROJECT_ID }} --location ${{ env.REGION }} > /dev/null 2>&1; then
-          gcloud artifacts repositories create ${{ env.REPO_NAME }} \
-            --repository-format=docker \
-            --location=${{ env.REGION }} \
-            --description="Docker repository for Agent images" \
-            --project=${{ env.PROJECT_ID }}
-        fi
-
     # --- Daily Agent ---
-    - name: Build Daily Agent
+    - name: Build & Push Daily Agent (Cloud Build)
       run: |
         cd se-daily-agent
-        docker build --platform linux/amd64 -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:latest .
-    
-    - name: Push Daily Agent
-      run: docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:latest
+        gcloud builds submit --tag ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:latest .
 
     - name: Deploy Daily Agent Job
       run: |
@@ -55,13 +42,10 @@ jobs:
           --task-timeout 5m
 
     # --- Explorer Agent ---
-    - name: Build Explorer Agent
+    - name: Build & Push Explorer Agent (Cloud Build)
       run: |
         cd se-explorer-agent
-        docker build --platform linux/amd64 -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-explorer-agent:latest .
-
-    - name: Push Explorer Agent
-      run: docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-explorer-agent:latest
+        gcloud builds submit --tag ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-explorer-agent:latest .
 
     - name: Deploy Explorer Agent Job
       run: |
