@@ -106,7 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let mut articles_text = String::new();
     for (i, article) in all_articles.iter().enumerate() {
-        articles_text.push_str(&format!( "{}. [{}] \n", i, article.source, article.title));
+        articles_text.push_str(&format!("{}. [{}] {}\n", i, article.source, article.title));
     }
 
     let selection_prompt = format!(
@@ -155,6 +155,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n--- Daily SE Briefing ---");
     println!("{}", summary);
 
+    // Create snippet BEFORE moving summary
+    let summary_snippet: String = summary.chars().take(100).collect();
+
     // 5. Upload Summary to GCS
     let today = Utc::now().format("%Y-%m-%d").to_string();
     let object_name = format!("summaries/{}.md", today);
@@ -200,7 +203,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         date: today,
         url: public_url,
         title: best_article.title.clone(),
-        summary_snippet: summary.chars().take(100).collect(),
+        summary_snippet,
     });
 
     // Upload manifest
