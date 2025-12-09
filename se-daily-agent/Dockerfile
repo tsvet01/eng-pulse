@@ -32,8 +32,6 @@ RUN apt-get update && apt-get install -y \
 # Copy the binary from the builder stage
 COPY --from=builder /app/target/release/se-daily-agent /usr/local/bin/se-daily-agent
 
-# Copy configuration files
-COPY sources.json .
 # Note: .env is NOT copied. Secrets should be injected via environment variables in Cloud Run.
 
 CMD ["se-daily-agent"]
