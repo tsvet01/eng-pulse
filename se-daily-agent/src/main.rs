@@ -43,6 +43,15 @@ struct GeminiError {
     message: String,
 }
 
+// --- Manifest Struct ---
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct ManifestEntry {
+    date: String,
+    url: String,
+    title: String,
+    summary_snippet: String,
+}
+
 // --- Main ---
 
 #[tokio::main]
@@ -97,7 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let mut articles_text = String::new();
     for (i, article) in all_articles.iter().enumerate() {
-        articles_text.push_str(&format!( "{}. [{}] {}\n", i, article.source, article.title));
+        articles_text.push_str(&format!("{}. [{}] {}\n", i, article.source, article.title));
     }
 
     let selection_prompt = format!(
@@ -146,6 +155,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n--- Daily SE Briefing ---");
     println!("{}", summary);
 
+    // Create snippet BEFORE moving summary
+    let summary_snippet: String = summary.chars().take(100).collect();
+
     // 5. Upload Summary to GCS
     let today = Utc::now().format("%Y-%m-%d").to_string();
     let object_name = format!("summaries/{}.md", today);
@@ -164,6 +176,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ).await?;
 
     println!("Upload complete!");
+
+    // 6. Update Manifest
+    println!("Updating manifest.json...");
+    let manifest_obj_name = "manifest.json";
+    let public_url = format!("https://storage.googleapis.com/{}/{}", bucket_name, object_name);
+    
+    // Download existing manifest
+    let mut manifest: Vec<ManifestEntry> = match gcs_client.download_object(
+        &GetObjectRequest {
+            bucket: bucket_name.to_string(),
+            object: manifest_obj_name.to_string(),
+            ..Default::default()
+        },
+        &Range::default()
+    ).await {
+        Ok(data) => serde_json::from_slice(&data).unwrap_or_else(|_| Vec::new()),
+        Err(_) => Vec::new(),
+    };
+
+    // Remove existing entry for today if any (to update it)
+    manifest.retain(|e| e.date != today);
+
+    // Add new entry
+    manifest.insert(0, ManifestEntry {
+        date: today,
+        url: public_url,
+        title: best_article.title.clone(),
+        summary_snippet,
+    });
+
+    // Upload manifest
+    let manifest_json = serde_json::to_vec_pretty(&manifest)?;
+    gcs_client.upload_object(
+        &UploadObjectRequest {
+            bucket: bucket_name.to_string(),
+            ..Default::default()
+        },
+        manifest_json,
+        &UploadType::Simple(Media::new(manifest_obj_name.to_string()))
+    ).await?;
+    println!("Manifest updated!");
 
     Ok(())
 }
