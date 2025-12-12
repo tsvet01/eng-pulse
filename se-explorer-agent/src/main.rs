@@ -12,14 +12,13 @@ use rss::Channel;
 use atom_syndication::Feed;
 use tracing::{info, warn, error, debug, instrument};
 use tracing_subscriber::{fmt, EnvFilter};
-use backoff::{ExponentialBackoff, future::retry};
 use std::time::Duration as StdDuration;
+use gemini_engine::call_gemini_with_retry;
 
 // --- Configuration Constants ---
 const HTTP_TIMEOUT_SECS: u64 = 30;
 const DEFAULT_BUCKET: &str = "tsvet01-agent-brain";
 const FRESHNESS_DAYS: i64 = 90;
-const MAX_RETRY_ELAPSED_SECS: u64 = 120;
 const MAX_FEED_DISCOVERY_ATTEMPTS: usize = 2;
 
 // --- Configuration Structs ---
@@ -28,38 +27,6 @@ pub struct SourceConfig {
     pub name: String,
     pub r#type: String, // "hackernews" or "rss"
     pub url: String,
-}
-
-// --- Gemini Structs ---
-#[derive(Serialize, Deserialize, Debug)]
-struct GeminiPart {
-    text: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct GeminiContent {
-    parts: Vec<GeminiPart>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct GeminiRequest {
-    contents: Vec<GeminiContent>,
-}
-
-#[derive(Deserialize, Debug)]
-struct GeminiCandidate {
-    content: GeminiContent,
-}
-
-#[derive(Deserialize, Debug)]
-struct GeminiResponse {
-    candidates: Option<Vec<GeminiCandidate>>,
-    error: Option<GeminiError>,
-}
-
-#[derive(Deserialize, Debug)]
-struct GeminiError {
-    message: String,
 }
 
 // --- Logging Initialization ---
@@ -430,109 +397,4 @@ async fn is_relevant_with_gemini(client: &reqwest::Client, api_key: &str, name: 
 
     let response = call_gemini_with_retry(client, api_key, prompt).await?;
     Ok(response.trim().to_lowercase() == "yes")
-}
-
-/// Call Gemini API with exponential backoff retry for transient failures
-#[instrument(skip(client, api_key, prompt), fields(prompt_len = prompt.len()))]
-async fn call_gemini_with_retry(
-    client: &reqwest::Client,
-    api_key: &str,
-    prompt: String,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let backoff = ExponentialBackoff {
-        max_elapsed_time: Some(StdDuration::from_secs(MAX_RETRY_ELAPSED_SECS)),
-        ..Default::default()
-    };
-
-    let client = client.clone();
-    let api_key = api_key.to_string();
-
-    let result = retry(backoff, || {
-        let client = client.clone();
-        let api_key = api_key.clone();
-        let prompt = prompt.clone();
-
-        async move {
-            match call_gemini(&client, &api_key, prompt).await {
-                Ok(response) => Ok(response),
-                Err(e) => {
-                    let err_str = e.to_string();
-                    if is_transient_error(&err_str) {
-                        warn!(error = %err_str, "Transient Gemini error, retrying");
-                        Err(backoff::Error::transient(e))
-                    } else {
-                        error!(error = %err_str, "Permanent Gemini error, not retrying");
-                        Err(backoff::Error::permanent(e))
-                    }
-                }
-            }
-        }
-    }).await?;
-
-    Ok(result)
-}
-
-fn is_transient_error(err: &str) -> bool {
-    let transient_patterns = [
-        "timeout",
-        "connection",
-        "rate limit",
-        "429",
-        "500",
-        "502",
-        "503",
-        "504",
-        "temporarily",
-        "overloaded",
-    ];
-
-    let err_lower = err.to_lowercase();
-    transient_patterns.iter().any(|p| err_lower.contains(p))
-}
-
-async fn call_gemini(client: &reqwest::Client, api_key: &str, text: String) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    // Note: API key in URL is required by Gemini API - we redact it in logs
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={}",
-        api_key
-    );
-
-    let request = GeminiRequest {
-        contents: vec![
-            GeminiContent {
-                parts: vec![ GeminiPart { text } ]
-            }
-        ]
-    };
-
-    debug!("Sending request to Gemini API");
-
-    let res = client.post(&url)
-        .json(&request)
-        .send()
-        .await?;
-
-    let status = res.status();
-    debug!(status = %status, "Gemini API response received");
-
-    if !status.is_success() {
-        let error_body = res.text().await.unwrap_or_default();
-        return Err(format!("Gemini API returned {}: {}", status, error_body).into());
-    }
-
-    let resp: GeminiResponse = res.json().await?;
-
-    if let Some(error) = resp.error {
-        return Err(format!("Gemini API Error: {}", error.message).into());
-    }
-
-    if let Some(candidates) = resp.candidates {
-        if let Some(first) = candidates.first() {
-            if let Some(part) = first.content.parts.first() {
-                return Ok(part.text.clone());
-            }
-        }
-    }
-
-    Err("No content returned from Gemini".into())
 }

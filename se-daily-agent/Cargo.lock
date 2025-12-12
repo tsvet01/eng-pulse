@@ -602,6 +602,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "gemini-engine"
+version = "0.1.0"
+dependencies = [
+ "backoff",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1825,9 +1837,9 @@ dependencies = [
 name = "se-daily-agent"
 version = "0.1.0"
 dependencies = [
- "backoff",
  "chrono",
  "dotenv",
+ "gemini-engine",
  "google-cloud-auth",
  "google-cloud-storage",
  "readabilityrs",
