@@ -10,16 +10,16 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
+  rust-check:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Set up Rust
       uses: dtolnay/rust-toolchain@stable
-      
+
     - name: Cache Cargo dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/bin/
@@ -37,6 +37,46 @@ jobs:
     - name: Check Explorer Agent
       run: cd se-explorer-agent && cargo check --verbose
 
-    # Add tests here if you write any unit tests
-    # - name: Run tests
-    #   run: cd se-daily-agent && cargo test --verbose
+    - name: Clippy Lint Daily Agent
+      run: cd se-daily-agent && cargo clippy -- -D warnings
+
+    - name: Clippy Lint Explorer Agent
+      run: cd se-explorer-agent && cargo clippy -- -D warnings
+
+  python-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        cd se-daily-notifier
+        pip install -r requirements.txt
+
+    - name: Check Python syntax
+      run: python -m py_compile se-daily-notifier/main.py
+
+  flutter-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.24.0'
+        channel: 'stable'
+
+    - name: Get dependencies
+      run: cd eng_pulse_mobile && flutter pub get
+
+    - name: Analyze code
+      run: cd eng_pulse_mobile && flutter analyze
+
+    - name: Run tests
+      run: cd eng_pulse_mobile && flutter test

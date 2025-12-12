@@ -1,8 +1,6 @@
 mod fetcher;
 
-use reqwest;
 use serde::{Deserialize, Serialize};
-use tokio;
 use readabilityrs::Readability;
 use crate::fetcher::{SourceConfig, Article};
 use google_cloud_storage::client::{Client, ClientConfig};
@@ -10,6 +8,17 @@ use google_cloud_storage::http::objects::download::Range;
 use google_cloud_storage::http::objects::get::GetObjectRequest;
 use google_cloud_storage::http::objects::upload::{UploadObjectRequest, UploadType, Media};
 use chrono::Utc;
+use tracing::{info, warn, error, debug, instrument};
+use tracing_subscriber::{fmt, EnvFilter};
+use backoff::{ExponentialBackoff, future::retry};
+use std::time::Duration;
+
+// --- Configuration Constants ---
+const HTTP_TIMEOUT_SECS: u64 = 60;
+const MAX_ARTICLE_CHARS: usize = 50_000;
+const SUMMARY_SNIPPET_CHARS: usize = 100;
+const DEFAULT_BUCKET: &str = "tsvet01-agent-brain";
+const MAX_RETRY_ELAPSED_SECS: u64 = 120;
 
 // --- Gemini Structs ---
 #[derive(Serialize, Deserialize, Debug)]
@@ -50,25 +59,60 @@ struct ManifestEntry {
     url: String,
     title: String,
     summary_snippet: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    original_url: Option<String>,
 }
 
 // --- Main ---
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    dotenv::dotenv().ok();
-    // Allow GEMINI_API_KEY to be missing if we just want to test GCS (optional, but sticking to strict for now)
-    let gemini_api_key = std::env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY not set");
-    let bucket_name = "tsvet01-agent-brain"; // Hardcoded for now, or use env var
+fn init_logging() {
+    // Use JSON format in production (when RUST_LOG is set), pretty format otherwise
+    let is_production = std::env::var("RUST_LOG").is_ok();
 
-    // 0. Initialize GCS Client
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+
+    if is_production {
+        fmt()
+            .with_env_filter(filter)
+            .json()
+            .with_target(true)
+            .with_thread_ids(false)
+            .with_file(true)
+            .with_line_number(true)
+            .init();
+    } else {
+        fmt()
+            .with_env_filter(filter)
+            .with_target(false)
+            .init();
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    dotenv::dotenv().ok();
+    init_logging();
+
+    let gemini_api_key = std::env::var("GEMINI_API_KEY").map_err(|_| {
+        error!("GEMINI_API_KEY environment variable not set");
+        "GEMINI_API_KEY environment variable not set"
+    })?;
+    let bucket_name = std::env::var("GCS_BUCKET").unwrap_or_else(|_| DEFAULT_BUCKET.to_string());
+
+    info!(bucket = %bucket_name, "Starting SE Daily Agent");
+
+    // 0. Initialize shared HTTP client (reused for connection pooling)
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .build()?;
+
+    // Initialize GCS Client
     let config = ClientConfig::default().with_auth().await?;
     let gcs_client = Client::new(config);
 
-    println!("Using GCS Bucket: {}", bucket_name);
-
     // 1. Load Sources from GCS
-    println!("Fetching sources.json from GCS...");
+    info!("Fetching sources.json from GCS");
     let sources_data = gcs_client.download_object(
         &GetObjectRequest {
             bucket: bucket_name.to_string(),
@@ -79,31 +123,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ).await?;
 
     let sources: Vec<SourceConfig> = serde_json::from_slice(&sources_data)?;
-    println!("Loaded {} sources from Cloud Storage.", sources.len());
-
+    info!(count = sources.len(), "Loaded sources from Cloud Storage");
 
     // 2. Fetch Articles
-    println!("Fetching headlines...");
+    info!("Fetching headlines from sources");
     let mut all_articles: Vec<Article> = Vec::new();
     for source in sources {
-        print!("  - {}: ", source.name);
+        debug!(source = %source.name, "Fetching from source");
         match fetcher::fetch_from_source(&source).await {
             Ok(mut articles) => {
-                println!("found {}", articles.len());
+                info!(source = %source.name, count = articles.len(), "Found articles");
                 all_articles.append(&mut articles);
             },
-            Err(e) => println!("Error: {}", e),
+            Err(e) => warn!(source = %source.name, error = %e, "Failed to fetch from source"),
         }
     }
 
     if all_articles.is_empty() {
-        println!("No recent articles found.");
+        warn!("No recent articles found from any source");
         return Ok(());
     }
 
+    info!(total_articles = all_articles.len(), "Total articles collected");
+
     // 3. Selection
-    println!("\nAsking Gemini to select the best article from {} candidates...", all_articles.len());
-    
+    info!("Asking Gemini to select best article");
+
     let mut articles_text = String::new();
     for (i, article) in all_articles.iter().enumerate() {
         articles_text.push_str(&format!("{}. [{}] {}\n", i, article.source, article.title));
@@ -114,57 +159,77 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         articles_text
     );
 
-    let selected_index = call_gemini(&gemini_api_key, selection_prompt).await?;
-    let index: usize = selected_index.trim().parse().unwrap_or(0);
+    let selected_index = call_gemini_with_retry(&http_client, &gemini_api_key, selection_prompt).await?;
 
-    let best_article = &all_articles[if index < all_articles.len() { index } else { 0 }];
+    // Parse the index - extract first contiguous digit sequence only
+    let index: usize = selected_index
+        .trim()
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit())
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .map_err(|e| {
+            format!("Failed to parse Gemini selection '{}': {}", selected_index.trim(), e)
+        })?;
 
-    println!("\n*** Selected Article ***");
-    println!("Title: {}", best_article.title);
-    println!("URL: {}", best_article.url);
+    // Validate index is within bounds
+    if index >= all_articles.len() {
+        warn!(
+            returned_index = index,
+            total_articles = all_articles.len(),
+            "Gemini returned invalid index, using first article"
+        );
+    }
+    let safe_index = if all_articles.is_empty() {
+        return Err("No articles available to select from".into());
+    } else {
+        index.min(all_articles.len() - 1)
+    };
+    let best_article = &all_articles[safe_index];
+
+    info!(
+        title = %best_article.title,
+        url = %best_article.url,
+        source = %best_article.source,
+        "Selected best article"
+    );
 
     // 4. Summarize
-    println!("\nScraping and Summarizing...");
-    
-    let html_content = reqwest::get(&best_article.url).await?.text().await?;
-    let product = Readability::new(
-        html_content.as_str(),
-        Some(&best_article.url),
-        None
-    )?.parse();
+    info!("Scraping and summarizing article");
 
-    let article_text = match product {
-        Some(a) => a.content.unwrap_or_default(),
-        None => format!("Title: {}, URL: {}", best_article.title, best_article.url)
+    let article_text = match fetch_article_content(&http_client, &best_article.url).await {
+        Ok(content) => content,
+        Err(e) => {
+            warn!(error = %e, "Failed to fetch article content, using title only");
+            format!("Title: {}, URL: {}", best_article.title, best_article.url)
+        }
     };
 
-    let truncated_text = if article_text.len() > 50000 {
-        &article_text[..50000]
-    } else {
-        &article_text
-    };
+    // Truncate safely at character boundary to avoid UTF-8 split
+    let truncated_text: String = article_text.chars().take(MAX_ARTICLE_CHARS).collect();
+    debug!(char_count = truncated_text.len(), "Article text truncated");
 
     let summary_prompt = format!(
         "Please summarize the following software engineering article in a compact and educational format. Focus on key takeaways, core concepts, and why it matters to a software engineer. Ignore any promotional or fluff content.\n\nArticle Source: {}\nTitle: {}\nContent: {}",
         best_article.source, best_article.title, truncated_text
     );
 
+    let summary = call_gemini_with_retry(&http_client, &gemini_api_key, summary_prompt).await?;
 
-    let summary = call_gemini(&gemini_api_key, summary_prompt).await?;
-
-    println!("\n--- Daily SE Briefing ---");
-    println!("{}", summary);
+    info!("Summary generated successfully");
+    debug!(summary_length = summary.len(), "Summary details");
 
     // Create snippet BEFORE moving summary
-    let summary_snippet: String = summary.chars().take(100).collect();
+    let summary_snippet: String = summary.chars().take(SUMMARY_SNIPPET_CHARS).collect();
 
     // 5. Upload Summary to GCS
     let today = Utc::now().format("%Y-%m-%d").to_string();
     let object_name = format!("summaries/{}.md", today);
     let summary_bytes = summary.into_bytes();
 
-    println!("\nUploading summary to GCS: gs://{}/{}", bucket_name, object_name);
-    
+    info!(object = %object_name, "Uploading summary to GCS");
+
     let upload_type = UploadType::Simple(Media::new(object_name.clone()));
     let _uploaded = gcs_client.upload_object(
         &UploadObjectRequest {
@@ -175,13 +240,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &upload_type
     ).await?;
 
-    println!("Upload complete!");
+    info!("Summary upload complete");
 
     // 6. Update Manifest
-    println!("Updating manifest.json...");
+    info!("Updating manifest.json");
     let manifest_obj_name = "manifest.json";
     let public_url = format!("https://storage.googleapis.com/{}/{}", bucket_name, object_name);
-    
+
     // Download existing manifest
     let mut manifest: Vec<ManifestEntry> = match gcs_client.download_object(
         &GetObjectRequest {
@@ -191,8 +256,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         &Range::default()
     ).await {
-        Ok(data) => serde_json::from_slice(&data).unwrap_or_else(|_| Vec::new()),
-        Err(_) => Vec::new(),
+        Ok(data) => {
+            serde_json::from_slice(&data).map_err(|e| {
+                error!(error = %e, "Failed to parse existing manifest.json - file may be corrupted");
+                e
+            })?
+        },
+        Err(e) if e.to_string().contains("No such object") => {
+            info!("No existing manifest.json found, creating new one");
+            Vec::new()
+        },
+        Err(e) => {
+            return Err(format!("Failed to download manifest.json: {}", e).into());
+        }
     };
 
     // Remove existing entry for today if any (to update it)
@@ -200,10 +276,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Add new entry
     manifest.insert(0, ManifestEntry {
-        date: today,
+        date: today.clone(),
         url: public_url,
         title: best_article.title.clone(),
         summary_snippet,
+        original_url: Some(best_article.url.clone()),
     });
 
     // Upload manifest
@@ -216,14 +293,98 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         manifest_json,
         &UploadType::Simple(Media::new(manifest_obj_name.to_string()))
     ).await?;
-    println!("Manifest updated!");
+
+    info!(date = %today, "Manifest updated successfully");
+    info!("SE Daily Agent completed successfully");
 
     Ok(())
 }
 
-async fn call_gemini(api_key: &str, text: String) -> Result<String, Box<dyn std::error::Error>> {
-    let url = format!("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={}", api_key);
-    
+#[instrument(skip(client, url), fields(url_domain = %extract_domain(url)))]
+async fn fetch_article_content(client: &reqwest::Client, url: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let response = client.get(url).send().await?;
+    let html_content = response.text().await?;
+
+    let reader = Readability::new(html_content.as_str(), Some(url), None)
+        .map_err(|e| format!("Readability parse error: {:?}", e))?;
+
+    let content = reader.parse()
+        .and_then(|p| p.content)
+        .ok_or("No content extracted from article")?;
+
+    Ok(content)
+}
+
+fn extract_domain(url: &str) -> String {
+    url.split('/').nth(2).unwrap_or("unknown").to_string()
+}
+
+/// Call Gemini API with exponential backoff retry for transient failures
+#[instrument(skip(client, api_key, prompt), fields(prompt_len = prompt.len()))]
+async fn call_gemini_with_retry(
+    client: &reqwest::Client,
+    api_key: &str,
+    prompt: String,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let backoff = ExponentialBackoff {
+        max_elapsed_time: Some(Duration::from_secs(MAX_RETRY_ELAPSED_SECS)),
+        ..Default::default()
+    };
+
+    let client = client.clone();
+    let api_key = api_key.to_string();
+
+    let result = retry(backoff, || {
+        let client = client.clone();
+        let api_key = api_key.clone();
+        let prompt = prompt.clone();
+
+        async move {
+            match call_gemini(&client, &api_key, prompt).await {
+                Ok(response) => Ok(response),
+                Err(e) => {
+                    let err_str = e.to_string();
+                    // Retry on transient errors (network, rate limits, server errors)
+                    if is_transient_error(&err_str) {
+                        warn!(error = %err_str, "Transient Gemini error, retrying");
+                        Err(backoff::Error::transient(e))
+                    } else {
+                        error!(error = %err_str, "Permanent Gemini error, not retrying");
+                        Err(backoff::Error::permanent(e))
+                    }
+                }
+            }
+        }
+    }).await?;
+
+    Ok(result)
+}
+
+fn is_transient_error(err: &str) -> bool {
+    let transient_patterns = [
+        "timeout",
+        "connection",
+        "rate limit",
+        "429",
+        "500",
+        "502",
+        "503",
+        "504",
+        "temporarily",
+        "overloaded",
+    ];
+
+    let err_lower = err.to_lowercase();
+    transient_patterns.iter().any(|p| err_lower.contains(p))
+}
+
+async fn call_gemini(client: &reqwest::Client, api_key: &str, text: String) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    // Note: API key in URL is required by Gemini API - we redact it in logs
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={}",
+        api_key
+    );
+
     let request = GeminiRequest {
         contents: vec![
             GeminiContent {
@@ -232,11 +393,20 @@ async fn call_gemini(api_key: &str, text: String) -> Result<String, Box<dyn std:
         ]
     };
 
-    let client = reqwest::Client::new();
+    debug!("Sending request to Gemini API");
+
     let res = client.post(&url)
         .json(&request)
         .send()
         .await?;
+
+    let status = res.status();
+    debug!(status = %status, "Gemini API response received");
+
+    if !status.is_success() {
+        let error_body = res.text().await.unwrap_or_default();
+        return Err(format!("Gemini API returned {}: {}", status, error_body).into());
+    }
 
     let resp: GeminiResponse = res.json().await?;
 

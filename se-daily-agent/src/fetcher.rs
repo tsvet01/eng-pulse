@@ -1,4 +1,3 @@
-use reqwest;
 use rss::Channel;
 use serde::Deserialize;
 use std::error::Error;
@@ -9,6 +8,7 @@ pub struct Article {
     pub title: String,
     pub url: String,
     pub source: String,
+    #[allow(dead_code)] // Reserved for future filtering by date
     pub published_at: DateTime<Utc>,
 }
 
@@ -25,6 +25,7 @@ struct HnItem {
     title: Option<String>,
     url: Option<String>,
     time: i64,
+    #[allow(dead_code)] // Required by HN API, may use for filtering in future
     r#type: String,
 }
 
@@ -32,9 +33,8 @@ pub async fn fetch_from_source(source: &SourceConfig) -> Result<Vec<Article>, Bo
     match source.r#type.as_str() {
         "rss" => fetch_rss(source).await,
         "hackernews" => fetch_hackernews(source).await,
-        _ => {
-            eprintln!("Unknown source type: {}", source.r#type);
-            Ok(vec![])
+        other => {
+            Err(format!("Unknown source type: '{}' for source '{}'", other, source.name).into())
         }
     }
 }
@@ -48,13 +48,11 @@ async fn fetch_rss(source: &SourceConfig) -> Result<Vec<Article>, Box<dyn Error>
 
     for item in channel.items().iter().take(10) {
         if let (Some(title), Some(link), Some(pub_date)) = (item.title(), item.link(), item.pub_date()) {
-            // Parse date (RFC2822 usually)
-            let parsed_date = DateTime::parse_from_rfc2822(pub_date)
-                .map(|dt| dt.with_timezone(&Utc))
-                .or_else(|_| {
-                    // Try generic parsing or current time fallback if parsing fails (simple for now)
-                    Ok::<DateTime<Utc>, chrono::ParseError>(Utc::now()) 
-                })?;
+            // Parse date (RFC2822 usually) - skip articles with unparseable dates
+            let parsed_date = match DateTime::parse_from_rfc2822(pub_date) {
+                Ok(dt) => dt.with_timezone(&Utc),
+                Err(_) => continue, // Skip articles with invalid dates
+            };
 
             if parsed_date > yesterday {
                 articles.push(Article {
@@ -71,27 +69,32 @@ async fn fetch_rss(source: &SourceConfig) -> Result<Vec<Article>, Box<dyn Error>
 
 async fn fetch_hackernews(source: &SourceConfig) -> Result<Vec<Article>, Box<dyn Error>> {
     let top_ids: Vec<u32> = reqwest::get(&source.url).await?.json().await?;
-    
-    // Check top 10 stories to find good ones
+
     let mut articles = Vec::new();
     let client = reqwest::Client::new();
+    let yesterday = Utc::now() - Duration::hours(24);
 
+    // Fetch top 10 stories
     for id in top_ids.iter().take(10) {
         let url = format!("https://hacker-news.firebaseio.com/v0/item/{}.json", id);
         let item: HnItem = client.get(&url).send().await?.json().await?;
 
         if let (Some(title), Some(url)) = (item.title, item.url) {
             // HN time is unix timestamp
-            let published_at = DateTime::from_timestamp(item.time, 0)
-                .unwrap_or_else(|| Utc::now());
-            
-            // Just take them regardless of strict 24h check (Top stories are usually recent enough)
-            articles.push(Article {
-                title,
-                url,
-                source: "Hacker News".to_string(),
-                published_at,
-            });
+            let published_at = match DateTime::from_timestamp(item.time, 0) {
+                Some(dt) => dt,
+                None => continue, // Skip items with invalid timestamps
+            };
+
+            // Apply same 24h freshness filter as RSS
+            if published_at > yesterday {
+                articles.push(Article {
+                    title,
+                    url,
+                    source: source.name.clone(),
+                    published_at,
+                });
+            }
         }
     }
 

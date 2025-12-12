@@ -38,7 +38,7 @@ jobs:
           --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:latest \
           --region ${{ env.REGION }} \
           --project ${{ env.PROJECT_ID }} \
-          --set-env-vars GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }} \
+          --set-secrets GEMINI_API_KEY=gemini-api-key:latest \
           --task-timeout 5m
 
     # --- Explorer Agent ---
@@ -53,12 +53,12 @@ jobs:
           --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-explorer-agent:latest \
           --region ${{ env.REGION }} \
           --project ${{ env.PROJECT_ID }} \
-          --set-env-vars GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }} \
+          --set-secrets GEMINI_API_KEY=gemini-api-key:latest \
           --task-timeout 30m
 
   deploy-notifier:
     runs-on: ubuntu-latest
-    needs: deploy-agents # Optional, can run in parallel
+    needs: deploy-agents
     steps:
     - uses: actions/checkout@v4
 
@@ -81,5 +81,5 @@ jobs:
           --entry-point=send_summary_email \
           --trigger-event-filters="type=google.cloud.storage.object.v1.finalized" \
           --trigger-event-filters="bucket=${{ env.PROJECT_ID }}-agent-brain" \
-          --set-env-vars "GMAIL_USER=atsvetkov@gmail.com,DEST_EMAIL=anton.tsvetkov@gmail.com,GMAIL_APP_PASSWORD=${{ secrets.GMAIL_APP_PASSWORD }}" \
+          --set-secrets "GMAIL_USER=gmail-user:latest,GMAIL_APP_PASSWORD=gmail-app-password:latest,DEST_EMAIL=dest-email:latest" \
           --project ${{ env.PROJECT_ID }}
