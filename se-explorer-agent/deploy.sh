@@ -25,7 +25,10 @@ gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
 # 2. Build and Push Image
 IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${IMAGE_NAME}:latest"
 echo "Building and Pushing image to $IMAGE_URI..."
-docker build --platform linux/amd64 -t $IMAGE_URI .
+# Build from project root to include gemini-engine shared crate
+cd ..
+docker build --platform linux/amd64 -t $IMAGE_URI -f se-explorer-agent/Dockerfile .
+cd se-explorer-agent
 docker push $IMAGE_URI
 
 # 3. Deploy Cloud Run Job

@@ -46,7 +46,10 @@ fi
 IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${IMAGE_NAME}:latest"
 echo "Building and Pushing image to $IMAGE_URI..."
 # Use --platform linux/amd64 to ensure it runs on Cloud Run (which is x86_64)
-docker build --platform linux/amd64 -t $IMAGE_URI .
+# Build from project root to include gemini-engine shared crate
+cd ..
+docker build --platform linux/amd64 -t $IMAGE_URI -f se-daily-agent/Dockerfile .
+cd se-daily-agent
 docker push $IMAGE_URI
 
 # 5. Deploy Cloud Run Job

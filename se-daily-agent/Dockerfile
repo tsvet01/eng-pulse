@@ -1,21 +1,17 @@
 # Stage 1: Build the application
-FROM rust:latest as builder
+FROM rust:1.83-bookworm as builder
 
 WORKDIR /app
 
-# Copy manifests first to cache dependencies
-COPY Cargo.toml Cargo.lock ./
+# Copy the shared engine
+COPY gemini-engine/ gemini-engine/
 
-# Create a dummy main.rs to build dependencies alone
-# This is a common Rust Docker pattern to cache cargo fetch/build
-RUN mkdir src && echo "fn main() {}" > src/main.rs
-RUN cargo build --release
+# Copy the agent
+COPY se-daily-agent/ se-daily-agent/
 
-# Now copy the real source code
-COPY . .
+WORKDIR /app/se-daily-agent
 
-# Touch main.rs to force a rebuild of the application code
-RUN touch src/main.rs
+# Build the application
 RUN cargo build --release
 
 # Stage 2: Create the runtime image
@@ -24,14 +20,12 @@ FROM debian:bookworm-slim
 WORKDIR /app
 
 # Install necessary runtime dependencies (SSL, CA certs)
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    libssl-dev \
+    libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the binary from the builder stage
-COPY --from=builder /app/target/release/se-daily-agent /usr/local/bin/se-daily-agent
-
-# Note: .env is NOT copied. Secrets should be injected via environment variables in Cloud Run.
+COPY --from=builder /app/se-daily-agent/target/release/se-daily-agent /usr/local/bin/se-daily-agent
 
 CMD ["se-daily-agent"]
