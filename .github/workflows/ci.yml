@@ -43,6 +43,15 @@ jobs:
     - name: Clippy Lint Explorer Agent
       run: cd se-explorer-agent && cargo clippy -- -D warnings
 
+    - name: Test gemini-engine
+      run: cd gemini-engine && cargo test --verbose
+
+    - name: Test Daily Agent
+      run: cd se-daily-agent && cargo test --verbose
+
+    - name: Test Explorer Agent
+      run: cd se-explorer-agent && cargo test --verbose
+
   python-check:
     runs-on: ubuntu-latest
     steps:

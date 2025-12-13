@@ -25,7 +25,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash appuser
+
 # Copy the binary from the builder stage
 COPY --from=builder /app/se-explorer-agent/target/release/se-explorer-agent /usr/local/bin/se-explorer-agent
+
+# Switch to non-root user
+USER appuser
 
 CMD ["se-explorer-agent"]

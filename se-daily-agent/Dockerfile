@@ -25,7 +25,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash appuser
+
 # Copy the binary from the builder stage
 COPY --from=builder /app/se-daily-agent/target/release/se-daily-agent /usr/local/bin/se-daily-agent
+
+# Switch to non-root user
+USER appuser
 
 CMD ["se-daily-agent"]
