@@ -29,8 +29,11 @@ jobs:
     # --- Daily Agent ---
     - name: Build & Push Daily Agent (Cloud Build)
       run: |
-        cd se-daily-agent
-        gcloud builds submit --tag ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:latest --machine-type=E2_HIGHCPU_8 .
+        gcloud builds submit \
+          --tag ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:latest \
+          --machine-type=E2_HIGHCPU_8 \
+          -f se-daily-agent/Dockerfile \
+          .
 
     - name: Deploy Daily Agent Job
       run: |
@@ -44,8 +47,11 @@ jobs:
     # --- Explorer Agent ---
     - name: Build & Push Explorer Agent (Cloud Build)
       run: |
-        cd se-explorer-agent
-        gcloud builds submit --tag ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-explorer-agent:latest --machine-type=E2_HIGHCPU_8 .
+        gcloud builds submit \
+          --tag ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-explorer-agent:latest \
+          --machine-type=E2_HIGHCPU_8 \
+          -f se-explorer-agent/Dockerfile \
+          .
 
     - name: Deploy Explorer Agent Job
       run: |
