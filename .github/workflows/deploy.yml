@@ -41,8 +41,7 @@ jobs:
           --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:latest \
           --region ${{ env.REGION }} \
           --project ${{ env.PROJECT_ID }} \
-          --clear-secrets \
-          --set-secrets GEMINI_API_KEY=gemini-api-key:latest \
+          --update-secrets GEMINI_API_KEY=gemini-api-key:latest \
           --task-timeout 5m
 
     # --- Explorer Agent ---
@@ -60,8 +59,7 @@ jobs:
           --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-explorer-agent:latest \
           --region ${{ env.REGION }} \
           --project ${{ env.PROJECT_ID }} \
-          --clear-secrets \
-          --set-secrets GEMINI_API_KEY=gemini-api-key:latest \
+          --update-secrets GEMINI_API_KEY=gemini-api-key:latest \
           --task-timeout 30m
 
   deploy-notifier:
