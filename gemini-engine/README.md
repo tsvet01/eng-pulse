@@ -1,0 +1,115 @@
+# gemini-engine
+
+Shared Rust crate providing a robust Gemini API client with exponential backoff retry logic.
+
+## Features
+
+- **Exponential Backoff**: Automatic retry with configurable max elapsed time (default: 120s)
+- **Transient Error Detection**: Intelligently distinguishes retryable errors from permanent failures
+- **Structured Logging**: Uses `tracing` for observability
+- **Type-safe API**: Strongly typed request/response structures
+
+## Usage
+
+Add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+gemini-engine = { path = "../gemini-engine" }
+```
+
+### Basic Example
+
+```rust
+use gemini_engine::call_gemini_with_retry;
+use reqwest::Client;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::new();
+    let api_key = std::env::var("GEMINI_API_KEY")?;
+
+    let response = call_gemini_with_retry(
+        &client,
+        &api_key,
+        "Summarize this article in 3 sentences.".to_string(),
+    ).await?;
+
+    println!("{}", response);
+    Ok(())
+}
+```
+
+## API
+
+### `call_gemini_with_retry`
+
+```rust
+pub async fn call_gemini_with_retry(
+    client: &reqwest::Client,
+    api_key: &str,
+    prompt: String,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>>
+```
+
+Makes a request to the Gemini API with automatic retry on transient failures.
+
+**Parameters:**
+- `client`: Shared reqwest client (for connection pooling)
+- `api_key`: Gemini API key
+- `prompt`: Text prompt to send to Gemini
+
+**Returns:** Generated text response or error
+
+**Retries on:**
+- HTTP 429 (Rate Limit)
+- HTTP 500, 502, 503, 504 (Server Errors)
+- Connection timeouts
+- Temporary network failures
+
+**Does NOT retry on:**
+- HTTP 400 (Bad Request)
+- HTTP 401/403 (Auth Errors)
+- Invalid API key
+- Malformed requests
+
+## Configuration
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `MAX_RETRY_ELAPSED_SECS` | 120 | Maximum total retry time |
+
+## Data Structures
+
+```rust
+// Request structure
+pub struct GeminiRequest {
+    pub contents: Vec<GeminiContent>,
+}
+
+pub struct GeminiContent {
+    pub parts: Vec<GeminiPart>,
+}
+
+pub struct GeminiPart {
+    pub text: String,
+}
+
+// Response structure
+pub struct GeminiResponse {
+    pub candidates: Option<Vec<GeminiCandidate>>,
+    pub error: Option<GeminiError>,
+}
+```
+
+## Model
+
+Currently uses `gemini-2.0-flash` model. Model selection is hardcoded - see issue #6 for configurability.
+
+## Dependencies
+
+- `reqwest` - HTTP client
+- `serde` / `serde_json` - Serialization
+- `tracing` - Logging
+- `backoff` - Retry logic
+- `tokio` - Async runtime
