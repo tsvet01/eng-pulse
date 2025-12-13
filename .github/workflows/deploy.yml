@@ -37,11 +37,18 @@ jobs:
 
     - name: Deploy Daily Agent Job
       run: |
+        # First clear any existing env var/secret conflict
+        gcloud run jobs update se-daily-agent-job \
+          --region ${{ env.REGION }} \
+          --project ${{ env.PROJECT_ID }} \
+          --remove-env-vars GEMINI_API_KEY \
+          --clear-secrets || true
+        # Then deploy with the secret
         gcloud run jobs deploy se-daily-agent-job \
           --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:latest \
           --region ${{ env.REGION }} \
           --project ${{ env.PROJECT_ID }} \
-          --update-secrets GEMINI_API_KEY=gemini-api-key:latest \
+          --set-secrets GEMINI_API_KEY=gemini-api-key:latest \
           --task-timeout 5m
 
     # --- Explorer Agent ---
@@ -55,11 +62,18 @@ jobs:
 
     - name: Deploy Explorer Agent Job
       run: |
+        # First clear any existing env var/secret conflict
+        gcloud run jobs update se-explorer-agent-job \
+          --region ${{ env.REGION }} \
+          --project ${{ env.PROJECT_ID }} \
+          --remove-env-vars GEMINI_API_KEY \
+          --clear-secrets || true
+        # Then deploy with the secret
         gcloud run jobs deploy se-explorer-agent-job \
           --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-explorer-agent:latest \
           --region ${{ env.REGION }} \
           --project ${{ env.PROJECT_ID }} \
-          --update-secrets GEMINI_API_KEY=gemini-api-key:latest \
+          --set-secrets GEMINI_API_KEY=gemini-api-key:latest \
           --task-timeout 30m
 
   deploy-notifier:
