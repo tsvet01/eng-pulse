@@ -142,3 +142,109 @@ async fn call_gemini(client: &reqwest::Client, api_key: &str, text: String) -> R
 
     Err("No content returned from Gemini".into())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_transient_error_timeout() {
+        assert!(is_transient_error("Connection timeout occurred"));
+        assert!(is_transient_error("Request TIMEOUT"));
+    }
+
+    #[test]
+    fn test_is_transient_error_rate_limit() {
+        assert!(is_transient_error("Rate limit exceeded"));
+        assert!(is_transient_error("HTTP 429 Too Many Requests"));
+    }
+
+    #[test]
+    fn test_is_transient_error_server_errors() {
+        assert!(is_transient_error("HTTP 500 Internal Server Error"));
+        assert!(is_transient_error("502 Bad Gateway"));
+        assert!(is_transient_error("503 Service Unavailable"));
+        assert!(is_transient_error("504 Gateway Timeout"));
+    }
+
+    #[test]
+    fn test_is_transient_error_connection() {
+        assert!(is_transient_error("Connection refused"));
+        assert!(is_transient_error("connection reset by peer"));
+    }
+
+    #[test]
+    fn test_is_transient_error_overloaded() {
+        assert!(is_transient_error("Server temporarily overloaded"));
+        assert!(is_transient_error("Service is temporarily unavailable"));
+    }
+
+    #[test]
+    fn test_is_not_transient_error() {
+        assert!(!is_transient_error("Invalid API key"));
+        assert!(!is_transient_error("Bad request: malformed JSON"));
+        assert!(!is_transient_error("HTTP 400 Bad Request"));
+        assert!(!is_transient_error("HTTP 401 Unauthorized"));
+        assert!(!is_transient_error("HTTP 403 Forbidden"));
+        assert!(!is_transient_error("HTTP 404 Not Found"));
+    }
+
+    #[test]
+    fn test_gemini_request_serialization() {
+        let request = GeminiRequest {
+            contents: vec![GeminiContent {
+                parts: vec![GeminiPart {
+                    text: "Hello, Gemini!".to_string(),
+                }],
+            }],
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("Hello, Gemini!"));
+        assert!(json.contains("contents"));
+        assert!(json.contains("parts"));
+        assert!(json.contains("text"));
+    }
+
+    #[test]
+    fn test_gemini_response_deserialization_success() {
+        let json = r#"{
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": "Hello from Gemini!"}]
+                }
+            }]
+        }"#;
+
+        let response: GeminiResponse = serde_json::from_str(json).unwrap();
+        assert!(response.candidates.is_some());
+        assert!(response.error.is_none());
+
+        let candidates = response.candidates.unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].content.parts[0].text, "Hello from Gemini!");
+    }
+
+    #[test]
+    fn test_gemini_response_deserialization_error() {
+        let json = r#"{
+            "error": {
+                "message": "API key invalid"
+            }
+        }"#;
+
+        let response: GeminiResponse = serde_json::from_str(json).unwrap();
+        assert!(response.candidates.is_none());
+        assert!(response.error.is_some());
+        assert_eq!(response.error.unwrap().message, "API key invalid");
+    }
+
+    #[test]
+    fn test_gemini_response_deserialization_empty() {
+        let json = r#"{}"#;
+
+        let response: GeminiResponse = serde_json::from_str(json).unwrap();
+        assert!(response.candidates.is_none());
+        assert!(response.error.is_none());
+    }
+}
