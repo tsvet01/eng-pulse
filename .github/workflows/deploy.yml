@@ -102,5 +102,6 @@ jobs:
           --entry-point=send_summary_email \
           --trigger-event-filters="type=google.cloud.storage.object.v1.finalized" \
           --trigger-event-filters="bucket=${{ env.PROJECT_ID }}-agent-brain" \
+          --clear-env-vars \
           --set-secrets "GMAIL_USER=gmail-user:latest,GMAIL_APP_PASSWORD=gmail-app-password:latest,DEST_EMAIL=dest-email:latest" \
           --project ${{ env.PROJECT_ID }}
