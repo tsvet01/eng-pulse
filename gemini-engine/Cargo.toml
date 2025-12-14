@@ -11,3 +11,4 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 backoff = { version = "0.4", features = ["tokio"] }
 tokio = { version = "1", features = ["sync", "time"] } # Minimal tokio for backoff/async
+url = "2.5"

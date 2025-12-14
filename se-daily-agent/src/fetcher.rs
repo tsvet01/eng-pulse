@@ -99,16 +99,18 @@ async fn fetch_hackernews(source: &SourceConfig, client: &reqwest::Client) -> Re
     // Fetch top stories using the shared client
     for id in top_ids.iter().take(MAX_ITEMS_PER_SOURCE) {
         let url = format!("https://hacker-news.firebaseio.com/v0/item/{}.json", id);
-        let item: HnItem = match client.get(&url).send().await {
-            Ok(resp) => match resp.json().await {
-                Ok(item) => item,
-                Err(e) => {
-                    warn!(id = id, error = %e, "Failed to parse HN item");
-                    continue;
-                }
-            },
+        let resp = match client.get(&url).send().await {
+            Ok(resp) => resp,
             Err(e) => {
                 warn!(id = id, error = %e, "Failed to fetch HN item");
+                continue;
+            }
+        };
+
+        let item: HnItem = match resp.json().await {
+            Ok(item) => item,
+            Err(e) => {
+                warn!(id = id, error = %e, "Failed to parse HN item");
                 continue;
             }
         };

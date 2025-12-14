@@ -3,8 +3,20 @@ use tracing::{debug, error, warn, instrument};
 use tracing_subscriber::{fmt, EnvFilter};
 use backoff::{ExponentialBackoff, future::retry};
 use std::time::Duration;
+use url::Url;
 
 const MAX_RETRY_ELAPSED_SECS: u64 = 120;
+
+// --- Shared Utilities ---
+
+/// Extract the domain/host from a URL string safely.
+/// Returns "unknown" if the URL cannot be parsed.
+pub fn extract_domain(url: &str) -> String {
+    Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "unknown".to_string())
+}
 
 // --- Shared Types ---
 
@@ -28,19 +40,19 @@ pub fn init_logging() {
         .unwrap_or_else(|_| EnvFilter::new("info"));
 
     if is_production {
-        fmt()
+        let _ = fmt()
             .with_env_filter(filter)
             .json()
             .with_target(true)
             .with_thread_ids(false)
             .with_file(true)
             .with_line_number(true)
-            .init();
+            .try_init();
     } else {
-        fmt()
+        let _ = fmt()
             .with_env_filter(filter)
             .with_target(false)
-            .init();
+            .try_init();
     }
 }
 
