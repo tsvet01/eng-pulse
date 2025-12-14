@@ -1,9 +1,48 @@
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, warn, instrument};
+use tracing_subscriber::{fmt, EnvFilter};
 use backoff::{ExponentialBackoff, future::retry};
 use std::time::Duration;
 
 const MAX_RETRY_ELAPSED_SECS: u64 = 120;
+
+// --- Shared Types ---
+
+/// Configuration for a news/article source
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SourceConfig {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub source_type: String,
+    pub url: String,
+}
+
+// --- Shared Logging ---
+
+/// Initialize structured logging with JSON format in production (when RUST_LOG is set),
+/// or pretty format for local development.
+pub fn init_logging() {
+    let is_production = std::env::var("RUST_LOG").is_ok();
+
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+
+    if is_production {
+        fmt()
+            .with_env_filter(filter)
+            .json()
+            .with_target(true)
+            .with_thread_ids(false)
+            .with_file(true)
+            .with_line_number(true)
+            .init();
+    } else {
+        fmt()
+            .with_env_filter(filter)
+            .with_target(false)
+            .init();
+    }
+}
 
 // --- Gemini Structs ---
 #[derive(Serialize, Deserialize, Debug)]

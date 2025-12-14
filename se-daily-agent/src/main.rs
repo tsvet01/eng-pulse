@@ -10,9 +10,8 @@ use google_cloud_storage::http::objects::get::GetObjectRequest;
 use google_cloud_storage::http::objects::upload::{UploadObjectRequest, UploadType, Media};
 use chrono::Utc;
 use tracing::{info, warn, error, debug, instrument};
-use tracing_subscriber::{fmt, EnvFilter};
 use std::time::Duration;
-use gemini_engine::call_gemini_with_retry;
+use gemini_engine::{call_gemini_with_retry, init_logging};
 
 // --- Configuration Constants ---
 const HTTP_TIMEOUT_SECS: u64 = 60;
@@ -32,30 +31,6 @@ struct ManifestEntry {
 }
 
 // --- Main ---
-
-fn init_logging() {
-    // Use JSON format in production (when RUST_LOG is set), pretty format otherwise
-    let is_production = std::env::var("RUST_LOG").is_ok();
-
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
-
-    if is_production {
-        fmt()
-            .with_env_filter(filter)
-            .json()
-            .with_target(true)
-            .with_thread_ids(false)
-            .with_file(true)
-            .with_line_number(true)
-            .init();
-    } else {
-        fmt()
-            .with_env_filter(filter)
-            .with_target(false)
-            .init();
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -93,12 +68,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let sources: Vec<SourceConfig> = serde_json::from_slice(&sources_data)?;
     info!(count = sources.len(), "Loaded sources from Cloud Storage");
 
-    // 2. Fetch Articles
+    // 2. Fetch Articles (use a dedicated client for fetching with appropriate timeout)
+    let fetch_client = fetcher::create_http_client()?;
     info!("Fetching headlines from sources");
     let mut all_articles: Vec<Article> = Vec::new();
     for source in sources {
         debug!(source = %source.name, "Fetching from source");
-        match fetcher::fetch_from_source(&source).await {
+        match fetcher::fetch_from_source(&source, &fetch_client).await {
             Ok(mut articles) => {
                 info!(source = %source.name, count = articles.len(), "Found articles");
                 all_articles.append(&mut articles);
@@ -141,18 +117,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             format!("Failed to parse Gemini selection '{}': {}", selected_index.trim(), e)
         })?;
 
-    // Validate index is within bounds
-    if index >= all_articles.len() {
+    // Validate index is within bounds (all_articles cannot be empty - we return early above)
+    let safe_index = if index >= all_articles.len() {
         warn!(
             returned_index = index,
             total_articles = all_articles.len(),
             "Gemini returned invalid index, using first article"
         );
-    }
-    let safe_index = if all_articles.is_empty() {
-        return Err("No articles available to select from".into());
+        0
     } else {
-        index.min(all_articles.len() - 1)
+        index
     };
     let best_article = &all_articles[safe_index];
 
@@ -284,5 +258,8 @@ async fn fetch_article_content(client: &reqwest::Client, url: &str) -> Result<St
 }
 
 fn extract_domain(url: &str) -> String {
-    url.split('/').nth(2).unwrap_or("unknown").to_string()
+    url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "unknown".to_string())
 }

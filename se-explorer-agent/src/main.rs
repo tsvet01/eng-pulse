@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use google_cloud_storage::client::{Client, ClientConfig};
 use google_cloud_storage::http::objects::download::Range;
 use google_cloud_storage::http::objects::get::GetObjectRequest;
@@ -11,48 +11,14 @@ use chrono::{DateTime, Utc, Duration};
 use rss::Channel;
 use atom_syndication::Feed;
 use tracing::{info, warn, error, debug, instrument};
-use tracing_subscriber::{fmt, EnvFilter};
 use std::time::Duration as StdDuration;
-use gemini_engine::call_gemini_with_retry;
+use gemini_engine::{call_gemini_with_retry, init_logging, SourceConfig};
 
 // --- Configuration Constants ---
 const HTTP_TIMEOUT_SECS: u64 = 30;
 const DEFAULT_BUCKET: &str = "tsvet01-agent-brain";
 const FRESHNESS_DAYS: i64 = 90;
 const MAX_FEED_DISCOVERY_ATTEMPTS: usize = 2;
-
-// --- Configuration Structs ---
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SourceConfig {
-    pub name: String,
-    pub r#type: String, // "hackernews" or "rss"
-    pub url: String,
-}
-
-// --- Logging Initialization ---
-fn init_logging() {
-    // Use JSON format in production (when RUST_LOG is set), pretty format otherwise
-    let is_production = std::env::var("RUST_LOG").is_ok();
-
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
-
-    if is_production {
-        fmt()
-            .with_env_filter(filter)
-            .json()
-            .with_target(true)
-            .with_thread_ids(false)
-            .with_file(true)
-            .with_line_number(true)
-            .init();
-    } else {
-        fmt()
-            .with_env_filter(filter)
-            .with_target(false)
-            .init();
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -178,7 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!(count = recommendations.len(), "Gemini recommended new sources");
 
         for rec in recommendations {
-            let temp_source = SourceConfig { name: rec.name.clone(), r#type: "rss".to_string(), url: rec.url.clone() };
+            let temp_source = SourceConfig { name: rec.name.clone(), source_type: "rss".to_string(), url: rec.url.clone() };
             if !all_sources.contains(&temp_source) {
                 info!(name = %rec.name, url = %rec.url, "Investigating Gemini recommendation");
                 match discover_and_validate_feed(&http_client, &gemini_api_key, &rec.url, &rec.name).await {
@@ -210,7 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     for source in all_sources.iter() {
         // HN is always fresh - skip freshness check for it
-        if source.r#type == "hackernews" {
+        if source.source_type == "hackernews" {
             reviewed_sources.insert(source.clone());
             continue;
         }
@@ -293,7 +259,7 @@ async fn discover_and_validate_feed(client: &reqwest::Client, gemini_api_key: &s
             && is_valid_feed
             && is_relevant_with_gemini(client, gemini_api_key, name, &final_url_str, &text).await?
         {
-            return Ok(Some(SourceConfig { name: name.to_string(), r#type: "rss".to_string(), url: final_url_str }));
+            return Ok(Some(SourceConfig { name: name.to_string(), source_type: "rss".to_string(), url: final_url_str }));
         }
 
         // HTML Discovery
@@ -312,7 +278,7 @@ async fn discover_and_validate_feed(client: &reqwest::Client, gemini_api_key: &s
                     if resp.status().is_success()
                         && is_relevant_with_gemini(client, gemini_api_key, name, &resolved_url_str, "").await.unwrap_or(false)
                     {
-                        return Ok(Some(SourceConfig { name: name.to_string(), r#type: "rss".to_string(), url: resolved_url_str }));
+                        return Ok(Some(SourceConfig { name: name.to_string(), source_type: "rss".to_string(), url: resolved_url_str }));
                     }
                 }
             }
@@ -344,7 +310,7 @@ async fn discover_and_validate_feed(client: &reqwest::Client, gemini_api_key: &s
                 if resp.status().is_success()
                     && is_relevant_with_gemini(client, gemini_api_key, name, &candidate_url_str, "").await.unwrap_or(false)
                 {
-                    return Ok(Some(SourceConfig { name: name.to_string(), r#type: "rss".to_string(), url: candidate_url_str }));
+                    return Ok(Some(SourceConfig { name: name.to_string(), source_type: "rss".to_string(), url: candidate_url_str }));
                 }
             }
         }
