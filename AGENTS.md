@@ -146,11 +146,12 @@ cd eng_pulse_mobile && flutter run
 
 Active issues to be aware of:
 
-1. **#5** - CI missing `cargo test`
-2. **#10** - Dockerfiles run as root
-3. **#11** - gemini-engine has no tests
-4. **#12** - Shared code duplicated between agents
-5. **#13** - Flutter services lack unit tests
+1. **#6** - Make Gemini model configurable
+2. **#7** - Complete FCM token registration
+3. **#8** - Add observability infrastructure
+4. **#9** - Replace :latest Docker tags with versioned tags
+5. **#12** - Shared code duplicated between agents
+6. **#13** - Flutter services lack unit tests
 
 See GitHub Issues for full list.
 
