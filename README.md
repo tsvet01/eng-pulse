@@ -39,7 +39,7 @@ Eng Pulse is a complete system for curating, summarizing, and delivering daily s
 
 ### Prerequisites
 
-- Rust (nightly for Cloud Build, stable for local development)
+- Rust 1.83+
 - Python 3.11+
 - Flutter 3.x+
 - Google Cloud SDK

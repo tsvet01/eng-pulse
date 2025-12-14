@@ -166,6 +166,6 @@ RUST_LOG=info cargo run
 - `gemini-engine` - Shared Gemini API client
 - `reqwest` - HTTP client
 - `google-cloud-storage` - GCS operations
-- `readabilityrs` - Article extraction
+- `readability` - Article extraction
 - `rss` - RSS parsing
 - `tracing` - Structured logging
