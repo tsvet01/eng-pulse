@@ -1,7 +1,8 @@
 mod fetcher;
 
 use serde::{Deserialize, Serialize};
-use readabilityrs::Readability;
+use readability::extractor;
+use std::io::Cursor;
 use crate::fetcher::{SourceConfig, Article};
 use google_cloud_storage::client::{Client, ClientConfig};
 use google_cloud_storage::http::objects::download::Range;
@@ -272,14 +273,14 @@ async fn fetch_article_content(client: &reqwest::Client, url: &str) -> Result<St
     let response = client.get(url).send().await?;
     let html_content = response.text().await?;
 
-    let reader = Readability::new(html_content.as_str(), Some(url), None)
-        .map_err(|e| format!("Readability parse error: {:?}", e))?;
+    let parsed_url = url::Url::parse(url)
+        .map_err(|e| format!("URL parse error: {:?}", e))?;
 
-    let content = reader.parse()
-        .and_then(|p| p.content)
-        .ok_or("No content extracted from article")?;
+    let mut reader = Cursor::new(html_content.as_bytes());
+    let product = extractor::extract(&mut reader, &parsed_url)
+        .map_err(|e| format!("Readability extract error: {:?}", e))?;
 
-    Ok(content)
+    Ok(product.text)
 }
 
 fn extract_domain(url: &str) -> String {
