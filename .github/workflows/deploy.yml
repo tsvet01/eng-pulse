@@ -3,6 +3,7 @@ name: Deploy
 on:
   push:
     branches: [ "main" ]
+  workflow_dispatch:
 
 env:
   PROJECT_ID: tsvet01
