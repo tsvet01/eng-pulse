@@ -52,14 +52,14 @@ docker build --platform linux/amd64 -t $IMAGE_URI -f se-daily-agent/Dockerfile .
 cd se-daily-agent
 docker push $IMAGE_URI
 
-# 5. Deploy Cloud Run Job
+# 5. Deploy Cloud Run Job (use Secret Manager for API key)
 echo "Deploying Cloud Run Job..."
 gcloud run jobs deploy $SERVICE_NAME \
   --image $IMAGE_URI \
   --region $REGION \
   --project $PROJECT_ID \
-  --set-env-vars GEMINI_API_KEY=$GEMINI_API_KEY \
-  --max-retries 0 \
+  --set-secrets GEMINI_API_KEY=gemini-api-key:latest \
+  --max-retries 1 \
   --task-timeout 5m
 
 echo "✅ Deployment Complete!"
