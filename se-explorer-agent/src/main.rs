@@ -12,7 +12,7 @@ use rss::Channel;
 use atom_syndication::Feed;
 use tracing::{info, warn, error, debug, instrument};
 use std::time::Duration as StdDuration;
-use gemini_engine::{call_gemini_with_retry, init_logging, SourceConfig};
+use gemini_engine::{call_gemini_with_retry, init_logging, SourceConfig, extract_domain};
 
 // --- Configuration Constants ---
 const HTTP_TIMEOUT_SECS: u64 = 30;
@@ -316,10 +316,6 @@ async fn discover_and_validate_feed(client: &reqwest::Client, gemini_api_key: &s
         }
     }
     Ok(None)
-}
-
-fn extract_domain(url: &str) -> String {
-    url.split('/').nth(2).unwrap_or("unknown").to_string()
 }
 
 #[instrument(skip(client), fields(url_domain = %extract_domain(feed_url)))]

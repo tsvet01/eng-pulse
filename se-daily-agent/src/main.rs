@@ -11,7 +11,7 @@ use google_cloud_storage::http::objects::upload::{UploadObjectRequest, UploadTyp
 use chrono::Utc;
 use tracing::{info, warn, error, debug, instrument};
 use std::time::Duration;
-use gemini_engine::{call_gemini_with_retry, init_logging};
+use gemini_engine::{call_gemini_with_retry, init_logging, extract_domain};
 
 // --- Configuration Constants ---
 const HTTP_TIMEOUT_SECS: u64 = 60;
@@ -255,11 +255,4 @@ async fn fetch_article_content(client: &reqwest::Client, url: &str) -> Result<St
         .map_err(|e| format!("Readability extract error: {:?}", e))?;
 
     Ok(product.text)
-}
-
-fn extract_domain(url: &str) -> String {
-    url::Url::parse(url)
-        .ok()
-        .and_then(|u| u.host_str().map(|s| s.to_string()))
-        .unwrap_or_else(|| "unknown".to_string())
 }
