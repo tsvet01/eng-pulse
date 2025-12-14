@@ -228,6 +228,19 @@ cd se-daily-notifier && ./deploy.sh
 - Skip error handling for "simple" cases
 - Modify prompts without testing
 - Add dependencies without justification
+- Run `cargo update` without checking for edition2024 crates (see below)
+
+## Dependency Notes
+
+Some transitive dependencies have released versions requiring Rust edition2024 (nightly). We pin these to stable-compatible versions in `Cargo.lock`:
+
+- `base64ct` - pinned to 1.6.0 (1.8.x requires edition2024)
+- `home` - pinned to 0.5.9 (0.5.12 requires edition2024)
+
+If `cargo update` breaks the build with "feature `edition2024` is required", pin the offending crate:
+```bash
+cargo update <crate>@<new-version> --precise <old-version>
+```
 
 ## Getting Help
 

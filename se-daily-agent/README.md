@@ -67,7 +67,7 @@ sources.json (GCS)
        │
        ▼
 ┌─────────────────┐
-│ Scrape Content  │ ── readabilityrs extraction
+│ Scrape Content  │ ── readability extraction
 └─────────────────┘
        │
        ▼
