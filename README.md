@@ -39,9 +39,9 @@ Eng Pulse is a complete system for curating, summarizing, and delivering daily s
 
 ### Prerequisites
 
-- Rust 1.83+
+- Rust (nightly for Cloud Build, stable for local development)
 - Python 3.11+
-- Flutter 3.10+
+- Flutter 3.x+
 - Google Cloud SDK
 - Gemini API key
 
@@ -116,12 +116,16 @@ cd se-daily-notifier && ./deploy.sh
 ### CI/CD
 
 GitHub Actions automatically:
-- **On PR**: Runs `cargo check`, `cargo clippy`, `flutter analyze`, `flutter test`
+- **On PR**: Runs `cargo check`, `cargo clippy`, `cargo test`, `flutter analyze`, `flutter test`
 - **On merge to main**: Deploys all components to Google Cloud
+
+Credentials are stored in GCP Secret Manager and GitHub Secrets.
 
 ## Configuration
 
 ### Environment Variables
+
+For local development, set these environment variables:
 
 | Variable | Description | Required |
 |----------|-------------|----------|
@@ -130,6 +134,14 @@ GitHub Actions automatically:
 | `GMAIL_USER` | Gmail address for notifications | Notifier only |
 | `GMAIL_APP_PASSWORD` | Gmail app password | Notifier only |
 | `DEST_EMAIL` | Notification recipient | Notifier only |
+
+### Production Secrets (GCP Secret Manager)
+
+In production, credentials are stored in GCP Secret Manager:
+- `gemini-api-key` - Gemini API key for agents
+- `gmail-user` - Gmail sender address
+- `gmail-app-password` - Gmail app password
+- `dest-email` - Notification recipient
 
 ### Scheduling
 

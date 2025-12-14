@@ -32,7 +32,9 @@ export DEST_EMAIL=recipient@example.com
 
 ## Configuration
 
-### Environment Variables
+### Environment Variables / Secrets
+
+In production, credentials are stored in GCP Secret Manager. For local development, use environment variables:
 
 | Variable | Required | Description |
 |----------|----------|-------------|

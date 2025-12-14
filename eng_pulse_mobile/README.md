@@ -14,18 +14,21 @@ Flutter mobile app for viewing AI-curated daily software engineering summaries.
 
 ```
 lib/
-├── main.dart              # App entry point
+├── main.dart                # App entry point
+├── firebase_options.dart    # Firebase configuration
 ├── models/
-│   └── summary.dart       # Summary data model
+│   └── summary.dart         # Summary data model
 ├── screens/
-│   ├── splash_screen.dart # Initial loading screen
-│   └── summary_screen.dart# Main summary display
+│   ├── splash_screen.dart   # Initial loading screen
+│   └── summary_screen.dart  # Main summary display
 ├── services/
-│   ├── api_service.dart   # GCS API client
-│   ├── cache_service.dart # Hive local storage
+│   ├── api_service.dart     # GCS API client
+│   ├── cache_service.dart   # Hive local storage
 │   └── notification_service.dart # FCM integration
+├── theme/
+│   └── app_theme.dart       # App theming and styles
 └── widgets/
-    └── summary_card.dart  # Reusable summary card widget
+    └── summary_card.dart    # Reusable summary card widget
 ```
 
 ## Setup
