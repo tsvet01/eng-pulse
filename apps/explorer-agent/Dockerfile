@@ -4,26 +4,26 @@ FROM rust:1.83-bookworm as builder
 WORKDIR /app
 
 # Copy only Cargo files first for dependency caching
-COPY gemini-engine/Cargo.toml gemini-engine/Cargo.toml
-COPY se-explorer-agent/Cargo.toml se-explorer-agent/Cargo.toml
-COPY se-explorer-agent/Cargo.lock se-explorer-agent/Cargo.lock
+COPY libs/gemini-engine/Cargo.toml libs/gemini-engine/Cargo.toml
+COPY apps/explorer-agent/Cargo.toml apps/explorer-agent/Cargo.toml
+COPY apps/explorer-agent/Cargo.lock apps/explorer-agent/Cargo.lock
 
 # Create dummy source files to build dependencies
-RUN mkdir -p gemini-engine/src && echo "pub fn dummy() {}" > gemini-engine/src/lib.rs
-RUN mkdir -p se-explorer-agent/src && echo "fn main() {}" > se-explorer-agent/src/main.rs
+RUN mkdir -p libs/gemini-engine/src && echo "pub fn dummy() {}" > libs/gemini-engine/src/lib.rs
+RUN mkdir -p apps/explorer-agent/src && echo "fn main() {}" > apps/explorer-agent/src/main.rs
 
 # Build dependencies only (this layer will be cached)
-WORKDIR /app/se-explorer-agent
+WORKDIR /app/apps/explorer-agent
 RUN cargo build --release || true
-RUN rm -rf /app/gemini-engine/src /app/se-explorer-agent/src
+RUN rm -rf /app/libs/gemini-engine/src /app/apps/explorer-agent/src
 
 # Now copy actual source code
 WORKDIR /app
-COPY gemini-engine/src gemini-engine/src
-COPY se-explorer-agent/src se-explorer-agent/src
+COPY libs/gemini-engine/src libs/gemini-engine/src
+COPY apps/explorer-agent/src apps/explorer-agent/src
 
 # Build the application
-WORKDIR /app/se-explorer-agent
+WORKDIR /app/apps/explorer-agent
 RUN cargo build --release
 
 # Stage 2: Create the runtime image
@@ -44,7 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd --no-create-home --shell /bin/false appuser
 
 # Copy the binary from the builder stage
-COPY --from=builder /app/se-explorer-agent/target/release/se-explorer-agent /usr/local/bin/se-explorer-agent
+COPY --from=builder /app/apps/explorer-agent/target/release/se-explorer-agent /usr/local/bin/se-explorer-agent
 
 # Switch to non-root user
 USER appuser

@@ -1,6 +1,8 @@
-# se-daily-agent
+# Daily Agent
 
 Rust-based Cloud Run job that generates daily software engineering article summaries.
+
+> Part of [Eng Pulse](../../README.md) - see root README for system overview.
 
 ## What It Does
 

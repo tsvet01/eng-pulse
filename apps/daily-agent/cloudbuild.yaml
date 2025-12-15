@@ -5,7 +5,7 @@ steps:
       - '-t'
       - '$_IMAGE_TAG'
       - '-f'
-      - 'se-explorer-agent/Dockerfile'
+      - 'apps/daily-agent/Dockerfile'
       - '.'
 images:
   - '$_IMAGE_TAG'

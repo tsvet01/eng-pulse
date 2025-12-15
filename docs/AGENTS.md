@@ -6,13 +6,13 @@ This document provides context and guidelines for AI coding assistants (Claude, 
 
 Eng Pulse is an AI-powered daily engineering digest system with these components:
 
-| Component | Language | Purpose |
-|-----------|----------|---------|
-| `gemini-engine` | Rust | Shared Gemini API client |
-| `se-daily-agent` | Rust | Daily article summarization |
-| `se-explorer-agent` | Rust | Source discovery/management |
-| `se-daily-notifier` | Python | Email notifications |
-| `eng_pulse_mobile` | Flutter/Dart | Mobile app |
+| Component | Location | Language | Purpose |
+|-----------|----------|----------|---------|
+| `gemini-engine` | `libs/gemini-engine/` | Rust | Shared Gemini API client |
+| `daily-agent` | `apps/daily-agent/` | Rust | Daily article summarization |
+| `explorer-agent` | `apps/explorer-agent/` | Rust | Source discovery/management |
+| `notifier` | `functions/notifier/` | Python | Email notifications |
+| `mobile` | `apps/mobile/` | Flutter/Dart | Mobile app |
 
 ## Architecture Decisions
 
@@ -88,7 +88,7 @@ final summaries = CacheService.getCachedSummaries();
 
 ### Adding a New Source Type
 
-1. Add type to `SourceConfig` in `se-daily-agent/src/fetcher.rs`
+1. Add type to `SourceConfig` in `apps/daily-agent/src/fetcher.rs`
 2. Add match arm in `fetch_from_source()`
 3. Implement fetch function following existing patterns
 4. Test with local run before deployment
@@ -96,8 +96,8 @@ final summaries = CacheService.getCachedSummaries();
 ### Modifying Gemini Prompts
 
 Prompts are in:
-- `se-daily-agent/src/main.rs` - Article selection, summarization
-- `se-explorer-agent/src/main.rs` - Source relevance, recommendations
+- `apps/daily-agent/src/main.rs` - Article selection, summarization
+- `apps/explorer-agent/src/main.rs` - Source relevance, recommendations
 
 When modifying:
 - Keep prompts concise but specific
@@ -116,7 +116,7 @@ When modifying:
 ### Rust
 
 ```bash
-cd se-daily-agent
+cd apps/daily-agent
 cargo test
 cargo clippy -- -D warnings
 ```
@@ -124,7 +124,7 @@ cargo clippy -- -D warnings
 ### Flutter
 
 ```bash
-cd eng_pulse_mobile
+cd apps/mobile
 flutter test
 flutter analyze
 ```
@@ -133,13 +133,13 @@ flutter analyze
 
 ```bash
 # 1. Run daily agent locally
-cd se-daily-agent && cargo run
+cd apps/daily-agent && cargo run
 
 # 2. Check GCS for output
 gsutil cat gs://bucket/manifest.json
 
 # 3. Run mobile app
-cd eng_pulse_mobile && flutter run
+cd apps/mobile && flutter run
 ```
 
 ## Known Technical Debt
@@ -150,8 +150,9 @@ Active issues to be aware of:
 2. **#7** - Complete FCM token registration
 3. **#8** - Add observability infrastructure
 4. **#9** - Replace :latest Docker tags with versioned tags
-5. **#12** - Shared code duplicated between agents
+5. ~~**#12** - Shared code duplicated between agents~~ (RESOLVED: gemini-engine now in libs/)
 6. **#13** - Flutter services lack unit tests
+7. **#14** - Add integration tests for agents
 
 See GitHub Issues for full list.
 
@@ -186,11 +187,11 @@ DEST_EMAIL=recipient
 
 ```bash
 # Rust agents
-cd se-daily-agent && ./deploy.sh
-cd se-explorer-agent && ./deploy.sh
+cd apps/daily-agent && ./deploy.sh
+cd apps/explorer-agent && ./deploy.sh
 
 # Python notifier
-cd se-daily-notifier && ./deploy.sh
+cd functions/notifier && ./deploy.sh
 ```
 
 ### CI/CD
@@ -203,11 +204,11 @@ cd se-daily-notifier && ./deploy.sh
 
 | File | Purpose |
 |------|---------|
-| `gemini-engine/src/lib.rs` | Core Gemini API logic |
-| `se-daily-agent/src/main.rs` | Daily agent orchestration |
-| `se-daily-agent/src/fetcher.rs` | RSS/HN fetching logic |
-| `se-explorer-agent/src/main.rs` | Source discovery logic |
-| `eng_pulse_mobile/lib/services/api_service.dart` | Mobile API client |
+| `libs/gemini-engine/src/lib.rs` | Core Gemini API logic |
+| `apps/daily-agent/src/main.rs` | Daily agent orchestration |
+| `apps/daily-agent/src/fetcher.rs` | RSS/HN fetching logic |
+| `apps/explorer-agent/src/main.rs` | Source discovery logic |
+| `apps/mobile/lib/services/api_service.dart` | Mobile API client |
 | `.github/workflows/ci.yml` | CI configuration |
 | `.github/workflows/deploy.yml` | Deployment configuration |
 
@@ -255,10 +256,10 @@ cargo update <crate>@<new-version> --precise <old-version>
 
 ```bash
 # Rust agent
-cd se-daily-agent && cargo run
+cd apps/daily-agent && cargo run
 
 # Flutter app
-cd eng_pulse_mobile && flutter run
+cd apps/mobile && flutter run
 ```
 
 ### Build & Test

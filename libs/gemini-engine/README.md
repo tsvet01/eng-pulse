@@ -1,6 +1,8 @@
-# gemini-engine
+# Gemini Engine
 
 Shared Rust crate providing a robust Gemini API client with exponential backoff retry logic.
+
+> Part of [Eng Pulse](../../README.md) - see root README for system overview.
 
 ## Features
 
@@ -15,7 +17,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-gemini-engine = { path = "../gemini-engine" }
+gemini-engine = { path = "../../libs/gemini-engine" }
 ```
 
 ### Basic Example

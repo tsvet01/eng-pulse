@@ -1,6 +1,8 @@
-# se-explorer-agent
+# Explorer Agent
 
 Rust-based Cloud Run job that discovers, validates, and manages RSS/blog sources.
+
+> Part of [Eng Pulse](../../README.md) - see root README for system overview.
 
 ## What It Does
 

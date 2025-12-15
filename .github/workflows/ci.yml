@@ -32,25 +32,25 @@ jobs:
           ${{ runner.os }}-cargo-
 
     - name: Check Daily Agent
-      run: cd se-daily-agent && cargo check --verbose
+      run: cd apps/daily-agent && cargo check --verbose
 
     - name: Check Explorer Agent
-      run: cd se-explorer-agent && cargo check --verbose
+      run: cd apps/explorer-agent && cargo check --verbose
 
     - name: Clippy Lint Daily Agent
-      run: cd se-daily-agent && cargo clippy -- -D warnings
+      run: cd apps/daily-agent && cargo clippy -- -D warnings
 
     - name: Clippy Lint Explorer Agent
-      run: cd se-explorer-agent && cargo clippy -- -D warnings
+      run: cd apps/explorer-agent && cargo clippy -- -D warnings
 
     - name: Test gemini-engine
-      run: cd gemini-engine && cargo test --verbose
+      run: cd libs/gemini-engine && cargo test --verbose
 
     - name: Test Daily Agent
-      run: cd se-daily-agent && cargo test --verbose
+      run: cd apps/daily-agent && cargo test --verbose
 
     - name: Test Explorer Agent
-      run: cd se-explorer-agent && cargo test --verbose
+      run: cd apps/explorer-agent && cargo test --verbose
 
   python-check:
     runs-on: ubuntu-latest
@@ -64,11 +64,11 @@ jobs:
 
     - name: Install dependencies
       run: |
-        cd se-daily-notifier
+        cd functions/notifier
         pip install -r requirements.txt
 
     - name: Check Python syntax
-      run: python -m py_compile se-daily-notifier/main.py
+      run: python -m py_compile functions/notifier/main.py
 
   flutter-check:
     runs-on: ubuntu-latest
@@ -81,10 +81,10 @@ jobs:
         channel: 'stable'
 
     - name: Get dependencies
-      run: cd eng_pulse_mobile && flutter pub get
+      run: cd apps/mobile && flutter pub get
 
     - name: Analyze code
-      run: cd eng_pulse_mobile && flutter analyze
+      run: cd apps/mobile && flutter analyze
 
     - name: Run tests
-      run: cd eng_pulse_mobile && flutter test
+      run: cd apps/mobile && flutter test
