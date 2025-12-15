@@ -9,7 +9,7 @@ env:
   PROJECT_ID: tsvet01
   REGION: us-central1
   REPO_NAME: agent-repo
-  
+
 jobs:
   deploy-agents:
     runs-on: ubuntu-latest
@@ -31,7 +31,7 @@ jobs:
     - name: Build & Push Daily Agent (Cloud Build)
       run: |
         gcloud builds submit \
-          --config=se-daily-agent/cloudbuild.yaml \
+          --config=apps/daily-agent/cloudbuild.yaml \
           --substitutions=_IMAGE_TAG=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:latest \
           --machine-type=E2_HIGHCPU_8 \
           .
@@ -56,7 +56,7 @@ jobs:
     - name: Build & Push Explorer Agent (Cloud Build)
       run: |
         gcloud builds submit \
-          --config=se-explorer-agent/cloudbuild.yaml \
+          --config=apps/explorer-agent/cloudbuild.yaml \
           --substitutions=_IMAGE_TAG=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-explorer-agent:latest \
           --machine-type=E2_HIGHCPU_8 \
           .
@@ -93,7 +93,7 @@ jobs:
 
     - name: Deploy Notifier Function
       run: |
-        cd se-daily-notifier
+        cd functions/notifier
         gcloud functions deploy se-daily-notifier \
           --gen2 \
           --runtime=python311 \

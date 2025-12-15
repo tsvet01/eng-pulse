@@ -29,11 +29,11 @@ Eng Pulse is a complete system for curating, summarizing, and delivering daily s
 
 | Component | Description | Tech Stack |
 |-----------|-------------|------------|
-| [gemini-engine](./gemini-engine/) | Shared Gemini API client with retry logic | Rust |
-| [se-daily-agent](./se-daily-agent/) | Daily article selection and summarization | Rust |
-| [se-explorer-agent](./se-explorer-agent/) | RSS/blog source discovery and management | Rust |
-| [se-daily-notifier](./se-daily-notifier/) | Email notification on new summaries | Python |
-| [eng_pulse_mobile](./eng_pulse_mobile/) | Mobile app for reading digests | Flutter |
+| [gemini-engine](./libs/gemini-engine/) | Shared Gemini API client with retry logic | Rust |
+| [daily-agent](./apps/daily-agent/) | Daily article selection and summarization | Rust |
+| [explorer-agent](./apps/explorer-agent/) | RSS/blog source discovery and management | Rust |
+| [notifier](./functions/notifier/) | Email notification on new summaries | Python |
+| [mobile](./apps/mobile/) | Mobile app for reading digests | Flutter |
 
 ## Quick Start
 
@@ -63,15 +63,15 @@ EOF
 
 ```bash
 # Daily Agent (generates today's summary)
-cd se-daily-agent
+cd apps/daily-agent
 cargo run
 
 # Explorer Agent (manages sources)
-cd se-explorer-agent
+cd apps/explorer-agent
 cargo run
 
 # Mobile App
-cd eng_pulse_mobile
+cd apps/mobile
 flutter run
 ```
 
@@ -101,16 +101,16 @@ bucket/
 
 ```bash
 # Deploy Daily Agent
-cd se-daily-agent && ./deploy.sh
+cd apps/daily-agent && ./deploy.sh
 
 # Deploy Explorer Agent
-cd se-explorer-agent && ./deploy.sh
+cd apps/explorer-agent && ./deploy.sh
 ```
 
 ### Cloud Function (Notifier)
 
 ```bash
-cd se-daily-notifier && ./deploy.sh
+cd functions/notifier && ./deploy.sh
 ```
 
 ### CI/CD
@@ -155,23 +155,29 @@ In production, credentials are stored in GCP Secret Manager:
 ```
 eng-pulse/
 ├── .github/workflows/     # CI/CD pipelines
-├── gemini-engine/         # Shared Rust crate
-├── se-daily-agent/        # Daily summarization agent
-├── se-explorer-agent/     # Source discovery agent
-├── se-daily-notifier/     # Email notification function
-├── eng_pulse_mobile/      # Flutter mobile app
-└── AGENTS.md             # Guide for AI coding agents
+├── apps/
+│   ├── daily-agent/       # Daily summarization agent (Rust)
+│   ├── explorer-agent/    # Source discovery agent (Rust)
+│   └── mobile/            # Flutter mobile app
+├── libs/
+│   └── gemini-engine/     # Shared Rust crate
+├── functions/
+│   └── notifier/          # Email notification (Python)
+├── scripts/               # Utility scripts
+└── docs/
+    └── AGENTS.md          # Guide for AI coding agents
 ```
 
 ### Running Tests
 
 ```bash
 # Rust tests
-cd se-daily-agent && cargo test
-cd se-explorer-agent && cargo test
+cd libs/gemini-engine && cargo test
+cd apps/daily-agent && cargo test
+cd apps/explorer-agent && cargo test
 
 # Flutter tests
-cd eng_pulse_mobile && flutter test
+cd apps/mobile && flutter test
 ```
 
 ### Code Quality
@@ -186,7 +192,7 @@ flutter analyze
 
 ## Contributing
 
-See [AGENTS.md](./AGENTS.md) for guidelines on working with this codebase, especially for AI coding assistants.
+See [AGENTS.md](./docs/AGENTS.md) for guidelines on working with this codebase, especially for AI coding assistants.
 
 ## License
 

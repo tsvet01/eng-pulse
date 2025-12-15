@@ -1,0 +1,3 @@
+# Override GitHub linguist language detection
+# Mark Flutter app as not counted in repo language stats
+apps/mobile/** linguist-vendored
