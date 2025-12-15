@@ -18,4 +18,4 @@ url = "2.5"
 chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-gemini-engine = { path = "../gemini-engine" }
+gemini-engine = { path = "../../libs/gemini-engine" }

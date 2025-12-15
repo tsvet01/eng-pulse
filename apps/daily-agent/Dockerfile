@@ -4,26 +4,26 @@ FROM rust:1.83-bookworm as builder
 WORKDIR /app
 
 # Copy only Cargo files first for dependency caching
-COPY gemini-engine/Cargo.toml gemini-engine/Cargo.toml
-COPY se-daily-agent/Cargo.toml se-daily-agent/Cargo.toml
-COPY se-daily-agent/Cargo.lock se-daily-agent/Cargo.lock
+COPY libs/gemini-engine/Cargo.toml libs/gemini-engine/Cargo.toml
+COPY apps/daily-agent/Cargo.toml apps/daily-agent/Cargo.toml
+COPY apps/daily-agent/Cargo.lock apps/daily-agent/Cargo.lock
 
 # Create dummy source files to build dependencies
-RUN mkdir -p gemini-engine/src && echo "pub fn dummy() {}" > gemini-engine/src/lib.rs
-RUN mkdir -p se-daily-agent/src && echo "fn main() {}" > se-daily-agent/src/main.rs
+RUN mkdir -p libs/gemini-engine/src && echo "pub fn dummy() {}" > libs/gemini-engine/src/lib.rs
+RUN mkdir -p apps/daily-agent/src && echo "fn main() {}" > apps/daily-agent/src/main.rs
 
 # Build dependencies only (this layer will be cached)
-WORKDIR /app/se-daily-agent
+WORKDIR /app/apps/daily-agent
 RUN cargo build --release || true
-RUN rm -rf /app/gemini-engine/src /app/se-daily-agent/src
+RUN rm -rf /app/libs/gemini-engine/src /app/apps/daily-agent/src
 
 # Now copy actual source code
 WORKDIR /app
-COPY gemini-engine/src gemini-engine/src
-COPY se-daily-agent/src se-daily-agent/src
+COPY libs/gemini-engine/src libs/gemini-engine/src
+COPY apps/daily-agent/src apps/daily-agent/src
 
 # Build the application
-WORKDIR /app/se-daily-agent
+WORKDIR /app/apps/daily-agent
 RUN cargo build --release
 
 # Stage 2: Create the runtime image
@@ -44,7 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd --no-create-home --shell /bin/false appuser
 
 # Copy the binary from the builder stage
-COPY --from=builder /app/se-daily-agent/target/release/se-daily-agent /usr/local/bin/se-daily-agent
+COPY --from=builder /app/apps/daily-agent/target/release/se-daily-agent /usr/local/bin/se-daily-agent
 
 # Switch to non-root user
 USER appuser

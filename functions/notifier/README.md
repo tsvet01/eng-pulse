@@ -1,6 +1,8 @@
-# se-daily-notifier
+# Notifier
 
 Python Cloud Function that sends email notifications when new summaries are published.
+
+> Part of [Eng Pulse](../../README.md) - see root README for system overview.
 
 ## What It Does
 

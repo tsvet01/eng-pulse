@@ -1,6 +1,8 @@
-# eng_pulse_mobile
+# Mobile App
 
 Flutter mobile app for viewing AI-curated daily software engineering summaries.
+
+> Part of [Eng Pulse](../../README.md) - see root README for system overview.
 
 ## Features
 
@@ -167,5 +169,5 @@ flutter build ios --release
 
 ## Related Components
 
-- [se-daily-agent](../se-daily-agent/) - Generates the summaries
-- [se-daily-notifier](../se-daily-notifier/) - Sends push notifications
+- [daily-agent](../daily-agent/) - Generates the summaries
+- [notifier](../../functions/notifier/) - Sends email notifications
