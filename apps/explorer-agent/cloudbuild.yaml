@@ -1,0 +1,11 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '$_IMAGE_TAG'
+      - '-f'
+      - 'apps/explorer-agent/Dockerfile'
+      - '.'
+images:
+  - '$_IMAGE_TAG'
