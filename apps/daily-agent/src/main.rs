@@ -34,9 +34,6 @@ struct ManifestEntry {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Debug: print immediately to verify binary execution
-    eprintln!("SE Daily Agent starting...");
-
     dotenv::dotenv().ok();
     init_logging();
 
@@ -54,10 +51,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .build()?;
 
     // Initialize GCS Client
-    eprintln!("Initializing GCS client...");
     let config = ClientConfig::default().with_auth().await?;
     let gcs_client = Client::new(config);
-    eprintln!("GCS client initialized");
 
     // 1. Load Sources from GCS
     info!("Fetching sources.json from GCS");
@@ -243,7 +238,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     info!(date = %today, "Manifest updated successfully");
     info!("SE Daily Agent completed successfully");
-    eprintln!("SE Daily Agent completed successfully");
 
     Ok(())
 }

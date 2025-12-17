@@ -15,7 +15,11 @@ RUN mkdir -p apps/daily-agent/src && echo "fn main() {}" > apps/daily-agent/src/
 # Build dependencies only (this layer will be cached)
 WORKDIR /app/apps/daily-agent
 RUN cargo build --release || true
-RUN rm -rf /app/libs/gemini-engine/src /app/apps/daily-agent/src
+
+# Remove dummy source and compiled binary to force rebuild
+RUN rm -rf /app/libs/gemini-engine/src /app/apps/daily-agent/src \
+    /app/apps/daily-agent/target/release/se-daily-agent \
+    /app/apps/daily-agent/target/release/deps/se_daily_agent*
 
 # Now copy actual source code
 WORKDIR /app
@@ -49,5 +53,4 @@ COPY --from=builder /app/apps/daily-agent/target/release/se-daily-agent /usr/loc
 # Switch to non-root user
 USER appuser
 
-# Debug wrapper to catch errors
-CMD ["/bin/sh", "-c", "echo 'Container starting...' && ls -la /usr/local/bin/se-daily-agent && echo 'Binary exists' && /usr/local/bin/se-daily-agent 2>&1; echo \"Exit code: $?\""]
+CMD ["se-daily-agent"]
