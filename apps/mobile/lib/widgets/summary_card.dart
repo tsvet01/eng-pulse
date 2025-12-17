@@ -1,24 +1,38 @@
 import 'package:flutter/material.dart';
 import '../models/cached_summary.dart';
 import '../services/cache_service.dart';
+import '../services/user_service.dart';
 import '../theme/app_theme.dart';
 
 class SummaryCard extends StatelessWidget {
   final CachedSummary summary;
   final VoidCallback onTap;
   final String formattedDate;
+  final bool showDateChip;
+  final int? readingTimeMinutes;
 
   const SummaryCard({
     super.key,
     required this.summary,
     required this.onTap,
     required this.formattedDate,
+    this.showDateChip = true,
+    this.readingTimeMinutes,
   });
+
+  /// Estimate reading time based on word count (avg 200 wpm)
+  static int estimateReadingTime(String? content) {
+    if (content == null || content.isEmpty) return 3; // default
+    final wordCount = content.split(RegExp(r'\s+')).length;
+    return (wordCount / 200).ceil().clamp(1, 15);
+  }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isCached = CacheService.hasContent(summary.url);
+    final isRead = UserService.hasRead(summary.url);
+    final readTime = readingTimeMinutes ?? estimateReadingTime(summary.cachedContent);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -32,7 +46,9 @@ class SummaryCard extends StatelessWidget {
               color: isDark ? AppTheme.darkSurface : AppTheme.lightSurface,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: isDark ? AppTheme.darkCardBorder : AppTheme.lightCardBorder,
+                color: isRead
+                    ? (isDark ? AppTheme.darkCardBorder.withAlpha(100) : AppTheme.lightCardBorder.withAlpha(150))
+                    : (isDark ? AppTheme.darkCardBorder : AppTheme.lightCardBorder),
                 width: 1,
               ),
             ),
@@ -41,27 +57,45 @@ class SummaryCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Date chip and cached indicator
+                  // Metadata row: date chip, reading time, read indicator
                   Row(
                     children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: (isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple)
-                              .withAlpha(25),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          formattedDate,
-                          style: TextStyle(
-                            color: isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
+                      if (showDateChip) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: (isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple)
+                                .withAlpha(25),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            formattedDate,
+                            style: TextStyle(
+                              color: isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
-                      ),
-                      if (isCached) ...[
                         const SizedBox(width: 8),
+                      ],
+                      // Reading time
+                      Icon(
+                        Icons.schedule_rounded,
+                        size: 14,
+                        color: isDark ? AppTheme.darkTextTertiary : AppTheme.lightTextTertiary,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '$readTime min read',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? AppTheme.darkTextTertiary : AppTheme.lightTextTertiary,
+                        ),
+                      ),
+                      const Spacer(),
+                      // Read indicator
+                      if (isRead)
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
@@ -73,13 +107,13 @@ class SummaryCard extends StatelessWidget {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(
-                                Icons.download_done_rounded,
+                                Icons.check_circle_outline_rounded,
                                 size: 12,
                                 color: isDark ? Colors.green.shade300 : Colors.green.shade700,
                               ),
                               const SizedBox(width: 4),
                               Text(
-                                'Saved',
+                                'Read',
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w600,
@@ -88,15 +122,24 @@ class SummaryCard extends StatelessWidget {
                               ),
                             ],
                           ),
+                        )
+                      else if (isCached)
+                        Icon(
+                          Icons.cloud_done_outlined,
+                          size: 16,
+                          color: isDark ? AppTheme.darkTextTertiary : AppTheme.lightTextTertiary,
                         ),
-                      ],
                     ],
                   ),
                   const SizedBox(height: 12),
                   // Title
                   Text(
                     summary.title,
-                    style: Theme.of(context).textTheme.titleLarge,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          color: isRead
+                              ? (isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary)
+                              : null,
+                        ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -104,29 +147,13 @@ class SummaryCard extends StatelessWidget {
                   // Snippet
                   Text(
                     summary.summarySnippet,
-                    style: Theme.of(context).textTheme.bodyMedium,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: isRead
+                              ? (isDark ? AppTheme.darkTextTertiary : AppTheme.lightTextTertiary)
+                              : null,
+                        ),
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 12),
-                  // Read more indicator
-                  Row(
-                    children: [
-                      Text(
-                        'Read more',
-                        style: TextStyle(
-                          color: isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      Icon(
-                        Icons.arrow_forward_rounded,
-                        size: 16,
-                        color: isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple,
-                      ),
-                    ],
                   ),
                 ],
               ),

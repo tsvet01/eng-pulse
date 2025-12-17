@@ -5,6 +5,7 @@ import '../models/cached_summary.dart';
 import '../services/api_service.dart';
 import '../services/connectivity_service.dart';
 import '../services/cache_service.dart';
+import '../theme/app_theme.dart';
 import '../widgets/summary_card.dart';
 import '../widgets/shimmer_loading.dart';
 import '../widgets/empty_state.dart';
@@ -205,28 +206,126 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildList(List<CachedSummary> summaries) {
+    // Group summaries by date category
+    final grouped = _groupByDateCategory(summaries);
+
     return RefreshIndicator(
       onRefresh: _refresh,
       color: Theme.of(context).colorScheme.primary,
       child: ListView.builder(
         padding: const EdgeInsets.only(top: 8, bottom: 20),
-        itemCount: summaries.length,
+        itemCount: grouped.length,
         itemBuilder: (context, index) {
-          final summary = summaries[index];
+          final item = grouped[index];
+
+          if (item is _SectionHeader) {
+            return _buildSectionHeader(context, item.title, item.isFirst);
+          }
+
+          final summaryItem = item as _SummaryItem;
           return SummaryCard(
-            summary: summary,
-            formattedDate: _formatDate(summary.date),
-            onTap: () {
-              Navigator.push(
+            summary: summaryItem.summary,
+            formattedDate: _formatDate(summaryItem.summary.date),
+            showDateChip: false, // Date shown in section header
+            onTap: () async {
+              await Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => DetailScreen(summary: summary),
+                  builder: (context) => DetailScreen(
+                    summary: summaryItem.summary,
+                    allSummaries: summaries,
+                    currentIndex: summaryItem.originalIndex,
+                  ),
                 ),
               );
+              // Refresh to update read status
+              setState(() {});
             },
           );
         },
       ),
     );
   }
+
+  List<dynamic> _groupByDateCategory(List<CachedSummary> summaries) {
+    final result = <dynamic>[];
+    String? currentCategory;
+
+    for (int i = 0; i < summaries.length; i++) {
+      final summary = summaries[i];
+      final category = _getDateCategory(summary.date);
+
+      if (category != currentCategory) {
+        result.add(_SectionHeader(title: category, isFirst: currentCategory == null));
+        currentCategory = category;
+      }
+      result.add(_SummaryItem(summary: summary, originalIndex: i));
+    }
+
+    return result;
+  }
+
+  String _getDateCategory(String dateStr) {
+    try {
+      final date = DateTime.parse(dateStr);
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final articleDate = DateTime(date.year, date.month, date.day);
+      final difference = today.difference(articleDate).inDays;
+
+      if (difference == 0) return 'Today';
+      if (difference == 1) return 'Yesterday';
+      if (difference < 7) return 'This Week';
+      return 'Earlier';
+    } catch (e) {
+      return 'Earlier';
+    }
+  }
+
+  Widget _buildSectionHeader(BuildContext context, String title, bool isFirst) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isToday = title == 'Today';
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, isFirst ? 8 : 24, 20, 8),
+      child: Row(
+        children: [
+          if (isToday) ...[
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+          Text(
+            title.toUpperCase(),
+            style: TextStyle(
+              color: isToday
+                  ? (isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple)
+                  : (isDark ? AppTheme.darkTextTertiary : AppTheme.lightTextTertiary),
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionHeader {
+  final String title;
+  final bool isFirst;
+  _SectionHeader({required this.title, required this.isFirst});
+}
+
+class _SummaryItem {
+  final CachedSummary summary;
+  final int originalIndex;
+  _SummaryItem({required this.summary, required this.originalIndex});
 }

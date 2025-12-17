@@ -11,13 +11,12 @@ use google_cloud_storage::http::objects::upload::{UploadObjectRequest, UploadTyp
 use chrono::Utc;
 use tracing::{info, warn, error, debug, instrument};
 use std::time::Duration;
-use gemini_engine::{call_gemini_with_retry, init_logging, extract_domain};
+use gemini_engine::{call_gemini_with_retry, init_logging, extract_domain, DEFAULT_BUCKET};
 
 // --- Configuration Constants ---
 const HTTP_TIMEOUT_SECS: u64 = 60;
 const MAX_ARTICLE_CHARS: usize = 50_000;
 const SUMMARY_SNIPPET_CHARS: usize = 100;
-const DEFAULT_BUCKET: &str = "tsvet01-agent-brain";
 
 // --- Manifest Struct ---
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -34,7 +33,7 @@ struct ManifestEntry {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     init_logging();
 
     let gemini_api_key = std::env::var("GEMINI_API_KEY").map_err(|_| {
