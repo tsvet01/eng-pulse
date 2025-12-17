@@ -49,4 +49,5 @@ COPY --from=builder /app/apps/daily-agent/target/release/se-daily-agent /usr/loc
 # Switch to non-root user
 USER appuser
 
-CMD ["se-daily-agent"]
+# Debug wrapper to verify container starts correctly
+CMD ["/bin/sh", "-c", "echo 'Container starting...' && exec /usr/local/bin/se-daily-agent"]
