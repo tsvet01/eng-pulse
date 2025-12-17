@@ -16,10 +16,16 @@ RUN mkdir -p apps/explorer-agent/src && echo "fn main() {}" > apps/explorer-agen
 WORKDIR /app/apps/explorer-agent
 RUN cargo build --release || true
 
-# Remove dummy source and compiled binary to force rebuild
+# Remove dummy source and compiled artifacts to force rebuild
+# Keep deps/ intact for caching, but remove the main binary and its fingerprints
 RUN rm -rf /app/libs/gemini-engine/src /app/apps/explorer-agent/src \
     /app/apps/explorer-agent/target/release/se-explorer-agent \
-    /app/apps/explorer-agent/target/release/deps/se_explorer_agent*
+    /app/apps/explorer-agent/target/release/.fingerprint/se-explorer-agent-* \
+    /app/apps/explorer-agent/target/release/.fingerprint/gemini-engine-* \
+    /app/apps/explorer-agent/target/release/deps/libse_explorer_agent* \
+    /app/apps/explorer-agent/target/release/deps/libgemini_engine* \
+    /app/apps/explorer-agent/target/release/deps/se_explorer_agent* \
+    /app/apps/explorer-agent/target/release/deps/gemini_engine*
 
 # Now copy actual source code
 WORKDIR /app

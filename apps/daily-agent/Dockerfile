@@ -16,10 +16,16 @@ RUN mkdir -p apps/daily-agent/src && echo "fn main() {}" > apps/daily-agent/src/
 WORKDIR /app/apps/daily-agent
 RUN cargo build --release || true
 
-# Remove dummy source and compiled binary to force rebuild
+# Remove dummy source and compiled artifacts to force rebuild
+# Keep deps/ intact for caching, but remove the main binary and its fingerprints
 RUN rm -rf /app/libs/gemini-engine/src /app/apps/daily-agent/src \
     /app/apps/daily-agent/target/release/se-daily-agent \
-    /app/apps/daily-agent/target/release/deps/se_daily_agent*
+    /app/apps/daily-agent/target/release/.fingerprint/se-daily-agent-* \
+    /app/apps/daily-agent/target/release/.fingerprint/gemini-engine-* \
+    /app/apps/daily-agent/target/release/deps/libse_daily_agent* \
+    /app/apps/daily-agent/target/release/deps/libgemini_engine* \
+    /app/apps/daily-agent/target/release/deps/se_daily_agent* \
+    /app/apps/daily-agent/target/release/deps/gemini_engine*
 
 # Now copy actual source code
 WORKDIR /app
