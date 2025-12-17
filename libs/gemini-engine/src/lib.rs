@@ -7,6 +7,9 @@ use url::Url;
 
 const MAX_RETRY_ELAPSED_SECS: u64 = 120;
 
+/// Default GCS bucket for storing agent data
+pub const DEFAULT_BUCKET: &str = "tsvet01-agent-brain";
+
 // --- Shared Utilities ---
 
 /// Extract the domain/host from a URL string safely.

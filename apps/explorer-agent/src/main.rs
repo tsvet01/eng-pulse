@@ -12,17 +12,16 @@ use rss::Channel;
 use atom_syndication::Feed;
 use tracing::{info, warn, error, debug, instrument};
 use std::time::Duration as StdDuration;
-use gemini_engine::{call_gemini_with_retry, init_logging, SourceConfig, extract_domain};
+use gemini_engine::{call_gemini_with_retry, init_logging, SourceConfig, extract_domain, DEFAULT_BUCKET};
 
 // --- Configuration Constants ---
 const HTTP_TIMEOUT_SECS: u64 = 30;
-const DEFAULT_BUCKET: &str = "tsvet01-agent-brain";
 const FRESHNESS_DAYS: i64 = 90;
 const MAX_FEED_DISCOVERY_ATTEMPTS: usize = 2;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     init_logging();
 
     let gemini_api_key = std::env::var("GEMINI_API_KEY").map_err(|_| {

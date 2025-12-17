@@ -40,8 +40,7 @@ def send_email(subject_file, html_body):
     dest_email = os.environ.get("DEST_EMAIL")
 
     if not all([gmail_user, gmail_password, dest_email]):
-        print("Error: Missing environment variables (GMAIL_USER, GMAIL_APP_PASSWORD, DEST_EMAIL).")
-        return
+        raise ValueError("Missing environment variables (GMAIL_USER, GMAIL_APP_PASSWORD, DEST_EMAIL)")
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"SE Daily Briefing: {subject_file.split('/')[-1].replace('.md', '')}"
@@ -66,12 +65,9 @@ def send_email(subject_file, html_body):
 
     msg.attach(MIMEText(full_html, "html"))
 
-    try:
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-        server.starttls()
-        server.login(gmail_user, gmail_password)
-        server.sendmail(gmail_user, dest_email, msg.as_string())
-        server.quit()
-        print(f"Email sent successfully to {dest_email}")
-    except Exception as e:
-        print(f"Failed to send email: {e}")
+    server = smtplib.SMTP("smtp.gmail.com", 587)
+    server.starttls()
+    server.login(gmail_user, gmail_password)
+    server.sendmail(gmail_user, dest_email, msg.as_string())
+    server.quit()
+    print(f"Email sent successfully to {dest_email}")

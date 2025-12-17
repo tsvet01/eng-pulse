@@ -91,16 +91,4 @@ class UserService {
     prefs.dailyBriefingEnabled = enabled;
     await savePreferences(prefs);
   }
-
-  static Future<void> setPreferredTime(String time) async {
-    final prefs = getPreferences();
-    prefs.preferredTime = time;
-    await savePreferences(prefs);
-  }
-
-  static Future<void> setPreferredTopics(List<String> topics) async {
-    final prefs = getPreferences();
-    prefs.preferredTopics = topics;
-    await savePreferences(prefs);
-  }
 }
