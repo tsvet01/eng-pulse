@@ -65,9 +65,11 @@ def send_email(subject_file, html_body):
 
     msg.attach(MIMEText(full_html, "html"))
 
-    server = smtplib.SMTP("smtp.gmail.com", 587)
-    server.starttls()
-    server.login(gmail_user, gmail_password)
-    server.sendmail(gmail_user, dest_email, msg.as_string())
-    server.quit()
-    print(f"Email sent successfully to {dest_email}")
+    server = smtplib.SMTP("smtp.gmail.com", 587, timeout=30)
+    try:
+        server.starttls()
+        server.login(gmail_user, gmail_password)
+        server.sendmail(gmail_user, dest_email, msg.as_string())
+        print(f"Email sent successfully to {dest_email}")
+    finally:
+        server.quit()

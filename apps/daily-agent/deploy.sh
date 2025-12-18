@@ -7,9 +7,11 @@ REPO_NAME="agent-repo"
 IMAGE_NAME="se-daily-agent"
 SERVICE_NAME="se-daily-agent-job"
 
-# Load .env variables
+# Load .env variables (safely, ignoring comments and empty lines)
 if [ -f .env ]; then
-  export $(cat .env | xargs)
+  set -a
+  source .env
+  set +a
 fi
 
 if [ -z "$GEMINI_API_KEY" ]; then

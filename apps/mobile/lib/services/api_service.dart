@@ -13,7 +13,7 @@ class ApiService {
     // Check connectivity
     final isOnline = await ConnectivityService.checkConnectivity();
 
-    if (!isOnline || !forceRefresh && _shouldUseCachedData()) {
+    if (!isOnline || (!forceRefresh && _shouldUseCachedData())) {
       // Return cached data if offline or cache is fresh
       final cached = CacheService.getCachedSummaries();
       if (cached.isNotEmpty) {
