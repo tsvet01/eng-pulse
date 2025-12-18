@@ -1,5 +1,8 @@
 # Eng Pulse
 
+[![CI](https://github.com/tsvet01/eng-pulse/actions/workflows/ci.yml/badge.svg)](https://github.com/tsvet01/eng-pulse/actions/workflows/ci.yml)
+[![Deploy](https://github.com/tsvet01/eng-pulse/actions/workflows/deploy.yml/badge.svg)](https://github.com/tsvet01/eng-pulse/actions/workflows/deploy.yml)
+
 AI-powered daily engineering digest system that curates and delivers the best software engineering content.
 
 ## Overview

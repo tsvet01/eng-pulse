@@ -10,6 +10,9 @@ const MAX_RETRY_ELAPSED_SECS: u64 = 120;
 /// Default GCS bucket for storing agent data
 pub const DEFAULT_BUCKET: &str = "tsvet01-agent-brain";
 
+/// Default Gemini model to use
+pub const DEFAULT_MODEL: &str = "gemini-2.0-flash";
+
 // --- Shared Utilities ---
 
 /// Extract the domain/host from a URL string safely.
@@ -151,10 +154,13 @@ fn is_transient_error(err: &str) -> bool {
 }
 
 async fn call_gemini(client: &reqwest::Client, api_key: &str, text: String) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    // Get model from environment or use default
+    let model = std::env::var("GEMINI_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+
     // Note: API key in URL is required by Gemini API - we redact it in logs
     let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={}",
-        api_key
+        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+        model, api_key
     );
 
     let request = GeminiRequest {
@@ -300,5 +306,43 @@ mod tests {
         let response: GeminiResponse = serde_json::from_str(json).unwrap();
         assert!(response.candidates.is_none());
         assert!(response.error.is_none());
+    }
+
+    #[test]
+    fn test_extract_domain_valid_url() {
+        assert_eq!(extract_domain("https://example.com/path"), "example.com");
+        assert_eq!(extract_domain("http://blog.example.org/article?id=1"), "blog.example.org");
+        assert_eq!(extract_domain("https://sub.domain.co.uk/"), "sub.domain.co.uk");
+    }
+
+    #[test]
+    fn test_extract_domain_invalid_url() {
+        assert_eq!(extract_domain("not a url"), "unknown");
+        assert_eq!(extract_domain(""), "unknown");
+        assert_eq!(extract_domain("ftp://"), "unknown");
+    }
+
+    #[test]
+    fn test_source_config_serialization() {
+        let source = SourceConfig {
+            name: "Test Blog".to_string(),
+            source_type: "rss".to_string(),
+            url: "https://example.com/feed".to_string(),
+        };
+
+        let json = serde_json::to_string(&source).unwrap();
+        assert!(json.contains("Test Blog"));
+        assert!(json.contains("rss"));
+        assert!(json.contains("https://example.com/feed"));
+    }
+
+    #[test]
+    fn test_source_config_deserialization() {
+        let json = r#"{"name": "My Blog", "type": "rss", "url": "https://myblog.com/feed"}"#;
+        let source: SourceConfig = serde_json::from_str(json).unwrap();
+
+        assert_eq!(source.name, "My Blog");
+        assert_eq!(source.source_type, "rss");
+        assert_eq!(source.url, "https://myblog.com/feed");
     }
 }

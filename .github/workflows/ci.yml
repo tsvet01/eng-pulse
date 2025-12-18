@@ -55,6 +55,15 @@ jobs:
     - name: Test Explorer Agent
       run: cd apps/explorer-agent && cargo test --verbose
 
+    - name: Install cargo-tarpaulin
+      run: cargo install cargo-tarpaulin || true
+
+    - name: Generate coverage report
+      run: |
+        cd libs/gemini-engine && cargo tarpaulin --out Xml --output-dir coverage
+        cd ../apps/daily-agent && cargo tarpaulin --out Xml --output-dir coverage
+      continue-on-error: true
+
   python-check:
     runs-on: ubuntu-latest
     steps:
