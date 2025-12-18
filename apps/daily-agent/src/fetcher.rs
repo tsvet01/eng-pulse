@@ -144,3 +144,41 @@ async fn fetch_hackernews(source: &SourceConfig, client: &reqwest::Client) -> Re
 
     Ok(articles)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_article_struct() {
+        let article = Article {
+            title: "Test Article".to_string(),
+            url: "https://example.com/article".to_string(),
+            source: "Test Source".to_string(),
+            published_at: Utc::now(),
+        };
+
+        assert_eq!(article.title, "Test Article");
+        assert_eq!(article.url, "https://example.com/article");
+        assert_eq!(article.source, "Test Source");
+    }
+
+    #[test]
+    fn test_source_config_unknown_type() {
+        let source = SourceConfig {
+            name: "Unknown".to_string(),
+            source_type: "unknown_type".to_string(),
+            url: "https://example.com".to_string(),
+        };
+
+        // We can't easily test async fetch_from_source without a mock client,
+        // but we can verify the source config is constructed correctly
+        assert_eq!(source.source_type, "unknown_type");
+    }
+
+    #[test]
+    fn test_create_http_client() {
+        let client = create_http_client();
+        assert!(client.is_ok(), "HTTP client should be created successfully");
+    }
+}

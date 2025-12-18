@@ -1,6 +1,23 @@
 mod fetcher;
 
 use serde::{Deserialize, Serialize};
+
+/// Parse an index from Gemini's response, extracting the first contiguous digit sequence.
+/// Returns None if no valid number is found.
+fn parse_selection_index(response: &str) -> Option<usize> {
+    let digits: String = response
+        .trim()
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit())
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+
+    if digits.is_empty() {
+        None
+    } else {
+        digits.parse().ok()
+    }
+}
 use readability::extractor;
 use std::io::Cursor;
 use crate::fetcher::{SourceConfig, Article};
@@ -104,17 +121,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let selected_index = call_gemini_with_retry(&http_client, &gemini_api_key, selection_prompt).await?;
 
-    // Parse the index - extract first contiguous digit sequence only
-    let index: usize = selected_index
-        .trim()
-        .chars()
-        .skip_while(|c| !c.is_ascii_digit())
-        .take_while(|c| c.is_ascii_digit())
-        .collect::<String>()
-        .parse()
-        .map_err(|e| {
-            format!("Failed to parse Gemini selection '{}': {}", selected_index.trim(), e)
-        })?;
+    // Parse the index using our helper function
+    let index = parse_selection_index(&selected_index).ok_or_else(|| {
+        format!("Failed to parse Gemini selection '{}': no valid number found", selected_index.trim())
+    })?;
 
     // Validate index is within bounds (all_articles cannot be empty - we return early above)
     let safe_index = if index >= all_articles.len() {
@@ -254,4 +264,45 @@ async fn fetch_article_content(client: &reqwest::Client, url: &str) -> Result<St
         .map_err(|e| format!("Readability extract error: {:?}", e))?;
 
     Ok(product.text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_selection_index_simple() {
+        assert_eq!(parse_selection_index("5"), Some(5));
+        assert_eq!(parse_selection_index("0"), Some(0));
+        assert_eq!(parse_selection_index("42"), Some(42));
+    }
+
+    #[test]
+    fn test_parse_selection_index_with_whitespace() {
+        assert_eq!(parse_selection_index("  3  "), Some(3));
+        assert_eq!(parse_selection_index("\n7\n"), Some(7));
+        assert_eq!(parse_selection_index("\t12"), Some(12));
+    }
+
+    #[test]
+    fn test_parse_selection_index_with_text() {
+        // Gemini sometimes returns text before/after the number
+        assert_eq!(parse_selection_index("I choose 5"), Some(5));
+        assert_eq!(parse_selection_index("Article 3 is best"), Some(3));
+        assert_eq!(parse_selection_index("The answer is: 7."), Some(7));
+    }
+
+    #[test]
+    fn test_parse_selection_index_invalid() {
+        assert_eq!(parse_selection_index("no number here"), None);
+        assert_eq!(parse_selection_index(""), None);
+        assert_eq!(parse_selection_index("   "), None);
+    }
+
+    #[test]
+    fn test_parse_selection_index_first_number_only() {
+        // Should only get the first contiguous digit sequence
+        assert_eq!(parse_selection_index("3 and 5"), Some(3));
+        assert_eq!(parse_selection_index("article 2, not 7"), Some(2));
+    }
 }

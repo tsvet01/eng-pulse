@@ -6,8 +6,12 @@ import 'cache_service.dart';
 import 'connectivity_service.dart';
 
 class ApiService {
-  static const String manifestUrl =
-      'https://storage.googleapis.com/tsvet01-agent-brain/manifest.json';
+  /// GCS bucket name - can be overridden for testing or different environments
+  static const String defaultBucket = 'tsvet01-agent-brain';
+
+  /// Constructs the manifest URL from bucket name
+  static String get manifestUrl =>
+      'https://storage.googleapis.com/$defaultBucket/manifest.json';
 
   Future<List<CachedSummary>> fetchSummaries({bool forceRefresh = false}) async {
     // Check connectivity
