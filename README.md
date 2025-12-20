@@ -91,11 +91,12 @@ flutter run
 
 ```
 bucket/
-├── sources.json           # List of RSS/blog sources
+├── config/
+│   └── sources.json       # List of RSS/blog sources
 ├── user_candidates.json   # User-submitted source candidates
 ├── manifest.json          # Article manifest for mobile app
 └── summaries/
-    └── YYYY-MM-DD.md     # Daily summaries
+    └── YYYY-MM-DD.md      # Daily summaries
 ```
 
 ## Deployment
@@ -133,7 +134,8 @@ For local development, set these environment variables:
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `GEMINI_API_KEY` | Google Gemini API key | Yes |
-| `GCS_BUCKET` | GCS bucket name | Yes (default: tsvet01-agent-brain) |
+| `GCS_BUCKET` | GCS bucket name | No (default: tsvet01-agent-brain) |
+| `GEMINI_MODEL` | Gemini model to use | No (default: gemini-2.0-flash) |
 | `GMAIL_USER` | Gmail address for notifications | Notifier only |
 | `GMAIL_APP_PASSWORD` | Gmail app password | Notifier only |
 | `DEST_EMAIL` | Notification recipient | Notifier only |

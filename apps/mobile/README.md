@@ -6,31 +6,44 @@ Flutter mobile app for viewing AI-curated daily software engineering summaries.
 
 ## Features
 
-- **Daily Summaries**: View AI-generated article summaries
+- **Daily Summaries**: View AI-generated article summaries with full markdown rendering
 - **Offline Support**: Local caching with Hive for offline reading
-- **Push Notifications**: Firebase Cloud Messaging for new summary alerts
+- **Push Notifications**: Optional Firebase Cloud Messaging for new summary alerts
 - **Pull to Refresh**: Manual refresh for latest content
-- **History**: Browse past summaries by date
+- **Reading History**: Track read articles with visual indicators
+- **Dark Mode**: System-aware dark/light theme
+- **Share**: Share summaries with other apps
+- **Original Links**: Direct links to source articles
 
 ## Architecture
 
 ```
 lib/
-├── main.dart                # App entry point
-├── firebase_options.dart    # Firebase configuration
+├── main.dart                    # App entry point
+├── firebase_options.dart        # Firebase configuration (optional)
 ├── models/
-│   └── summary.dart         # Summary data model
+│   ├── summary.dart             # API response model
+│   ├── cached_summary.dart      # Local cache model
+│   └── reading_history.dart     # Reading history model
 ├── screens/
-│   ├── splash_screen.dart   # Initial loading screen
-│   └── summary_screen.dart  # Main summary display
+│   ├── splash_screen.dart       # Initial loading screen
+│   ├── home_screen.dart         # Main summary list
+│   ├── detail_screen.dart       # Full article view
+│   └── settings_screen.dart     # App settings
 ├── services/
-│   ├── api_service.dart     # GCS API client
-│   ├── cache_service.dart   # Hive local storage
-│   └── notification_service.dart # FCM integration
+│   ├── api_service.dart         # GCS API client
+│   ├── cache_service.dart       # Hive local storage
+│   ├── connectivity_service.dart # Network status
+│   ├── notification_service.dart # FCM integration
+│   └── user_service.dart        # User preferences & history
 ├── theme/
-│   └── app_theme.dart       # App theming and styles
+│   └── app_theme.dart           # App theming and styles
 └── widgets/
-    └── summary_card.dart    # Reusable summary card widget
+    ├── summary_card.dart        # Summary list card
+    ├── empty_state.dart         # Empty/error states
+    ├── feedback_widget.dart     # Article feedback
+    ├── offline_banner.dart      # Offline indicator
+    └── shimmer_loading.dart     # Loading placeholder
 ```
 
 ## Setup
@@ -39,7 +52,8 @@ lib/
 
 - Flutter 3.x+
 - Dart 3.x+
-- iOS/Android development environment
+- Xcode (for iOS/macOS)
+- Android Studio (for Android)
 
 ### Installation
 
@@ -47,25 +61,54 @@ lib/
 # Install dependencies
 flutter pub get
 
-# Run on device/emulator
+# Run on connected device/emulator
 flutter run
+
+# Run on specific platform
+flutter run -d macos
+flutter run -d chrome
+flutter run -d <device-id>  # Use `flutter devices` to list
 ```
+
+### iOS Device Setup
+
+To run on a physical iPhone:
+
+1. Connect iPhone via USB
+2. Enable Developer Mode: **Settings → Privacy & Security → Developer Mode**
+3. Open `ios/Runner.xcworkspace` in Xcode
+4. Select your Apple Developer team in **Signing & Capabilities**
+5. Run: `flutter run -d <device-id> --release`
 
 ### Firebase Setup (Optional)
 
-For push notifications:
+Firebase is **optional**. The app works without it (push notifications disabled).
 
-1. Create Firebase project
-2. Add `google-services.json` (Android) and `GoogleService-Info.plist` (iOS)
-3. Enable Cloud Messaging in Firebase Console
+To enable push notifications:
+
+```bash
+# Install FlutterFire CLI
+dart pub global activate flutterfire_cli
+
+# Configure Firebase (requires Firebase project)
+flutterfire configure --project=YOUR_PROJECT_ID
+```
+
+This generates `firebase_options.dart` with your credentials.
 
 ## Configuration
 
-The app fetches data from a GCS bucket. Configure the endpoint in `lib/services/api_service.dart`:
+### API Endpoint
+
+The app fetches data from a GCS bucket. Configure in `lib/services/api_service.dart`:
 
 ```dart
-static const _manifestUrl = 'https://storage.googleapis.com/YOUR_BUCKET/manifest.json';
+static const String defaultBucket = 'your-bucket-name';
 ```
+
+### UTF-8 Support
+
+The app properly handles UTF-8 encoded content, including non-ASCII characters (Cyrillic, CJK, etc.) in article titles and content.
 
 ## Data Flow
 
@@ -73,29 +116,32 @@ static const _manifestUrl = 'https://storage.googleapis.com/YOUR_BUCKET/manifest
 GCS Bucket                    Mobile App
     │                             │
     │  manifest.json              │
+    │  (article list)             │
     │────────────────────────────▶│
+    │                             │  ┌─────────┐
+    │  summaries/YYYY-MM-DD.md    │  │  Hive   │
+    │  (full content)             │──│  Cache  │
+    │────────────────────────────▶│  └─────────┘
     │                             │
-    │  summaries/YYYY-MM-DD.md    │
-    │────────────────────────────▶│
-    │                             │
-    │                        ┌────┴────┐
-    │                        │  Hive   │
-    │                        │  Cache  │
-    │                        └─────────┘
 ```
 
 ## Services
 
 ### ApiService
 
-Static service for fetching data from GCS:
+Fetches data from GCS with caching:
 
 ```dart
-// Fetch manifest
-final manifest = await ApiService.fetchManifest();
+final apiService = ApiService();
 
-// Fetch summary content
-final content = await ApiService.fetchSummary(url);
+// Fetch manifest with summaries
+final summaries = await apiService.fetchSummaries();
+
+// Fetch full markdown content
+final content = await apiService.fetchMarkdown(url);
+
+// Pre-cache for offline
+await apiService.preCacheContent(summaries);
 ```
 
 ### CacheService
@@ -107,22 +153,42 @@ Hive-based local storage:
 await CacheService.init();
 
 // Cache summaries
-CacheService.cacheSummaries(summaries);
+await CacheService.cacheSummaries(summaries);
 
 // Retrieve cached
 final cached = CacheService.getCachedSummaries();
+
+// Check content cache
+final hasContent = CacheService.hasContent(url);
 ```
 
 ### NotificationService
 
-Firebase Cloud Messaging integration:
+Firebase Cloud Messaging (optional):
+
+```dart
+// Check if available (Firebase configured)
+if (NotificationService.isAvailable) {
+  await NotificationService.subscribeToTopic('daily_briefings');
+}
+
+// Check notification status
+final enabled = await NotificationService.areNotificationsEnabled();
+```
+
+### UserService
+
+Reading history and preferences:
 
 ```dart
 // Initialize
-await NotificationService.init();
+await UserService.init();
 
-// Request permissions
-await NotificationService.requestPermission();
+// Track reading
+await UserService.addToHistory(summary);
+
+// Check if read
+final isRead = UserService.isRead(articleUrl);
 ```
 
 ## Testing
@@ -144,6 +210,7 @@ dart format --set-exit-if-changed .
 
 ```bash
 flutter build apk --release
+flutter build appbundle --release  # For Play Store
 ```
 
 ### iOS
@@ -152,20 +219,39 @@ flutter build apk --release
 flutter build ios --release
 ```
 
+### macOS
+
+```bash
+flutter build macos --release
+```
+
 ## Dependencies
 
 | Package | Purpose |
 |---------|---------|
 | `http` | HTTP client |
 | `hive` / `hive_flutter` | Local storage |
-| `firebase_messaging` | Push notifications |
 | `firebase_core` | Firebase initialization |
+| `firebase_messaging` | Push notifications |
+| `flutter_local_notifications` | Local notification display |
 | `flutter_markdown` | Markdown rendering |
+| `connectivity_plus` | Network status |
+| `share_plus` | Share functionality |
+| `url_launcher` | Open URLs |
 
-## Known Issues
+## Platform Notes
 
-- FCM token registration not fully implemented (see issue #7)
-- Widget tests need expansion (see issue #13)
+### macOS
+
+Requires network entitlements in `macos/Runner/*.entitlements`:
+```xml
+<key>com.apple.security.network.client</key>
+<true/>
+```
+
+### iOS
+
+Requires proper signing with Apple Developer account for physical devices.
 
 ## Related Components
 

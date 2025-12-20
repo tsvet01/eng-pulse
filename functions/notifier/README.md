@@ -9,7 +9,7 @@ Python Cloud Function that sends email notifications when new summaries are publ
 1. **Triggers** on GCS object creation in the bucket
 2. **Filters** to only process files in `summaries/` folder ending with `.md`
 3. **Downloads** the markdown content
-4. **Converts** markdown to HTML
+4. **Converts** markdown to HTML with sanitization (XSS protection)
 5. **Sends** styled email to configured recipient
 
 ## Usage
@@ -83,10 +83,17 @@ Only processes files matching:
 ## Dependencies
 
 ```
-functions-framework==3.*
+functions-framework==3.5.0
 google-cloud-storage==2.14.0
-markdown==3.5.1
+markdown==3.5.2
+bleach==6.1.0
 ```
+
+### Security
+
+- **HTML Sanitization**: Uses `bleach` to sanitize markdown-generated HTML, preventing XSS attacks
+- **Input Validation**: Validates all inputs before processing
+- **SMTP Timeout**: 30-second timeout prevents hanging connections
 
 ## Error Handling
 

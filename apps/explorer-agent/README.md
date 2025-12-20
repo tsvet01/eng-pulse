@@ -41,6 +41,7 @@ cargo run
 |----------|----------|---------|-------------|
 | `GEMINI_API_KEY` | Yes | - | Google Gemini API key |
 | `GCS_BUCKET` | No | `tsvet01-agent-brain` | GCS bucket for storage |
+| `GEMINI_MODEL` | No | `gemini-2.0-flash` | Gemini model to use |
 | `RUST_LOG` | No | `info` | Log level |
 
 ### Constants

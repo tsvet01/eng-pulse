@@ -84,6 +84,13 @@ await CacheService.init();
 final summaries = CacheService.getCachedSummaries();
 ```
 
+### Firebase (Optional)
+
+Firebase is optional in the mobile app. When not configured:
+- App runs normally without push notifications
+- `NotificationService.isAvailable` returns `false`
+- Use `flutterfire configure` to enable Firebase
+
 ## Common Tasks
 
 ### Adding a New Source Type
@@ -146,7 +153,7 @@ cd apps/mobile && flutter run
 
 Active issues to be aware of:
 
-1. **#6** - Make Gemini model configurable
+1. ~~**#6** - Make Gemini model configurable~~ (RESOLVED: GEMINI_MODEL env var)
 2. **#7** - Complete FCM token registration
 3. **#8** - Add observability infrastructure
 4. **#9** - Replace :latest Docker tags with versioned tags
@@ -173,7 +180,8 @@ Required for local development:
 ```bash
 # Rust agents
 GEMINI_API_KEY=your_key
-GCS_BUCKET=your_bucket  # Optional, has default
+GCS_BUCKET=your_bucket    # Optional, default: tsvet01-agent-brain
+GEMINI_MODEL=gemini-2.0-flash  # Optional, default: gemini-2.0-flash
 
 # Python notifier
 GMAIL_USER=email
