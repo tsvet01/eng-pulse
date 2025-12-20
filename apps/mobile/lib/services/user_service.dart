@@ -91,4 +91,14 @@ class UserService {
     prefs.dailyBriefingEnabled = enabled;
     await savePreferences(prefs);
   }
+
+  static String getSelectedModel() {
+    return getPreferences().selectedModel;
+  }
+
+  static Future<void> setSelectedModel(String model) async {
+    final prefs = getPreferences();
+    prefs.selectedModel = model;
+    await savePreferences(prefs);
+  }
 }

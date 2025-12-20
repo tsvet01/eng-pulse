@@ -28,7 +28,10 @@ use google_cloud_storage::http::objects::upload::{UploadObjectRequest, UploadTyp
 use chrono::Utc;
 use tracing::{info, warn, error, debug, instrument};
 use std::time::Duration;
-use gemini_engine::{call_gemini_with_retry, init_logging, extract_domain, DEFAULT_BUCKET};
+use gemini_engine::{
+    call_llm_with_retry, init_logging, extract_domain,
+    DEFAULT_BUCKET, LlmProvider, get_api_key_env_var,
+};
 
 // --- Configuration Constants ---
 const HTTP_TIMEOUT_SECS: u64 = 60;
@@ -44,6 +47,26 @@ struct ManifestEntry {
     summary_snippet: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     original_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+}
+
+/// Get list of enabled LLM providers based on available API keys
+fn get_enabled_providers() -> Vec<(LlmProvider, String)> {
+    let providers = [LlmProvider::Gemini, LlmProvider::OpenAI, LlmProvider::Claude];
+    let mut enabled = Vec::new();
+
+    for provider in providers {
+        let env_var = get_api_key_env_var(provider);
+        if let Ok(key) = std::env::var(env_var) {
+            if !key.is_empty() {
+                info!(provider = %provider.as_str(), "Provider enabled");
+                enabled.push((provider, key));
+            }
+        }
+    }
+
+    enabled
 }
 
 // --- Main ---
@@ -53,13 +76,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     dotenvy::dotenv().ok();
     init_logging();
 
-    let gemini_api_key = std::env::var("GEMINI_API_KEY").map_err(|_| {
-        error!("GEMINI_API_KEY environment variable not set");
-        "GEMINI_API_KEY environment variable not set"
-    })?;
     let bucket_name = std::env::var("GCS_BUCKET").unwrap_or_else(|_| DEFAULT_BUCKET.to_string());
 
-    info!(bucket = %bucket_name, "Starting SE Daily Agent");
+    // Get enabled providers
+    let enabled_providers = get_enabled_providers();
+    if enabled_providers.is_empty() {
+        error!("No LLM providers configured. Set at least one of: GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY");
+        return Err("No LLM providers configured".into());
+    }
+
+    info!(
+        bucket = %bucket_name,
+        providers = ?enabled_providers.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(),
+        "Starting SE Daily Agent"
+    );
+
+    // Use first provider for article selection (prefer Gemini if available)
+    let (selection_provider, selection_key) = enabled_providers.first().unwrap().clone();
 
     // 0. Initialize shared HTTP client (reused for connection pooling)
     let http_client = reqwest::Client::builder()
@@ -106,8 +139,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     info!(total_articles = all_articles.len(), "Total articles collected");
 
-    // 3. Selection
-    info!("Asking Gemini to select best article");
+    // 3. Selection (using first available provider)
+    info!(provider = %selection_provider.as_str(), "Asking LLM to select best article");
 
     let mut articles_text = String::new();
     for (i, article) in all_articles.iter().enumerate() {
@@ -119,11 +152,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         articles_text
     );
 
-    let selected_index = call_gemini_with_retry(&http_client, &gemini_api_key, selection_prompt).await?;
+    let selected_index = call_llm_with_retry(&http_client, selection_provider, &selection_key, selection_prompt).await?;
 
     // Parse the index using our helper function
     let index = parse_selection_index(&selected_index).ok_or_else(|| {
-        format!("Failed to parse Gemini selection '{}': no valid number found", selected_index.trim())
+        format!("Failed to parse LLM selection '{}': no valid number found", selected_index.trim())
     })?;
 
     // Validate index is within bounds (all_articles cannot be empty - we return early above)
@@ -146,8 +179,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "Selected best article"
     );
 
-    // 4. Summarize
-    info!("Scraping and summarizing article");
+    // 4. Fetch article content once (shared across all providers)
+    info!("Scraping article content");
 
     let article_text = match fetch_article_content(&http_client, &best_article.url).await {
         Ok(content) => content,
@@ -166,37 +199,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         best_article.source, best_article.title, truncated_text
     );
 
-    let summary = call_gemini_with_retry(&http_client, &gemini_api_key, summary_prompt).await?;
-
-    info!("Summary generated successfully");
-    debug!(summary_length = summary.len(), "Summary details");
-
-    // Create snippet BEFORE moving summary
-    let summary_snippet: String = summary.chars().take(SUMMARY_SNIPPET_CHARS).collect();
-
-    // 5. Upload Summary to GCS
+    // 5. Generate summaries with each enabled provider
     let today = Utc::now().format("%Y-%m-%d").to_string();
-    let object_name = format!("summaries/{}.md", today);
-    let summary_bytes = summary.into_bytes();
+    let mut new_manifest_entries: Vec<ManifestEntry> = Vec::new();
 
-    info!(object = %object_name, "Uploading summary to GCS");
+    for (provider, api_key) in &enabled_providers {
+        info!(provider = %provider.as_str(), "Generating summary");
 
-    let upload_type = UploadType::Simple(Media::new(object_name.clone()));
-    let _uploaded = gcs_client.upload_object(
-        &UploadObjectRequest {
-            bucket: bucket_name.to_string(),
-            ..Default::default()
-        },
-        summary_bytes,
-        &upload_type
-    ).await?;
+        match call_llm_with_retry(&http_client, *provider, api_key, summary_prompt.clone()).await {
+            Ok(summary) => {
+                info!(provider = %provider.as_str(), "Summary generated successfully");
+                debug!(provider = %provider.as_str(), summary_length = summary.len(), "Summary details");
 
-    info!("Summary upload complete");
+                // Create snippet BEFORE moving summary
+                let summary_snippet: String = summary.chars().take(SUMMARY_SNIPPET_CHARS).collect();
+
+                // Upload Summary to GCS (provider-specific path)
+                let object_name = format!("summaries/{}/{}.md", provider.as_str(), today);
+                let summary_bytes = summary.into_bytes();
+
+                info!(provider = %provider.as_str(), object = %object_name, "Uploading summary to GCS");
+
+                let upload_type = UploadType::Simple(Media::new(object_name.clone()));
+                match gcs_client.upload_object(
+                    &UploadObjectRequest {
+                        bucket: bucket_name.to_string(),
+                        ..Default::default()
+                    },
+                    summary_bytes,
+                    &upload_type
+                ).await {
+                    Ok(_) => {
+                        info!(provider = %provider.as_str(), "Summary upload complete");
+
+                        let public_url = format!("https://storage.googleapis.com/{}/{}", bucket_name, object_name);
+                        new_manifest_entries.push(ManifestEntry {
+                            date: today.clone(),
+                            url: public_url,
+                            title: best_article.title.clone(),
+                            summary_snippet,
+                            original_url: Some(best_article.url.clone()),
+                            model: Some(provider.as_str().to_string()),
+                        });
+                    }
+                    Err(e) => {
+                        error!(provider = %provider.as_str(), error = %e, "Failed to upload summary");
+                    }
+                }
+            }
+            Err(e) => {
+                error!(provider = %provider.as_str(), error = %e, "Failed to generate summary");
+            }
+        }
+    }
+
+    if new_manifest_entries.is_empty() {
+        error!("No summaries were generated successfully");
+        return Err("No summaries generated".into());
+    }
 
     // 6. Update Manifest
     info!("Updating manifest.json");
     let manifest_obj_name = "manifest.json";
-    let public_url = format!("https://storage.googleapis.com/{}/{}", bucket_name, object_name);
 
     // Download existing manifest
     let mut manifest: Vec<ManifestEntry> = match gcs_client.download_object(
@@ -211,7 +275,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             serde_json::from_slice(&data).map_err(|e| {
                 error!(error = %e, "Failed to parse existing manifest.json - file may be corrupted");
                 e
-            })? 
+            })?
         },
         Err(e) if e.to_string().contains("No such object") => {
             info!("No existing manifest.json found, creating new one");
@@ -222,17 +286,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     };
 
-    // Remove existing entry for today if any (to update it)
+    // Remove existing entries for today (all models)
     manifest.retain(|e| e.date != today);
 
-    // Add new entry
-    manifest.insert(0, ManifestEntry {
-        date: today.clone(),
-        url: public_url,
-        title: best_article.title.clone(),
-        summary_snippet,
-        original_url: Some(best_article.url.clone()),
-    });
+    // Add new entries at the beginning
+    for entry in new_manifest_entries.into_iter().rev() {
+        manifest.insert(0, entry);
+    }
 
     // Upload manifest
     let manifest_json = serde_json::to_vec_pretty(&manifest)?;

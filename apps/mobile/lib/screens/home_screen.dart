@@ -2,9 +2,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/cached_summary.dart';
+import '../models/summary.dart';
 import '../services/api_service.dart';
 import '../services/connectivity_service.dart';
 import '../services/cache_service.dart';
+import '../services/user_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/summary_card.dart';
 import '../widgets/shimmer_loading.dart';
@@ -26,11 +28,14 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isRefreshing = false;
   bool _isOnline = true;
   StreamSubscription<bool>? _connectivitySubscription;
+  late LlmModel _selectedModel;
+  List<LlmModel> _availableModels = [];
 
   @override
   void initState() {
     super.initState();
     _isOnline = ConnectivityService.isOnline;
+    _selectedModel = LlmModel.fromId(UserService.getSelectedModel());
     _summariesFuture = _loadSummaries();
 
     // Listen to connectivity changes
@@ -53,7 +58,30 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<List<CachedSummary>> _loadSummaries() async {
-    final summaries = await _apiService.fetchSummaries();
+    final allSummaries = await _apiService.fetchSummaries();
+
+    // Determine available models from the data
+    final modelIds = allSummaries
+        .map((s) => s.model)
+        .whereType<String>()
+        .toSet();
+
+    setState(() {
+      _availableModels = modelIds.isEmpty
+          ? [LlmModel.gemini] // Default if no model field (backwards compat)
+          : modelIds.map((id) => LlmModel.fromId(id)).toList();
+
+      // Ensure selected model is available
+      if (!_availableModels.contains(_selectedModel) && _availableModels.isNotEmpty) {
+        _selectedModel = _availableModels.first;
+      }
+    });
+
+    // Filter by selected model (or show all if no model field)
+    final summaries = allSummaries.where((s) {
+      if (s.model == null) return true; // Backwards compat
+      return s.model == _selectedModel.id;
+    }).toList();
 
     // Pre-cache content for offline reading in background
     if (ConnectivityService.isOnline && summaries.isNotEmpty) {
@@ -137,6 +165,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         ],
                       ),
                       actions: [
+                        // Model selector (only show if multiple models available)
+                        if (_availableModels.length > 1)
+                          _buildModelSelector(context),
                         IconButton(
                           icon: AnimatedRotation(
                             turns: _isRefreshing ? 1 : 0,
@@ -200,6 +231,51 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildModelSelector(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: (isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple)
+            .withAlpha(25),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<LlmModel>(
+          value: _selectedModel,
+          icon: Icon(
+            Icons.expand_more_rounded,
+            size: 20,
+            color: isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple,
+          ),
+          style: TextStyle(
+            color: isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+          dropdownColor: isDark ? AppTheme.darkSurface : AppTheme.lightSurface,
+          items: _availableModels.map((model) {
+            return DropdownMenuItem(
+              value: model,
+              child: Text(model.displayName),
+            );
+          }).toList(),
+          onChanged: (model) async {
+            if (model != null && model != _selectedModel) {
+              await UserService.setSelectedModel(model.id);
+              setState(() {
+                _selectedModel = model;
+                _summariesFuture = _loadSummaries();
+              });
+            }
+          },
         ),
       ),
     );

@@ -48,6 +48,7 @@ class ApiService {
             cachedContent: CacheService.getCachedContent(summary.url),
             lastUpdated: DateTime.now(),
             originalUrl: summary.originalUrl,
+            model: summary.model,
           );
         }).toList();
 
