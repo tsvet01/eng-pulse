@@ -13,14 +13,16 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 }
 
 class NotificationService {
-  static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
+  static FirebaseMessaging? _messaging;
   static final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
 
   static bool _initialized = false;
+  static bool _firebaseAvailable = false;
   static String? _fcmToken;
 
   static String? get fcmToken => _fcmToken;
+  static bool get isAvailable => _firebaseAvailable;
 
   /// Initialize notification service
   /// Call this after Firebase.initializeApp()
@@ -28,6 +30,9 @@ class NotificationService {
     if (_initialized) return;
 
     try {
+      _messaging = FirebaseMessaging.instance;
+      _firebaseAvailable = true;
+
       // Set background message handler
       FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
@@ -41,7 +46,7 @@ class NotificationService {
       await _getToken();
 
       // Listen for token refresh
-      _messaging.onTokenRefresh.listen((token) {
+      _messaging!.onTokenRefresh.listen((token) {
         _fcmToken = token;
         debugPrint('FCM Token refreshed: $token');
         // TODO: Send new token to your server
@@ -54,7 +59,7 @@ class NotificationService {
       FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
 
       // Check if app was opened from a notification
-      final initialMessage = await _messaging.getInitialMessage();
+      final initialMessage = await _messaging!.getInitialMessage();
       if (initialMessage != null) {
         _handleNotificationTap(initialMessage);
       }
@@ -63,11 +68,12 @@ class NotificationService {
       debugPrint('NotificationService initialized');
     } catch (e) {
       debugPrint('Failed to initialize NotificationService: $e');
+      _firebaseAvailable = false;
     }
   }
 
   static Future<void> _requestPermission() async {
-    final settings = await _messaging.requestPermission(
+    final settings = await _messaging!.requestPermission(
       alert: true,
       announcement: false,
       badge: true,
@@ -122,7 +128,7 @@ class NotificationService {
 
   static Future<void> _getToken() async {
     try {
-      _fcmToken = await _messaging.getToken();
+      _fcmToken = await _messaging!.getToken();
       debugPrint('FCM Token: $_fcmToken');
       // TODO: Send token to your server for push notifications
     } catch (e) {
@@ -185,8 +191,9 @@ class NotificationService {
 
   /// Subscribe to a topic
   static Future<void> subscribeToTopic(String topic) async {
+    if (!_firebaseAvailable || _messaging == null) return;
     try {
-      await _messaging.subscribeToTopic(topic);
+      await _messaging!.subscribeToTopic(topic);
       debugPrint('Subscribed to topic: $topic');
     } catch (e) {
       debugPrint('Failed to subscribe to topic: $e');
@@ -195,8 +202,9 @@ class NotificationService {
 
   /// Unsubscribe from a topic
   static Future<void> unsubscribeFromTopic(String topic) async {
+    if (!_firebaseAvailable || _messaging == null) return;
     try {
-      await _messaging.unsubscribeFromTopic(topic);
+      await _messaging!.unsubscribeFromTopic(topic);
       debugPrint('Unsubscribed from topic: $topic');
     } catch (e) {
       debugPrint('Failed to unsubscribe from topic: $e');
@@ -205,7 +213,13 @@ class NotificationService {
 
   /// Check if notifications are enabled
   static Future<bool> areNotificationsEnabled() async {
-    final settings = await _messaging.getNotificationSettings();
-    return settings.authorizationStatus == AuthorizationStatus.authorized;
+    if (!_firebaseAvailable || _messaging == null) return false;
+    try {
+      final settings = await _messaging!.getNotificationSettings();
+      return settings.authorizationStatus == AuthorizationStatus.authorized;
+    } catch (e) {
+      debugPrint('Failed to check notification settings: $e');
+      return false;
+    }
   }
 }

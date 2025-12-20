@@ -17,6 +17,12 @@ import 'package:flutter/foundation.dart'
 /// IMPORTANT: Run `flutterfire configure` to replace this placeholder
 /// with your actual Firebase configuration.
 class DefaultFirebaseOptions {
+  /// Returns true if Firebase is properly configured (not using placeholders)
+  static bool get isConfigured {
+    // Check if any platform config uses placeholder values
+    return !ios.apiKey.contains('PLACEHOLDER');
+  }
+
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
       return web;

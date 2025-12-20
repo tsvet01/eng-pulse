@@ -12,20 +12,22 @@ import 'services/user_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Firebase
-  // Note: This will fail until you run `flutterfire configure`
-  // Comment out Firebase initialization if you haven't set up Firebase yet
-  try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-    // Initialize notifications after Firebase
-    await NotificationService.init();
-    // Subscribe to daily briefings topic
-    await NotificationService.subscribeToTopic('daily_briefings');
-  } catch (e) {
-    debugPrint('Firebase initialization failed: $e');
-    debugPrint('Run `flutterfire configure` to set up Firebase');
+  // Initialize Firebase (only if properly configured)
+  if (DefaultFirebaseOptions.isConfigured) {
+    try {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+      // Initialize notifications after Firebase
+      await NotificationService.init();
+      // Subscribe to daily briefings topic
+      await NotificationService.subscribeToTopic('daily_briefings');
+    } catch (e) {
+      debugPrint('Firebase initialization failed: $e');
+    }
+  } else {
+    debugPrint('Firebase not configured - push notifications disabled');
+    debugPrint('Run `flutterfire configure` to enable push notifications');
   }
 
   // Initialize other services
