@@ -42,10 +42,14 @@ class UserPreferences extends HiveObject {
   @HiveField(3)
   List<String> preferredTopics;
 
+  @HiveField(4)
+  String selectedModel; // 'gemini', 'openai', 'claude'
+
   UserPreferences({
     this.notificationsEnabled = true,
     this.dailyBriefingEnabled = true,
     this.preferredTime = "08:00",
     List<String>? preferredTopics,
+    this.selectedModel = 'gemini',
   }) : preferredTopics = preferredTopics ?? [];
 }

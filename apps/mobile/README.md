@@ -206,20 +206,49 @@ dart format --set-exit-if-changed .
 
 ## Building
 
-### Android
+### Development Build with Version Tracking
+
+Use the build script to inject git commit and build time:
+
+```bash
+# Make executable (first time only)
+chmod +x build.sh
+
+# Debug build on connected device
+./build.sh
+
+# Specify device
+./build.sh -d <device-id>
+
+# Release build
+./build.sh --release
+
+# Combined
+./build.sh -d <device-id> --release
+```
+
+The script injects:
+- `GIT_COMMIT` - Short git commit hash (e.g., `3290cc2`)
+- `BUILD_TIME` - UTC build timestamp (e.g., `2025-01-15 14:30 UTC`)
+
+These appear in **Settings → About → Build**.
+
+### Production Builds
+
+#### Android
 
 ```bash
 flutter build apk --release
 flutter build appbundle --release  # For Play Store
 ```
 
-### iOS
+#### iOS
 
 ```bash
 flutter build ios --release
 ```
 
-### macOS
+#### macOS
 
 ```bash
 flutter build macos --release

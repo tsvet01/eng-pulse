@@ -67,13 +67,14 @@ class UserPreferencesAdapter extends TypeAdapter<UserPreferences> {
       dailyBriefingEnabled: fields[1] as bool,
       preferredTime: fields[2] as String,
       preferredTopics: (fields[3] as List?)?.cast<String>(),
+      selectedModel: fields[4] as String,
     );
   }
 
   @override
   void write(BinaryWriter writer, UserPreferences obj) {
     writer
-      ..writeByte(4)
+      ..writeByte(5)
       ..writeByte(0)
       ..write(obj.notificationsEnabled)
       ..writeByte(1)
@@ -81,7 +82,9 @@ class UserPreferencesAdapter extends TypeAdapter<UserPreferences> {
       ..writeByte(2)
       ..write(obj.preferredTime)
       ..writeByte(3)
-      ..write(obj.preferredTopics);
+      ..write(obj.preferredTopics)
+      ..writeByte(4)
+      ..write(obj.selectedModel);
   }
 
   @override

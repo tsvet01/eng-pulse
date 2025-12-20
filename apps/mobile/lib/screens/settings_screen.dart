@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/reading_history.dart';
 import '../services/user_service.dart';
 import '../services/notification_service.dart';
 import '../services/cache_service.dart';
+import '../services/build_info.dart';
 import '../theme/app_theme.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -120,9 +122,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildActionTile(
             context,
             title: 'About Eng Pulse',
-            subtitle: 'Version 1.0.0',
+            subtitle: BuildInfo.fullVersion,
             icon: Icons.info_outline_rounded,
             onTap: () => _showAboutDialog(context),
+          ),
+          _buildActionTile(
+            context,
+            title: 'Build',
+            subtitle: '${BuildInfo.gitCommit} (${BuildInfo.buildTime})',
+            icon: Icons.code_rounded,
+            onTap: () {
+              Clipboard.setData(ClipboardData(text: BuildInfo.gitCommit));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Commit hash copied')),
+              );
+            },
           ),
 
           const SizedBox(height: 32),
@@ -369,7 +383,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showAboutDialog(
       context: context,
       applicationName: 'Eng Pulse',
-      applicationVersion: '1.0.0',
+      applicationVersion: BuildInfo.fullVersion,
       applicationIcon: Container(
         width: 48,
         height: 48,
