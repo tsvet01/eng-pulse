@@ -77,9 +77,19 @@ Makes a request to the Gemini API with automatic retry on transient failures.
 
 ## Configuration
 
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GEMINI_MODEL` | `gemini-2.0-flash` | Gemini model to use |
+
+### Constants
+
 | Constant | Value | Description |
 |----------|-------|-------------|
 | `MAX_RETRY_ELAPSED_SECS` | 120 | Maximum total retry time |
+| `DEFAULT_MODEL` | `gemini-2.0-flash` | Default Gemini model |
+| `DEFAULT_BUCKET` | `tsvet01-agent-brain` | Default GCS bucket |
 
 ## Data Structures
 
@@ -106,7 +116,37 @@ pub struct GeminiResponse {
 
 ## Model
 
-Currently uses `gemini-2.0-flash` model. Model selection is hardcoded - see issue #6 for configurability.
+Uses `gemini-2.0-flash` by default. Override with `GEMINI_MODEL` environment variable:
+
+```bash
+export GEMINI_MODEL=gemini-1.5-pro
+```
+
+## Utility Functions
+
+### `init_logging()`
+
+Initializes structured logging with `tracing`:
+
+```rust
+use gemini_engine::init_logging;
+
+fn main() {
+    init_logging();
+    // Logs now available
+}
+```
+
+### `extract_domain(url)`
+
+Extracts domain from URL for logging:
+
+```rust
+use gemini_engine::extract_domain;
+
+let domain = extract_domain("https://blog.example.com/post/123");
+// Returns "blog.example.com"
+```
 
 ## Dependencies
 
