@@ -36,7 +36,8 @@ class ApiService {
           .timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
-        final List<dynamic> jsonList = json.decode(response.body);
+        // Decode as UTF-8 to properly handle non-ASCII characters (e.g., Cyrillic)
+        final List<dynamic> jsonList = json.decode(utf8.decode(response.bodyBytes));
         final summaries = jsonList.map((json) {
           final summary = Summary.fromJson(json);
           return CachedSummary(
