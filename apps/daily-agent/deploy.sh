@@ -7,6 +7,10 @@ REPO_NAME="agent-repo"
 IMAGE_NAME="se-daily-agent"
 SERVICE_NAME="se-daily-agent-job"
 
+# Always activate the correct project first
+echo "🔧 Activating GCP project: $PROJECT_ID"
+gcloud config set project $PROJECT_ID --quiet
+
 # Load .env variables (safely, ignoring comments and empty lines)
 if [ -f .env ]; then
   set -a
@@ -14,16 +18,21 @@ if [ -f .env ]; then
   set +a
 fi
 
+# Check required API keys
 if [ -z "$GEMINI_API_KEY" ]; then
   echo "Error: GEMINI_API_KEY is not set. Please check your .env file."
   exit 1
 fi
 
 echo "🚀 Starting deployment to GCP Project: $PROJECT_ID"
+echo "   Enabled providers:"
+echo "   - Gemini: ✓"
+[ -n "$OPENAI_API_KEY" ] && echo "   - OpenAI: ✓" || echo "   - OpenAI: (not configured)"
+[ -n "$ANTHROPIC_API_KEY" ] && echo "   - Claude: ✓" || echo "   - Claude: (not configured)"
 
 # 1. Enable APIs
-echo "Enable APIs..."
-gcloud services enable artifactregistry.googleapis.com run.googleapis.com \
+echo "Enabling APIs..."
+gcloud services enable artifactregistry.googleapis.com run.googleapis.com secretmanager.googleapis.com \
   --project $PROJECT_ID
 
 # 2. Configure Docker Auth
@@ -54,16 +63,51 @@ docker build --platform linux/amd64 -t $IMAGE_URI -f apps/daily-agent/Dockerfile
 cd apps/daily-agent
 docker push $IMAGE_URI
 
-# 5. Deploy Cloud Run Job (use Secret Manager for API key)
+# 5. Create/Update Secrets in Secret Manager
+echo "Setting up secrets..."
+
+# Helper function to create or update a secret
+create_or_update_secret() {
+  local secret_name=$1
+  local secret_value=$2
+
+  if [ -z "$secret_value" ]; then
+    return
+  fi
+
+  if gcloud secrets describe $secret_name --project $PROJECT_ID > /dev/null 2>&1; then
+    echo "   Updating secret: $secret_name"
+    echo -n "$secret_value" | gcloud secrets versions add $secret_name --data-file=- --project $PROJECT_ID
+  else
+    echo "   Creating secret: $secret_name"
+    echo -n "$secret_value" | gcloud secrets create $secret_name --data-file=- --project $PROJECT_ID
+  fi
+}
+
+create_or_update_secret "gemini-api-key" "$GEMINI_API_KEY"
+create_or_update_secret "openai-api-key" "$OPENAI_API_KEY"
+create_or_update_secret "anthropic-api-key" "$ANTHROPIC_API_KEY"
+
+# 6. Deploy Cloud Run Job with all configured secrets
 echo "Deploying Cloud Run Job..."
+
+# Build secrets flag dynamically based on available keys
+SECRETS_FLAG="GEMINI_API_KEY=gemini-api-key:latest"
+[ -n "$OPENAI_API_KEY" ] && SECRETS_FLAG="$SECRETS_FLAG,OPENAI_API_KEY=openai-api-key:latest"
+[ -n "$ANTHROPIC_API_KEY" ] && SECRETS_FLAG="$SECRETS_FLAG,ANTHROPIC_API_KEY=anthropic-api-key:latest"
+
 gcloud run jobs deploy $SERVICE_NAME \
   --image $IMAGE_URI \
   --region $REGION \
   --project $PROJECT_ID \
-  --set-secrets GEMINI_API_KEY=gemini-api-key:latest \
+  --set-secrets "$SECRETS_FLAG" \
   --max-retries 1 \
-  --task-timeout 5m
+  --task-timeout 10m
 
 echo "✅ Deployment Complete!"
-echo "You can run the job manually with:"
-echo "gcloud run jobs execute $SERVICE_NAME --region $REGION --project $PROJECT_ID"
+echo ""
+echo "Run the job manually with:"
+echo "  gcloud run jobs execute $SERVICE_NAME --region $REGION --project $PROJECT_ID"
+echo ""
+echo "View logs with:"
+echo "  gcloud run jobs executions list --job $SERVICE_NAME --region $REGION --project $PROJECT_ID"

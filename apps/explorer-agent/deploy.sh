@@ -7,6 +7,10 @@ REPO_NAME="agent-repo"
 IMAGE_NAME="se-explorer-agent"
 SERVICE_NAME="se-explorer-agent-job"
 
+# Always activate the correct project first
+echo "🔧 Activating GCP project: $PROJECT_ID"
+gcloud config set project $PROJECT_ID --quiet
+
 # Load .env variables (safely, ignoring comments and empty lines)
 if [ -f .env ]; then
   set -a
