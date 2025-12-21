@@ -25,13 +25,14 @@ class CachedSummaryAdapter extends TypeAdapter<CachedSummary> {
       lastUpdated: fields[5] as DateTime?,
       originalUrl: fields[6] as String?,
       model: fields[7] as String?,
+      selectedBy: fields[8] as String?,
     );
   }
 
   @override
   void write(BinaryWriter writer, CachedSummary obj) {
     writer
-      ..writeByte(8)
+      ..writeByte(9)
       ..writeByte(0)
       ..write(obj.date)
       ..writeByte(1)
@@ -47,7 +48,9 @@ class CachedSummaryAdapter extends TypeAdapter<CachedSummary> {
       ..writeByte(6)
       ..write(obj.originalUrl)
       ..writeByte(7)
-      ..write(obj.model);
+      ..write(obj.model)
+      ..writeByte(8)
+      ..write(obj.selectedBy);
   }
 
   @override

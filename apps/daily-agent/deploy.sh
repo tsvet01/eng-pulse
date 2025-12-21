@@ -66,6 +66,11 @@ docker push $IMAGE_URI
 # 5. Create/Update Secrets in Secret Manager
 echo "Setting up secrets..."
 
+# Get the default compute service account
+SERVICE_ACCOUNT=$(gcloud iam service-accounts list --project $PROJECT_ID \
+  --filter="email~compute@developer.gserviceaccount.com" \
+  --format="value(email)" | head -1)
+
 # Helper function to create or update a secret
 create_or_update_secret() {
   local secret_name=$1
@@ -81,6 +86,11 @@ create_or_update_secret() {
   else
     echo "   Creating secret: $secret_name"
     echo -n "$secret_value" | gcloud secrets create $secret_name --data-file=- --project $PROJECT_ID
+    # Grant Cloud Run access to new secret
+    gcloud secrets add-iam-policy-binding $secret_name \
+      --member="serviceAccount:$SERVICE_ACCOUNT" \
+      --role="roles/secretmanager.secretAccessor" \
+      --project=$PROJECT_ID --quiet
   fi
 }
 
