@@ -7,7 +7,7 @@ use select::document::Document;
 use select::predicate::{Name, Attr, Predicate};
 use std::collections::HashSet;
 use url::Url;
-use chrono::{DateTime, Utc, Duration, Datelike};
+use chrono::{DateTime, Utc, Duration};
 use rss::Channel;
 use atom_syndication::Feed;
 use tracing::{info, warn, error, debug, instrument};
@@ -368,6 +368,7 @@ fn clean_gemini_json(response: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Datelike;
 
     #[test]
     fn test_clean_gemini_json_with_fences() {

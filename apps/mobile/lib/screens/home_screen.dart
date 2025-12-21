@@ -80,7 +80,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // Filter by selected model (or show all if no model field)
     final summaries = allSummaries.where((s) {
       if (s.model == null) return true; // Backwards compat
-      return s.model == _selectedModel.id;
+      return _selectedModel.matchesId(s.model);
     }).toList();
 
     // Pre-cache content for offline reading in background

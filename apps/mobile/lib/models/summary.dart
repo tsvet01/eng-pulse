@@ -63,4 +63,10 @@ enum LlmModel {
       orElse: () => LlmModel.gemini,
     );
   }
+
+  /// Check if this model matches a given model string (by ID or vendor)
+  bool matchesId(String? modelStr) {
+    if (modelStr == null) return false;
+    return modelStr == id || modelStr == vendor;
+  }
 }
