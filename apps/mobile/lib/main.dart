@@ -30,10 +30,14 @@ void main() async {
     debugPrint('Run `flutterfire configure` to enable push notifications');
   }
 
-  // Initialize other services
-  await CacheService.init();
-  await ConnectivityService.init();
-  await UserService.init();
+  // Initialize other services with error handling
+  try {
+    await CacheService.init();
+    await ConnectivityService.init();
+    await UserService.init();
+  } catch (e) {
+    debugPrint('Service initialization error: $e');
+  }
 
   // Set system UI overlay style
   SystemChrome.setSystemUIOverlayStyle(
