@@ -3,6 +3,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/cached_summary.dart';
+import '../models/summary.dart';
 import '../services/api_service.dart';
 import '../services/cache_service.dart';
 import '../services/connectivity_service.dart';
@@ -171,7 +172,7 @@ class _DetailScreenState extends State<DetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Date chip, source, and offline indicator
+                  // Date chip, model badge, source, and offline indicator
                   Row(
                     children: [
                       Container(
@@ -190,6 +191,26 @@ class _DetailScreenState extends State<DetailScreen> {
                           ),
                         ),
                       ),
+                      // Model badge
+                      if (_currentSummary.model != null) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: (isDark ? Colors.teal.shade300 : Colors.teal.shade600)
+                                .withAlpha(25),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            LlmModel.fromId(_currentSummary.model).displayName,
+                            style: TextStyle(
+                              color: isDark ? Colors.teal.shade300 : Colors.teal.shade600,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
                       if (_currentSummary.originalUrl != null) ...[
                         const SizedBox(width: 8),
                         Text(
