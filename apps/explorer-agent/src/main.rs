@@ -7,7 +7,7 @@ use select::document::Document;
 use select::predicate::{Name, Attr, Predicate};
 use std::collections::HashSet;
 use url::Url;
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Utc, Duration, Datelike};
 use rss::Channel;
 use atom_syndication::Feed;
 use tracing::{info, warn, error, debug, instrument};
@@ -120,11 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         let response_text = call_gemini_with_retry(&http_client, &gemini_api_key, prompt).await?;
 
-        let clean_json = response_text.trim()
-            .trim_start_matches("```json")
-            .trim_start_matches("```")
-            .trim_end_matches("```")
-            .trim();
+        let clean_json = clean_gemini_json(&response_text);
 
         #[derive(Deserialize)]
         struct Recommendation {
@@ -358,4 +354,98 @@ async fn is_relevant_with_gemini(client: &reqwest::Client, api_key: &str, name: 
 
     let response = call_gemini_with_retry(client, api_key, prompt).await?;
     Ok(response.trim().to_lowercase() == "yes")
+}
+
+/// Clean Gemini JSON response by removing markdown code fences
+fn clean_gemini_json(response: &str) -> &str {
+    response.trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_clean_gemini_json_with_fences() {
+        let input = r#"```json
+[{"name": "Test", "url": "https://example.com"}]
+```"#;
+        let expected = r#"[{"name": "Test", "url": "https://example.com"}]"#;
+        assert_eq!(clean_gemini_json(input), expected);
+    }
+
+    #[test]
+    fn test_clean_gemini_json_plain() {
+        let input = r#"[{"name": "Test", "url": "https://example.com"}]"#;
+        assert_eq!(clean_gemini_json(input), input);
+    }
+
+    #[test]
+    fn test_clean_gemini_json_with_extra_whitespace() {
+        let input = r#"  ```json
+[{"name": "Test"}]
+```  "#;
+        let expected = r#"[{"name": "Test"}]"#;
+        assert_eq!(clean_gemini_json(input), expected);
+    }
+
+    #[test]
+    fn test_parse_rss_date() {
+        // RFC2822 format used by RSS
+        let date_str = "Wed, 18 Dec 2024 10:30:00 +0000";
+        let parsed = DateTime::parse_from_rfc2822(date_str);
+        assert!(parsed.is_ok());
+        let dt = parsed.unwrap().with_timezone(&Utc);
+        assert_eq!(dt.year(), 2024);
+        assert_eq!(dt.month(), 12);
+        assert_eq!(dt.day(), 18);
+    }
+
+    #[test]
+    fn test_freshness_threshold() {
+        let now = Utc::now();
+        let three_months_ago = now - Duration::days(FRESHNESS_DAYS);
+
+        // Recent date should pass
+        let recent = now - Duration::days(30);
+        assert!(recent > three_months_ago);
+
+        // Old date should fail
+        let old = now - Duration::days(120);
+        assert!(old < three_months_ago);
+    }
+
+    #[test]
+    fn test_source_config_equality() {
+        let s1 = SourceConfig {
+            name: "Test".to_string(),
+            source_type: "rss".to_string(),
+            url: "https://example.com/feed".to_string(),
+        };
+        let s2 = SourceConfig {
+            name: "Test".to_string(),
+            source_type: "rss".to_string(),
+            url: "https://example.com/feed".to_string(),
+        };
+        assert_eq!(s1, s2);
+    }
+
+    #[test]
+    fn test_source_config_hash_set() {
+        let mut sources: HashSet<SourceConfig> = HashSet::new();
+        let s1 = SourceConfig {
+            name: "Test".to_string(),
+            source_type: "rss".to_string(),
+            url: "https://example.com/feed".to_string(),
+        };
+        let s2 = s1.clone();
+
+        sources.insert(s1);
+        assert!(!sources.insert(s2)); // Should return false (already exists)
+        assert_eq!(sources.len(), 1);
+    }
 }

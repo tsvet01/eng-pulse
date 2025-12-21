@@ -82,6 +82,9 @@ jobs:
     - name: Check Python syntax
       run: python -m py_compile functions/notifier/main.py
 
+    - name: Run notifier tests
+      run: cd functions/notifier && python -m pytest test_main.py -v
+
   flutter-check:
     runs-on: ubuntu-latest
     steps:
