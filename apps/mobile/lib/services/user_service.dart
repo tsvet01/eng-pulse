@@ -17,8 +17,19 @@ class UserService {
       Hive.registerAdapter(UserPreferencesAdapter());
     }
 
-    _historyBox = await Hive.openBox<ReadingHistoryItem>(_historyBoxName);
-    _preferencesBox = await Hive.openBox<UserPreferences>(_preferencesBoxName);
+    try {
+      _historyBox = await Hive.openBox<ReadingHistoryItem>(_historyBoxName);
+    } catch (e) {
+      await Hive.deleteBoxFromDisk(_historyBoxName);
+      _historyBox = await Hive.openBox<ReadingHistoryItem>(_historyBoxName);
+    }
+
+    try {
+      _preferencesBox = await Hive.openBox<UserPreferences>(_preferencesBoxName);
+    } catch (e) {
+      await Hive.deleteBoxFromDisk(_preferencesBoxName);
+      _preferencesBox = await Hive.openBox<UserPreferences>(_preferencesBoxName);
+    }
   }
 
   // Reading History
