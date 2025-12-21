@@ -49,6 +49,7 @@ class ApiService {
             lastUpdated: DateTime.now(),
             originalUrl: summary.originalUrl,
             model: summary.model,
+            selectedBy: summary.selectedBy,
           );
         }).toList();
 

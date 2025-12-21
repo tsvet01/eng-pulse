@@ -47,6 +47,15 @@ impl LlmProvider {
             LlmProvider::Claude => "Claude",
         }
     }
+
+    /// Returns the exact model name/ID used for this provider
+    pub fn model_name(&self) -> &'static str {
+        match self {
+            LlmProvider::Gemini => DEFAULT_GEMINI_MODEL,
+            LlmProvider::OpenAI => DEFAULT_OPENAI_MODEL,
+            LlmProvider::Claude => DEFAULT_CLAUDE_MODEL,
+        }
+    }
 }
 
 // --- Shared Utilities ---

@@ -47,8 +47,12 @@ struct ManifestEntry {
     summary_snippet: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     original_url: Option<String>,
+    /// Which model generated the summary
     #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<String>,
+    /// Which model selected this article from the candidates
+    #[serde(skip_serializing_if = "Option::is_none")]
+    selected_by: Option<String>,
 }
 
 /// Get list of enabled LLM providers based on available API keys
@@ -211,12 +215,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 info!(provider = %provider.as_str(), "Summary generated successfully");
                 debug!(provider = %provider.as_str(), summary_length = summary.len(), "Summary details");
 
-                // Create snippet BEFORE moving summary
+                // Create snippet BEFORE modifying summary
                 let summary_snippet: String = summary.chars().take(SUMMARY_SNIPPET_CHARS).collect();
+
+                // Append metadata footer with original link
+                let summary_with_footer = format!(
+                    "{}\n\n---\n\n**Original article:** [{}]({})\n\n*Summarized by {} · Selected by {}*",
+                    summary,
+                    best_article.title,
+                    best_article.url,
+                    provider.model_name(),
+                    selection_provider.model_name()
+                );
 
                 // Upload Summary to GCS (provider-specific path)
                 let object_name = format!("summaries/{}/{}.md", provider.as_str(), today);
-                let summary_bytes = summary.into_bytes();
+                let summary_bytes = summary_with_footer.into_bytes();
 
                 info!(provider = %provider.as_str(), object = %object_name, "Uploading summary to GCS");
 
@@ -239,7 +253,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             title: best_article.title.clone(),
                             summary_snippet,
                             original_url: Some(best_article.url.clone()),
-                            model: Some(provider.as_str().to_string()),
+                            model: Some(provider.model_name().to_string()),
+                            selected_by: Some(selection_provider.model_name().to_string()),
                         });
                     }
                     Err(e) => {
