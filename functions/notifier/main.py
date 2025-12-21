@@ -7,6 +7,33 @@ from google.cloud import storage
 import markdown
 import bleach
 
+# Allowed HTML tags for email content sanitization
+ALLOWED_TAGS = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li',
+                'strong', 'em', 'a', 'br', 'hr', 'code', 'pre', 'blockquote']
+ALLOWED_ATTRS = {'a': ['href']}
+
+
+def sanitize_html(content: str) -> str:
+    """Convert markdown to HTML and sanitize to prevent XSS."""
+    raw_html = markdown.markdown(content)
+    return bleach.clean(
+        raw_html,
+        tags=ALLOWED_TAGS,
+        attributes=ALLOWED_ATTRS,
+        strip=True
+    )
+
+
+def sanitize_filename(filename: str) -> str:
+    """Sanitize filename for email subject (allow only safe chars)."""
+    return ''.join(c for c in filename if c.isalnum() or c in '-_. ')
+
+
+def should_process_file(file_name: str) -> bool:
+    """Check if file should be processed (summaries/*.md only)."""
+    return file_name.startswith("summaries/") and file_name.endswith(".md")
+
+
 @functions_framework.cloud_event
 def send_summary_email(cloud_event):
     data = cloud_event.data
@@ -19,7 +46,7 @@ def send_summary_email(cloud_event):
     print(f"File: {file_name}")
 
     # Only process files in 'summaries/' folder
-    if not file_name.startswith("summaries/") or not file_name.endswith(".md"):
+    if not should_process_file(file_name):
         print("Not a summary file. Skipping.")
         return
 
@@ -30,15 +57,7 @@ def send_summary_email(cloud_event):
     content = blob.download_as_text()
 
     # Parse Markdown to HTML and sanitize to prevent XSS
-    raw_html = markdown.markdown(content)
-    # Allow only safe HTML tags for email content
-    html_content = bleach.clean(
-        raw_html,
-        tags=['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li',
-              'strong', 'em', 'a', 'br', 'hr', 'code', 'pre', 'blockquote'],
-        attributes={'a': ['href']},
-        strip=True
-    )
+    html_content = sanitize_html(content)
 
     # Send Email
     send_email(file_name, html_content)
@@ -57,10 +76,9 @@ def send_email(subject_file, html_body):
     if not html_body or not isinstance(html_body, str):
         raise ValueError("Invalid html_body parameter")
 
-    # Extract date safely from filename
+    # Extract date safely from filename and sanitize for email subject
     filename = subject_file.split('/')[-1].replace('.md', '')
-    # Sanitize filename for email subject (allow only safe chars)
-    safe_filename = ''.join(c for c in filename if c.isalnum() or c in '-_. ')
+    safe_filename = sanitize_filename(filename)
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"SE Daily Briefing: {safe_filename}"

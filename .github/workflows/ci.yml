@@ -61,7 +61,8 @@ jobs:
     - name: Generate coverage report
       run: |
         cd libs/gemini-engine && cargo tarpaulin --out Xml --output-dir coverage
-        cd ../apps/daily-agent && cargo tarpaulin --out Xml --output-dir coverage
+        cd ../../apps/daily-agent && cargo tarpaulin --out Xml --output-dir coverage
+        cd ../explorer-agent && cargo tarpaulin --out Xml --output-dir coverage
       continue-on-error: true
 
   python-check:
@@ -77,7 +78,7 @@ jobs:
     - name: Install dependencies
       run: |
         cd functions/notifier
-        pip install -r requirements.txt
+        pip install -r requirements-dev.txt
 
     - name: Check Python syntax
       run: python -m py_compile functions/notifier/main.py
