@@ -17,7 +17,13 @@ class CacheService {
       Hive.registerAdapter(CachedSummaryAdapter());
     }
 
-    _summariesBox = await Hive.openBox<CachedSummary>(_summariesBoxName);
+    try {
+      _summariesBox = await Hive.openBox<CachedSummary>(_summariesBoxName);
+    } catch (e) {
+      // Schema changed - delete old incompatible cache and retry
+      await Hive.deleteBoxFromDisk(_summariesBoxName);
+      _summariesBox = await Hive.openBox<CachedSummary>(_summariesBoxName);
+    }
     _contentBox = await Hive.openBox<String>(_contentBoxName);
     _metadataBox = await Hive.openBox<dynamic>(_metadataBoxName);
   }
