@@ -1,4 +1,5 @@
 use rss::Channel;
+use atom_syndication::Feed as AtomFeed;
 use serde::Deserialize;
 use std::error::Error;
 use std::time::Duration as StdDuration;
@@ -43,6 +44,7 @@ pub fn create_http_client() -> Result<reqwest::Client, Box<dyn Error + Send + Sy
 pub async fn fetch_from_source(source: &SourceConfig, client: &reqwest::Client) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
     match source.source_type.as_str() {
         "rss" => fetch_rss(source, client).await,
+        "atom" => fetch_atom(source, client).await,
         "hackernews" => fetch_hackernews(source, client).await,
         other => {
             Err(format!("Unknown source type: '{}' for source '{}'", other, source.name).into())
@@ -85,6 +87,52 @@ async fn fetch_rss(source: &SourceConfig, client: &reqwest::Client) -> Result<Ve
         warn!(source = %source.name, skipped = skipped_dates, "Skipped articles with unparseable dates");
     }
     debug!(source = %source.name, count = articles.len(), "Fetched RSS articles");
+
+    Ok(articles)
+}
+
+async fn fetch_atom(source: &SourceConfig, client: &reqwest::Client) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
+    let content = client.get(&source.url).send().await?.text().await?;
+    let feed = content.parse::<AtomFeed>()?;
+
+    let mut articles = Vec::new();
+    let yesterday = Utc::now() - Duration::hours(24);
+    let mut skipped_dates = 0;
+
+    for entry in feed.entries().iter().take(MAX_ITEMS_PER_SOURCE) {
+        let title = entry.title().as_str();
+
+        // Get the first link (usually the alternate/html link)
+        let link = entry.links().first().map(|l| l.href());
+
+        // Atom uses published or updated date
+        let date_str = entry.published().or(Some(entry.updated()));
+
+        if let (Some(link), Some(date)) = (link, date_str) {
+            // Parse RFC3339 date
+            let parsed_date = match DateTime::parse_from_rfc3339(&date.to_rfc3339()) {
+                Ok(dt) => dt.with_timezone(&Utc),
+                Err(_) => {
+                    skipped_dates += 1;
+                    continue;
+                }
+            };
+
+            if parsed_date >= yesterday {
+                articles.push(Article {
+                    title: title.to_string(),
+                    url: link.to_string(),
+                    source: source.name.clone(),
+                    published_at: parsed_date,
+                });
+            }
+        }
+    }
+
+    if skipped_dates > 0 {
+        warn!(source = %source.name, skipped = skipped_dates, "Skipped entries with unparseable dates");
+    }
+    debug!(source = %source.name, count = articles.len(), "Fetched Atom articles");
 
     Ok(articles)
 }

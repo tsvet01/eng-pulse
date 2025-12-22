@@ -12,6 +12,7 @@ dotenvy = "0.15"
 readability = { version = "0.3", default-features = false }
 url = "2.5"
 rss = "2.0"
+atom_syndication = "0.12"
 chrono = { version = "0.4", features = ["serde"] }
 google-cloud-storage = "0.15"
 google-cloud-auth = "0.13"
