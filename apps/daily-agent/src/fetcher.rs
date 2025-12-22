@@ -216,6 +216,7 @@ async fn fetch_hackernews(source: &SourceConfig, client: &reqwest::Client) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Datelike;
 
     #[test]
     fn test_article_struct() {
@@ -248,5 +249,45 @@ mod tests {
     fn test_create_http_client() {
         let client = create_http_client();
         assert!(client.is_ok(), "HTTP client should be created successfully");
+    }
+
+    #[test]
+    fn test_parse_rss_date_rfc2822() {
+        // Standard RSS format
+        let date = parse_rss_date("Tue, 18 Nov 2025 00:00:00 +0000");
+        assert!(date.is_some());
+        let dt = date.unwrap();
+        assert_eq!(dt.year(), 2025);
+        assert_eq!(dt.month(), 11);
+        assert_eq!(dt.day(), 18);
+    }
+
+    #[test]
+    fn test_parse_rss_date_thoughtworks_format() {
+        // ThoughtWorks custom format: "Tue Nov 18 00:00:00 UTC 2025"
+        let date = parse_rss_date("Tue Nov 18 00:00:00 UTC 2025");
+        assert!(date.is_some());
+        let dt = date.unwrap();
+        assert_eq!(dt.year(), 2025);
+        assert_eq!(dt.month(), 11);
+        assert_eq!(dt.day(), 18);
+    }
+
+    #[test]
+    fn test_parse_rss_date_rfc3339() {
+        // ISO 8601 / RFC3339 format
+        let date = parse_rss_date("2025-11-18T00:00:00+00:00");
+        assert!(date.is_some());
+        let dt = date.unwrap();
+        assert_eq!(dt.year(), 2025);
+        assert_eq!(dt.month(), 11);
+        assert_eq!(dt.day(), 18);
+    }
+
+    #[test]
+    fn test_parse_rss_date_invalid() {
+        assert!(parse_rss_date("not a date").is_none());
+        assert!(parse_rss_date("").is_none());
+        assert!(parse_rss_date("2025-13-45").is_none());
     }
 }
