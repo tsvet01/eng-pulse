@@ -1,0 +1,97 @@
+#!/bin/bash
+# Pre-commit hook - runs quick validation before allowing commit
+# Install with: cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# Check if we're in the middle of a merge/rebase
+if [ -f "$REPO_ROOT/.git/MERGE_HEAD" ] || [ -d "$REPO_ROOT/.git/rebase-merge" ]; then
+    echo "Skipping pre-commit hooks during merge/rebase"
+    exit 0
+fi
+
+# Get list of staged Rust files
+RUST_STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.rs$' || true)
+PYTHON_STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.py$' || true)
+DART_STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.dart$' || true)
+
+# Quick exit if no relevant files changed
+if [ -z "$RUST_STAGED" ] && [ -z "$PYTHON_STAGED" ] && [ -z "$DART_STAGED" ]; then
+    echo "No Rust/Python/Dart files staged, skipping checks"
+    exit 0
+fi
+
+echo "Running pre-commit checks..."
+
+FAILED=0
+
+# Rust checks (if Rust files staged)
+if [ -n "$RUST_STAGED" ]; then
+    echo "  Checking Rust code..."
+
+    # Check which crates have changes
+    if echo "$RUST_STAGED" | grep -q "apps/daily-agent"; then
+        if ! (cd "$REPO_ROOT/apps/daily-agent" && cargo check --quiet 2>/dev/null && cargo clippy --quiet -- -D warnings 2>/dev/null); then
+            echo "  ✗ daily-agent: compilation or clippy errors"
+            FAILED=1
+        else
+            echo "  ✓ daily-agent"
+        fi
+    fi
+
+    if echo "$RUST_STAGED" | grep -q "apps/explorer-agent"; then
+        if ! (cd "$REPO_ROOT/apps/explorer-agent" && cargo check --quiet 2>/dev/null && cargo clippy --quiet -- -D warnings 2>/dev/null); then
+            echo "  ✗ explorer-agent: compilation or clippy errors"
+            FAILED=1
+        else
+            echo "  ✓ explorer-agent"
+        fi
+    fi
+
+    if echo "$RUST_STAGED" | grep -q "libs/gemini-engine"; then
+        if ! (cd "$REPO_ROOT/libs/gemini-engine" && cargo check --quiet 2>/dev/null && cargo test --quiet 2>/dev/null); then
+            echo "  ✗ gemini-engine: compilation or test errors"
+            FAILED=1
+        else
+            echo "  ✓ gemini-engine"
+        fi
+    fi
+fi
+
+# Python checks (if Python files staged)
+if [ -n "$PYTHON_STAGED" ]; then
+    echo "  Checking Python code..."
+    for file in $PYTHON_STAGED; do
+        if [ -f "$REPO_ROOT/$file" ]; then
+            if ! python3 -m py_compile "$REPO_ROOT/$file" 2>/dev/null; then
+                echo "  ✗ $file: syntax error"
+                FAILED=1
+            else
+                echo "  ✓ $file"
+            fi
+        fi
+    done
+fi
+
+# Dart/Flutter checks (if Dart files staged)
+if [ -n "$DART_STAGED" ]; then
+    echo "  Checking Flutter code..."
+    if ! (cd "$REPO_ROOT/apps/mobile" && flutter analyze --no-pub 2>/dev/null | grep -q "No issues found"); then
+        echo "  ✗ Flutter: analysis issues found"
+        FAILED=1
+    else
+        echo "  ✓ Flutter"
+    fi
+fi
+
+if [ $FAILED -ne 0 ]; then
+    echo ""
+    echo "Pre-commit checks failed. Please fix the issues above."
+    echo "To skip this check (not recommended): git commit --no-verify"
+    exit 1
+fi
+
+echo "All pre-commit checks passed!"
+exit 0

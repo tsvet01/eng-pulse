@@ -8,6 +8,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_HOME: /home/runner/.cargo
+  CARGO_INCREMENTAL: 0
 
 jobs:
   rust-check:
@@ -17,6 +19,8 @@ jobs:
 
     - name: Set up Rust
       uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy, rustfmt
 
     - name: Cache Cargo dependencies
       uses: actions/cache@v4
@@ -31,11 +35,17 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-
 
+    - name: Check gemini-engine
+      run: cd libs/gemini-engine && cargo check --verbose
+
     - name: Check Daily Agent
       run: cd apps/daily-agent && cargo check --verbose
 
     - name: Check Explorer Agent
       run: cd apps/explorer-agent && cargo check --verbose
+
+    - name: Clippy Lint gemini-engine
+      run: cd libs/gemini-engine && cargo clippy -- -D warnings
 
     - name: Clippy Lint Daily Agent
       run: cd apps/daily-agent && cargo clippy -- -D warnings
