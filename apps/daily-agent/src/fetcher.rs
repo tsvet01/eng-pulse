@@ -52,6 +52,26 @@ pub async fn fetch_from_source(source: &SourceConfig, client: &reqwest::Client) 
     }
 }
 
+/// Try to parse various date formats commonly found in RSS feeds
+fn parse_rss_date(date_str: &str) -> Option<DateTime<Utc>> {
+    // Try RFC2822 first (standard RSS format)
+    if let Ok(dt) = DateTime::parse_from_rfc2822(date_str) {
+        return Some(dt.with_timezone(&Utc));
+    }
+
+    // Try ThoughtWorks format: "Tue Nov 18 00:00:00 UTC 2025"
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(date_str, "%a %b %d %H:%M:%S UTC %Y") {
+        return Some(dt.and_utc());
+    }
+
+    // Try ISO 8601 / RFC3339
+    if let Ok(dt) = DateTime::parse_from_rfc3339(date_str) {
+        return Some(dt.with_timezone(&Utc));
+    }
+
+    None
+}
+
 async fn fetch_rss(source: &SourceConfig, client: &reqwest::Client) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
     let content = client.get(&source.url).send().await?.bytes().await?;
     let channel = Channel::read_from(&content[..])?;
@@ -62,10 +82,10 @@ async fn fetch_rss(source: &SourceConfig, client: &reqwest::Client) -> Result<Ve
 
     for item in channel.items().iter().take(MAX_ITEMS_PER_SOURCE) {
         if let (Some(title), Some(link), Some(pub_date)) = (item.title(), item.link(), item.pub_date()) {
-            // Parse date (RFC2822 usually) - log and skip articles with unparseable dates
-            let parsed_date = match DateTime::parse_from_rfc2822(pub_date) {
-                Ok(dt) => dt.with_timezone(&Utc),
-                Err(_) => {
+            // Parse date using multiple format attempts
+            let parsed_date = match parse_rss_date(pub_date) {
+                Some(dt) => dt,
+                None => {
                     skipped_dates += 1;
                     continue;
                 }
