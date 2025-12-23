@@ -118,6 +118,35 @@ When modifying:
 3. Create/update screen in `lib/screens/`
 4. Follow existing widget patterns in `lib/widgets/`
 
+## Pre-Commit Protections
+
+### Setup Pre-Commit Hook
+
+Install the pre-commit hook to catch issues before they reach CI:
+
+```bash
+cp scripts/pre-commit .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+The hook automatically:
+- Checks Rust compilation and clippy for modified crates
+- Validates Python syntax for modified `.py` files
+- Runs Flutter analyze for modified `.dart` files
+- Only runs checks for files in the staged commit
+
+### Full Validation Script
+
+Run all checks manually:
+
+```bash
+# Full validation (includes Flutter - slower)
+./scripts/validate.sh
+
+# Quick validation (Rust + Python only)
+./scripts/validate.sh --quick
+```
+
 ## Testing Guidelines
 
 ### Rust
@@ -224,6 +253,8 @@ cd functions/notifier && ./deploy.sh
 
 ### Do
 
+- **Install the pre-commit hook** (see Pre-Commit Protections above)
+- **Run `./scripts/validate.sh` before pushing** to catch issues early
 - Use existing patterns from similar code
 - Add structured logging for new functionality
 - Handle errors explicitly with `Result`/`try-catch`
@@ -232,6 +263,8 @@ cd functions/notifier && ./deploy.sh
 
 ### Don't
 
+- **Push without running local validation** - CI failures are preventable
+- **Skip pre-commit hooks with `--no-verify`** - unless you have a very good reason
 - Use `.unwrap()` or `.expect()` in production paths
 - Hardcode credentials or API keys
 - Skip error handling for "simple" cases
@@ -260,6 +293,14 @@ cargo update <crate>@<new-version> --precise <old-version>
 
 ## Quick Reference
 
+### Setup (First Time)
+
+```bash
+# Install pre-commit hook
+cp scripts/pre-commit .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
 ### Run Locally
 
 ```bash
@@ -268,6 +309,16 @@ cd apps/daily-agent && cargo run
 
 # Flutter app
 cd apps/mobile && flutter run
+```
+
+### Validate Before Commit
+
+```bash
+# Full validation
+./scripts/validate.sh
+
+# Quick (Rust + Python only)
+./scripts/validate.sh --quick
 ```
 
 ### Build & Test
