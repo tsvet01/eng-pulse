@@ -213,11 +213,38 @@ class _DetailScreenState extends State<DetailScreen> {
                       ],
                       if (_currentSummary.originalUrl != null) ...[
                         const SizedBox(width: 8),
-                        Text(
-                          _extractSourceName(_currentSummary.originalUrl!),
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: isDark ? AppTheme.darkTextTertiary : AppTheme.lightTextTertiary,
+                        GestureDetector(
+                          onTap: _openOriginalArticle,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: (isDark ? Colors.blue.shade300 : Colors.blue.shade600)
+                                  .withAlpha(25),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: (isDark ? Colors.blue.shade300 : Colors.blue.shade600)
+                                    .withAlpha(50),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.open_in_new_rounded,
+                                  size: 12,
+                                  color: isDark ? Colors.blue.shade300 : Colors.blue.shade600,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  _extractSourceName(_currentSummary.originalUrl!),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDark ? Colors.blue.shade300 : Colors.blue.shade600,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ],
@@ -253,10 +280,20 @@ class _DetailScreenState extends State<DetailScreen> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  // Title
-                  Text(
-                    _currentSummary.title,
-                    style: Theme.of(context).textTheme.headlineMedium,
+                  // Title with Hero transition
+                  Hero(
+                    tag: 'title-${_currentSummary.url}',
+                    flightShuttleBuilder: (flightContext, animation, flightDirection,
+                        fromHeroContext, toHeroContext) {
+                      return Material(
+                        color: Colors.transparent,
+                        child: toHeroContext.widget,
+                      );
+                    },
+                    child: Text(
+                      _currentSummary.title,
+                      style: Theme.of(context).textTheme.headlineMedium,
+                    ),
                   ),
                 ],
               ),
@@ -402,23 +439,65 @@ class _DetailScreenState extends State<DetailScreen> {
                     },
                   ),
                 ),
-                // Read original article link
+                // Read original article link - prominent CTA
                 if (_currentSummary.originalUrl != null)
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-                    child: OutlinedButton.icon(
-                      onPressed: _openOriginalArticle,
-                      icon: const Icon(Icons.open_in_new_rounded, size: 18),
-                      label: Text('Read full article on ${_extractSourceName(_currentSummary.originalUrl!)}'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple,
-                        side: BorderSide(
-                          color: (isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple).withAlpha(100),
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: _openOriginalArticle,
+                        borderRadius: BorderRadius.circular(16),
+                        child: Ink(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: isDark
+                                  ? [Colors.blue.shade800, Colors.blue.shade900]
+                                  : [Colors.blue.shade500, Colors.blue.shade700],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.blue.withAlpha(isDark ? 50 : 80),
+                                blurRadius: 12,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(
+                                  Icons.article_outlined,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 12),
+                                Flexible(
+                                  child: Text(
+                                    'Read full article on ${_extractSourceName(_currentSummary.originalUrl!)}',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                const Icon(
+                                  Icons.arrow_forward_rounded,
+                                  color: Colors.white,
+                                  size: 18,
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       ),
                     ),
                   ),
