@@ -13,9 +13,23 @@ class ApiService {
   static String get manifestUrl =>
       'https://storage.googleapis.com/$defaultBucket/manifest.json';
 
+  /// HTTP client - can be injected for testing
+  final http.Client _client;
+
+  /// Connectivity checker - can be injected for testing
+  final Future<bool> Function() _checkConnectivity;
+
+  /// Constructor with optional HTTP client and connectivity checker for testing
+  ApiService({
+    http.Client? client,
+    Future<bool> Function()? connectivityChecker,
+  })  : _client = client ?? http.Client(),
+        _checkConnectivity =
+            connectivityChecker ?? ConnectivityService.checkConnectivity;
+
   Future<List<CachedSummary>> fetchSummaries({bool forceRefresh = false}) async {
     // Check connectivity
-    final isOnline = await ConnectivityService.checkConnectivity();
+    final isOnline = await _checkConnectivity();
 
     if (!isOnline || (!forceRefresh && _shouldUseCachedData())) {
       // Return cached data if offline or cache is fresh
@@ -31,7 +45,7 @@ class ApiService {
     }
 
     try {
-      final response = await http
+      final response = await _client
           .get(Uri.parse(manifestUrl))
           .timeout(const Duration(seconds: 15));
 
@@ -76,7 +90,7 @@ class ApiService {
     // Check if we have cached content
     final cachedContent = CacheService.getCachedContent(url);
 
-    final isOnline = await ConnectivityService.checkConnectivity();
+    final isOnline = await _checkConnectivity();
 
     if (!isOnline) {
       if (cachedContent != null) {
@@ -86,7 +100,7 @@ class ApiService {
     }
 
     try {
-      final response = await http
+      final response = await _client
           .get(Uri.parse(url))
           .timeout(const Duration(seconds: 15));
 
@@ -120,7 +134,7 @@ class ApiService {
 
   /// Pre-cache content for offline reading
   Future<void> preCacheContent(List<CachedSummary> summaries) async {
-    final isOnline = await ConnectivityService.checkConnectivity();
+    final isOnline = await _checkConnectivity();
     if (!isOnline) return;
 
     for (final summary in summaries) {
