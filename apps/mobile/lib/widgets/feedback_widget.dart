@@ -28,9 +28,8 @@ class _FeedbackWidgetState extends State<FeedbackWidget> {
       _feedback = newValue;
     });
 
-    if (newValue != null) {
-      await UserService.setFeedback(widget.articleUrl, newValue);
-    }
+    // Always persist feedback state (including null to clear it)
+    await UserService.setFeedback(widget.articleUrl, newValue);
   }
 
   @override
