@@ -28,6 +28,17 @@ class CacheService {
     _metadataBox = await Hive.openBox<dynamic>(_metadataBoxName);
   }
 
+  /// Initialize for testing - assumes Hive.init() was already called
+  static Future<void> initForTesting() async {
+    if (!Hive.isAdapterRegistered(0)) {
+      Hive.registerAdapter(CachedSummaryAdapter());
+    }
+
+    _summariesBox = await Hive.openBox<CachedSummary>(_summariesBoxName);
+    _contentBox = await Hive.openBox<String>(_contentBoxName);
+    _metadataBox = await Hive.openBox<dynamic>(_metadataBoxName);
+  }
+
   // Summaries
   static List<CachedSummary> getCachedSummaries() {
     if (_summariesBox == null) return [];

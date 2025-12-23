@@ -32,6 +32,27 @@ class UserService {
     }
   }
 
+  /// Initialize for testing - assumes Hive.init() was already called
+  static Future<void> initForTesting() async {
+    if (!Hive.isAdapterRegistered(1)) {
+      Hive.registerAdapter(ReadingHistoryItemAdapter());
+    }
+    if (!Hive.isAdapterRegistered(2)) {
+      Hive.registerAdapter(UserPreferencesAdapter());
+    }
+
+    _historyBox = await Hive.openBox<ReadingHistoryItem>(_historyBoxName);
+    _preferencesBox = await Hive.openBox<UserPreferences>(_preferencesBoxName);
+  }
+
+  /// Close boxes for testing cleanup
+  static Future<void> close() async {
+    await _historyBox?.close();
+    await _preferencesBox?.close();
+    _historyBox = null;
+    _preferencesBox = null;
+  }
+
   // Reading History
   static List<ReadingHistoryItem> getReadingHistory() {
     if (_historyBox == null) return [];
