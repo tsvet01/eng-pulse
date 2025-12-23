@@ -40,6 +40,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Listen to connectivity changes
     _connectivitySubscription = ConnectivityService.onConnectivityChanged.listen((isOnline) {
+      if (!mounted) return;
       setState(() {
         _isOnline = isOnline;
       });
@@ -66,16 +67,18 @@ class _HomeScreenState extends State<HomeScreen> {
         .whereType<String>()
         .toSet();
 
-    setState(() {
-      _availableModels = modelIds.isEmpty
-          ? [LlmModel.gemini] // Default if no model field (backwards compat)
-          : modelIds.map((id) => LlmModel.fromId(id)).toList();
+    if (mounted) {
+      setState(() {
+        _availableModels = modelIds.isEmpty
+            ? [LlmModel.gemini] // Default if no model field (backwards compat)
+            : modelIds.map((id) => LlmModel.fromId(id)).toList();
 
-      // Ensure selected model is available
-      if (!_availableModels.contains(_selectedModel) && _availableModels.isNotEmpty) {
-        _selectedModel = _availableModels.first;
-      }
-    });
+        // Ensure selected model is available
+        if (!_availableModels.contains(_selectedModel) && _availableModels.isNotEmpty) {
+          _selectedModel = _availableModels.first;
+        }
+      });
+    }
 
     // Filter by selected model (or show all if no model field)
     final summaries = allSummaries.where((s) {
@@ -92,23 +95,32 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _refresh() async {
+    if (!mounted) return;
     setState(() {
       _isRefreshing = true;
     });
 
     try {
-      final summaries = await _apiService.fetchSummaries(forceRefresh: true);
+      final allSummaries = await _apiService.fetchSummaries(forceRefresh: true);
+
+      // Filter by selected model (same logic as _loadSummaries)
+      final summaries = allSummaries.where((s) {
+        if (s.model == null) return true; // Backwards compat
+        return _selectedModel.matchesId(s.model);
+      }).toList();
 
       // Pre-cache content
       if (ConnectivityService.isOnline && summaries.isNotEmpty) {
         _apiService.preCacheContent(summaries);
       }
 
+      if (!mounted) return;
       setState(() {
         _summariesFuture = Future.value(summaries);
         _isRefreshing = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _summariesFuture = Future.error(e);
         _isRefreshing = false;
@@ -294,37 +306,36 @@ class _HomeScreenState extends State<HomeScreen> {
         itemBuilder: (context, index) {
           final item = grouped[index];
 
-          if (item is _SectionHeader) {
-            return _buildSectionHeader(context, item.title, item.isFirst);
-          }
-
-          final summaryItem = item as _SummaryItem;
-          return SummaryCard(
-            summary: summaryItem.summary,
-            formattedDate: _formatDate(summaryItem.summary.date),
-            showDateChip: false, // Date shown in section header
-            onTap: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => DetailScreen(
-                    summary: summaryItem.summary,
-                    allSummaries: summaries,
-                    currentIndex: summaryItem.originalIndex,
+          return switch (item) {
+            _SectionHeader(:final title, :final isFirst) =>
+              _buildSectionHeader(context, title, isFirst),
+            _SummaryItem(:final summary, :final originalIndex) => SummaryCard(
+              summary: summary,
+              formattedDate: _formatDate(summary.date),
+              showDateChip: false, // Date shown in section header
+              onTap: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => DetailScreen(
+                      summary: summary,
+                      allSummaries: summaries,
+                      currentIndex: originalIndex,
+                    ),
                   ),
-                ),
-              );
-              // Refresh to update read status
-              setState(() {});
-            },
-          );
+                );
+                // Refresh to update read status
+                if (mounted) setState(() {});
+              },
+            ),
+          };
         },
       ),
     );
   }
 
-  List<dynamic> _groupByDateCategory(List<CachedSummary> summaries) {
-    final result = <dynamic>[];
+  List<_GroupedItem> _groupByDateCategory(List<CachedSummary> summaries) {
+    final result = <_GroupedItem>[];
     String? currentCategory;
 
     for (int i = 0; i < summaries.length; i++) {
@@ -394,13 +405,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class _SectionHeader {
+/// Sealed class for type-safe grouped list items
+sealed class _GroupedItem {}
+
+class _SectionHeader extends _GroupedItem {
   final String title;
   final bool isFirst;
   _SectionHeader({required this.title, required this.isFirst});
 }
 
-class _SummaryItem {
+class _SummaryItem extends _GroupedItem {
   final CachedSummary summary;
   final int originalIndex;
   _SummaryItem({required this.summary, required this.originalIndex});

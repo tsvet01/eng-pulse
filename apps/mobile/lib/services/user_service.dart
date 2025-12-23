@@ -59,12 +59,16 @@ class UserService {
     await _historyBox!.put(summary.url, item);
   }
 
-  static Future<void> setFeedback(String url, int feedback) async {
+  static Future<void> setFeedback(String url, int? feedback) async {
     final item = _historyBox?.get(url);
     if (item != null) {
       item.feedback = feedback;
       await item.save();
     }
+  }
+
+  static Future<void> clearFeedback(String url) async {
+    await setFeedback(url, null);
   }
 
   static int? getFeedback(String url) {
