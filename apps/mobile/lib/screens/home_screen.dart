@@ -214,8 +214,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     }
 
                     if (snapshot.hasError) {
-                      // Try to show cached data on error
-                      final cached = CacheService.getCachedSummaries();
+                      // Try to show cached data on error (filtered by selected model)
+                      final cached = CacheService.getCachedSummaries()
+                          .where((s) => s.model == null || _selectedModel.matchesId(s.model))
+                          .toList();
                       if (cached.isNotEmpty) {
                         return _buildList(cached);
                       }
