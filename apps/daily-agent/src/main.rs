@@ -55,9 +55,10 @@ struct ManifestEntry {
     selected_by: Option<String>,
 }
 
-/// Get list of enabled LLM providers based on available API keys
+/// Get list of enabled LLM providers based on available API keys.
+/// Claude is first for article selection, others follow for summary generation.
 fn get_enabled_providers() -> Vec<(LlmProvider, String)> {
-    let providers = [LlmProvider::Gemini, LlmProvider::OpenAI, LlmProvider::Claude];
+    let providers = [LlmProvider::Claude, LlmProvider::Gemini, LlmProvider::OpenAI];
     let mut enabled = Vec::new();
 
     for provider in providers {
@@ -95,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "Starting SE Daily Agent"
     );
 
-    // Use first provider for article selection (prefer Gemini if available)
+    // Use first provider for article selection (Claude preferred)
     let (selection_provider, selection_key) = enabled_providers.first().unwrap().clone();
 
     // 0. Initialize shared HTTP client (reused for connection pooling)
