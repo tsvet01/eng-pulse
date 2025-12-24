@@ -58,6 +58,14 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  /// Filter summaries by selected model (extracted to avoid duplication)
+  List<CachedSummary> _filterByModel(List<CachedSummary> summaries) {
+    return summaries.where((s) {
+      if (s.model == null) return true; // Backwards compat
+      return _selectedModel.matchesId(s.model);
+    }).toList();
+  }
+
   Future<List<CachedSummary>> _loadSummaries() async {
     final allSummaries = await _apiService.fetchSummaries();
 
@@ -80,11 +88,7 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     }
 
-    // Filter by selected model (or show all if no model field)
-    final summaries = allSummaries.where((s) {
-      if (s.model == null) return true; // Backwards compat
-      return _selectedModel.matchesId(s.model);
-    }).toList();
+    final summaries = _filterByModel(allSummaries);
 
     // Pre-cache content for offline reading in background
     if (ConnectivityService.isOnline && summaries.isNotEmpty) {
@@ -102,12 +106,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final allSummaries = await _apiService.fetchSummaries(forceRefresh: true);
-
-      // Filter by selected model (same logic as _loadSummaries)
-      final summaries = allSummaries.where((s) {
-        if (s.model == null) return true; // Backwards compat
-        return _selectedModel.matchesId(s.model);
-      }).toList();
+      final summaries = _filterByModel(allSummaries);
 
       // Pre-cache content
       if (ConnectivityService.isOnline && summaries.isNotEmpty) {
@@ -215,9 +214,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
                     if (snapshot.hasError) {
                       // Try to show cached data on error (filtered by selected model)
-                      final cached = CacheService.getCachedSummaries()
-                          .where((s) => s.model == null || _selectedModel.matchesId(s.model))
-                          .toList();
+                      final cached = _filterByModel(CacheService.getCachedSummaries());
                       if (cached.isNotEmpty) {
                         return _buildList(cached);
                       }

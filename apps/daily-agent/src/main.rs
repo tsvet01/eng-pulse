@@ -169,7 +169,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         warn!(
             returned_index = index,
             total_articles = all_articles.len(),
-            "Gemini returned invalid index, using first article"
+            provider = %selection_provider.as_str(),
+            "LLM returned invalid index, using first article"
         );
         0
     } else {
@@ -293,7 +294,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 e
             })?
         },
-        Err(e) if e.to_string().contains("No such object") => {
+        // Note: GCS SDK doesn't expose structured error types, so we match on message.
+        // Both "No such object" and "404" patterns are checked for robustness.
+        Err(e) if e.to_string().contains("No such object") || e.to_string().contains("404") => {
             info!("No existing manifest.json found, creating new one");
             Vec::new()
         },
