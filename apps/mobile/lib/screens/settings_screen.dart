@@ -5,6 +5,7 @@ import '../services/user_service.dart';
 import '../services/notification_service.dart';
 import '../services/cache_service.dart';
 import '../services/build_info.dart';
+import '../services/tts_service.dart';
 import '../theme/app_theme.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -17,12 +18,18 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late UserPreferences _prefs;
   bool _notificationsAvailable = false;
+  final TtsService _ttsService = TtsService.instance;
 
   @override
   void initState() {
     super.initState();
     _prefs = UserService.getPreferences();
     _checkNotificationStatus();
+    _initTts();
+  }
+
+  Future<void> _initTts() async {
+    await _ttsService.init();
   }
 
   Future<void> _checkNotificationStatus() async {
@@ -94,6 +101,50 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: '${UserService.getReadingHistory().length} articles read',
             icon: Icons.history_rounded,
             onTap: () => _showReadingHistory(context),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Listening Section
+          _buildSectionHeader(context, 'Listening'),
+          _buildSliderTile(
+            context,
+            title: 'Speech Rate',
+            subtitle: _getSpeechRateLabel(_prefs.ttsSpeechRate),
+            icon: Icons.speed_rounded,
+            value: _prefs.ttsSpeechRate,
+            min: 0.25,
+            max: 1.0,
+            onChanged: (value) async {
+              setState(() {
+                _prefs.ttsSpeechRate = value;
+              });
+              await UserService.setTtsSpeechRate(value);
+              await _ttsService.setSpeechRate(value);
+            },
+          ),
+          _buildSliderTile(
+            context,
+            title: 'Pitch',
+            subtitle: _getPitchLabel(_prefs.ttsPitch),
+            icon: Icons.tune_rounded,
+            value: _prefs.ttsPitch,
+            min: 0.5,
+            max: 2.0,
+            onChanged: (value) async {
+              setState(() {
+                _prefs.ttsPitch = value;
+              });
+              await UserService.setTtsPitch(value);
+              await _ttsService.setPitch(value);
+            },
+          ),
+          _buildActionTile(
+            context,
+            title: 'Test Voice',
+            subtitle: 'Preview current settings',
+            icon: Icons.play_circle_outline_rounded,
+            onTap: () => _testTtsVoice(context),
           ),
 
           const SizedBox(height: 16),
@@ -229,6 +280,124 @@ class _SettingsScreenState extends State<SettingsScreen> {
         color: isDark ? AppTheme.darkTextTertiary : AppTheme.lightTextTertiary,
       ),
       onTap: onTap,
+    );
+  }
+
+  Widget _buildSliderTile(
+    BuildContext context, {
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required double value,
+    required double min,
+    required double max,
+    required ValueChanged<double> onChanged,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: (isDark
+                          ? AppTheme.primaryPurpleDark
+                          : AppTheme.primaryPurple)
+                      .withAlpha(25),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  icon,
+                  color: isDark
+                      ? AppTheme.primaryPurpleDark
+                      : AppTheme.primaryPurple,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: Theme.of(context).textTheme.titleMedium),
+                    Text(subtitle,
+                        style: Theme.of(context).textTheme.bodyMedium),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              activeTrackColor:
+                  isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple,
+              inactiveTrackColor: (isDark
+                      ? AppTheme.primaryPurpleDark
+                      : AppTheme.primaryPurple)
+                  .withAlpha(50),
+              thumbColor:
+                  isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple,
+              overlayColor: (isDark
+                      ? AppTheme.primaryPurpleDark
+                      : AppTheme.primaryPurple)
+                  .withAlpha(30),
+            ),
+            child: Slider(
+              value: value.clamp(min, max),
+              min: min,
+              max: max,
+              divisions: ((max - min) * 20).round(),
+              onChanged: onChanged,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getSpeechRateLabel(double rate) {
+    if (rate <= 0.3) return 'Very Slow';
+    if (rate <= 0.45) return 'Slow';
+    if (rate <= 0.55) return 'Normal';
+    if (rate <= 0.7) return 'Fast';
+    if (rate <= 0.85) return 'Very Fast';
+    return 'Maximum';
+  }
+
+  String _getPitchLabel(double pitch) {
+    if (pitch <= 0.7) return 'Very Low';
+    if (pitch <= 0.9) return 'Low';
+    if (pitch <= 1.1) return 'Normal';
+    if (pitch <= 1.4) return 'High';
+    if (pitch <= 1.7) return 'Very High';
+    return 'Maximum';
+  }
+
+  Future<void> _testTtsVoice(BuildContext context) async {
+    const testText =
+        'This is a preview of your text-to-speech settings. Adjust the speech rate and pitch to your preference.';
+
+    await _ttsService.speak(testText);
+
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Playing voice preview...'),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        action: SnackBarAction(
+          label: 'Stop',
+          onPressed: () => _ttsService.stop(),
+        ),
+      ),
     );
   }
 

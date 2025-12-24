@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:share_plus/share_plus.dart';
@@ -7,6 +8,7 @@ import '../models/summary.dart';
 import '../services/api_service.dart';
 import '../services/cache_service.dart';
 import '../services/connectivity_service.dart';
+import '../services/tts_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/feedback_widget.dart';
@@ -30,10 +32,18 @@ class DetailScreen extends StatefulWidget {
 
 class _DetailScreenState extends State<DetailScreen> {
   final ApiService _apiService = ApiService();
+  final TtsService _ttsService = TtsService.instance;
   late Future<String> _contentFuture;
   late CachedSummary _currentSummary;
   late int _currentIndex;
   bool _isCached = false;
+
+  // TTS state
+  TtsState _ttsState = TtsState.stopped;
+  double _ttsProgress = 0.0;
+  StreamSubscription<TtsState>? _ttsStateSubscription;
+  StreamSubscription<double>? _ttsProgressSubscription;
+  String? _loadedContent;
 
   bool get _hasPrevious =>
       widget.allSummaries != null && _currentIndex > 0;
@@ -47,6 +57,50 @@ class _DetailScreenState extends State<DetailScreen> {
     _currentSummary = widget.summary;
     _currentIndex = widget.currentIndex ?? 0;
     _loadCurrentArticle();
+    _initTts();
+  }
+
+  Future<void> _initTts() async {
+    await _ttsService.init();
+
+    // Load user's TTS preferences
+    final speechRate = UserService.getTtsSpeechRate();
+    final pitch = UserService.getTtsPitch();
+    final voice = UserService.getTtsVoice();
+
+    await _ttsService.setSpeechRate(speechRate);
+    await _ttsService.setPitch(pitch);
+    if (voice != null) {
+      await _ttsService.setVoice(voice);
+    }
+
+    // Check if already playing this article
+    if (_ttsService.currentArticleUrl == _currentSummary.url) {
+      _ttsState = _ttsService.state;
+    }
+
+    _ttsStateSubscription = _ttsService.stateStream.listen((state) {
+      if (mounted) {
+        setState(() {
+          _ttsState = state;
+        });
+      }
+    });
+
+    _ttsProgressSubscription = _ttsService.progressStream.listen((progress) {
+      if (mounted) {
+        setState(() {
+          _ttsProgress = progress;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _ttsStateSubscription?.cancel();
+    _ttsProgressSubscription?.cancel();
+    super.dispose();
   }
 
   void _loadCurrentArticle() {
@@ -57,11 +111,35 @@ class _DetailScreenState extends State<DetailScreen> {
 
   void _navigateTo(int index) {
     if (widget.allSummaries == null) return;
+    // Stop TTS when navigating to another article
+    if (_ttsState != TtsState.stopped) {
+      _ttsService.stop();
+    }
     setState(() {
       _currentIndex = index;
       _currentSummary = widget.allSummaries![index];
+      _loadedContent = null;
+      _ttsProgress = 0.0;
       _loadCurrentArticle();
     });
+  }
+
+  Future<void> _toggleTts() async {
+    if (_loadedContent == null) return;
+
+    final isCurrentArticle = _ttsService.currentArticleUrl == _currentSummary.url;
+
+    if (_ttsState == TtsState.playing && isCurrentArticle) {
+      await _ttsService.pause();
+    } else if (_ttsState == TtsState.paused && isCurrentArticle) {
+      await _ttsService.resume();
+    } else {
+      await _ttsService.speak(_loadedContent!, articleUrl: _currentSummary.url);
+    }
+  }
+
+  Future<void> _stopTts() async {
+    await _ttsService.stop();
   }
 
   void _retry() {
@@ -118,7 +196,11 @@ class _DetailScreenState extends State<DetailScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isOnline = ConnectivityService.isOnline;
 
+    final isPlayingThisArticle = _ttsService.currentArticleUrl == _currentSummary.url;
+    final showTtsPlayer = _ttsState != TtsState.stopped && isPlayingThisArticle;
+
     return Scaffold(
+      bottomNavigationBar: showTtsPlayer ? _buildTtsPlayerBar(isDark) : null,
       body: CustomScrollView(
         slivers: [
           // App Bar
@@ -145,6 +227,22 @@ class _DetailScreenState extends State<DetailScreen> {
               onPressed: () => Navigator.pop(context),
             ),
             actions: [
+              // TTS Listen button
+              if (_loadedContent != null)
+                IconButton(
+                  icon: Icon(
+                    _ttsState == TtsState.playing &&
+                            _ttsService.currentArticleUrl == _currentSummary.url
+                        ? Icons.pause_rounded
+                        : Icons.headphones_rounded,
+                    color: _ttsState != TtsState.stopped &&
+                            _ttsService.currentArticleUrl == _currentSummary.url
+                        ? (isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple)
+                        : (isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary),
+                  ),
+                  onPressed: _toggleTts,
+                  tooltip: _ttsState == TtsState.playing ? 'Pause' : 'Listen',
+                ),
               IconButton(
                 icon: Icon(
                   Icons.open_in_new_rounded,
@@ -341,11 +439,12 @@ class _DetailScreenState extends State<DetailScreen> {
 
                 final content = snapshot.data ?? '';
 
-                // Update cached state after content loads
-                if (!_isCached) {
+                // Store content for TTS and update cached state
+                if (_loadedContent != content || !_isCached) {
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (mounted) {
                       setState(() {
+                        _loadedContent = content;
                         _isCached = true;
                       });
                     }
@@ -625,6 +724,133 @@ class _DetailScreenState extends State<DetailScreen> {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               textAlign: isNext ? TextAlign.end : TextAlign.start,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTtsPlayerBar(bool isDark) {
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.darkSurface : AppTheme.lightSurface,
+        border: Border(
+          top: BorderSide(
+            color: isDark ? AppTheme.darkCardBorder : AppTheme.lightCardBorder,
+          ),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withAlpha(20),
+            blurRadius: 8,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Progress bar
+            LinearProgressIndicator(
+              value: _ttsProgress,
+              backgroundColor: isDark
+                  ? AppTheme.darkCardBorder
+                  : AppTheme.lightCardBorder,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple,
+              ),
+              minHeight: 3,
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  // Headphones icon
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: (isDark
+                              ? AppTheme.primaryPurpleDark
+                              : AppTheme.primaryPurple)
+                          .withAlpha(25),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      Icons.headphones_rounded,
+                      color: isDark
+                          ? AppTheme.primaryPurpleDark
+                          : AppTheme.primaryPurple,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  // Title and status
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Now Playing',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isDark
+                                ? AppTheme.darkTextTertiary
+                                : AppTheme.lightTextTertiary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _currentSummary.title,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: isDark
+                                ? AppTheme.darkTextPrimary
+                                : AppTheme.lightTextPrimary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Play/Pause button
+                  IconButton(
+                    onPressed: _toggleTts,
+                    icon: Icon(
+                      _ttsState == TtsState.playing
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                      color: isDark
+                          ? AppTheme.primaryPurpleDark
+                          : AppTheme.primaryPurple,
+                    ),
+                    style: IconButton.styleFrom(
+                      backgroundColor: (isDark
+                              ? AppTheme.primaryPurpleDark
+                              : AppTheme.primaryPurple)
+                          .withAlpha(25),
+                    ),
+                  ),
+                  // Stop button
+                  IconButton(
+                    onPressed: _stopTts,
+                    icon: Icon(
+                      Icons.stop_rounded,
+                      color: isDark
+                          ? AppTheme.darkTextSecondary
+                          : AppTheme.lightTextSecondary,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),

@@ -137,4 +137,35 @@ class UserService {
     prefs.selectedModel = model;
     await savePreferences(prefs);
   }
+
+  // TTS Settings
+  static double getTtsSpeechRate() {
+    return getPreferences().ttsSpeechRate;
+  }
+
+  static Future<void> setTtsSpeechRate(double rate) async {
+    final prefs = getPreferences();
+    prefs.ttsSpeechRate = rate.clamp(0.0, 1.0);
+    await savePreferences(prefs);
+  }
+
+  static double getTtsPitch() {
+    return getPreferences().ttsPitch;
+  }
+
+  static Future<void> setTtsPitch(double pitch) async {
+    final prefs = getPreferences();
+    prefs.ttsPitch = pitch.clamp(0.5, 2.0);
+    await savePreferences(prefs);
+  }
+
+  static String? getTtsVoice() {
+    return getPreferences().ttsVoice;
+  }
+
+  static Future<void> setTtsVoice(String? voice) async {
+    final prefs = getPreferences();
+    prefs.ttsVoice = voice;
+    await savePreferences(prefs);
+  }
 }

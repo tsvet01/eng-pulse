@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/cached_summary.dart';
 import '../services/cache_service.dart';
+import '../services/tts_service.dart';
 import '../services/user_service.dart';
 import '../theme/app_theme.dart';
 
@@ -35,6 +37,9 @@ class _SummaryCardState extends State<SummaryCard>
     with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _scaleAnimation;
+  final TtsService _ttsService = TtsService.instance;
+  StreamSubscription<TtsState>? _ttsSubscription;
+  bool _isPlaying = false;
 
   @override
   void initState() {
@@ -46,10 +51,24 @@ class _SummaryCardState extends State<SummaryCard>
     _scaleAnimation = Tween<double>(begin: 1.0, end: 0.98).animate(
       CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
     );
+    _checkPlayingState();
+    _ttsSubscription = _ttsService.stateStream.listen((_) {
+      _checkPlayingState();
+    });
+  }
+
+  void _checkPlayingState() {
+    final isPlaying = _ttsService.isPlayingArticle(widget.summary.url);
+    if (_isPlaying != isPlaying && mounted) {
+      setState(() {
+        _isPlaying = isPlaying;
+      });
+    }
   }
 
   @override
   void dispose() {
+    _ttsSubscription?.cancel();
     _animationController.dispose();
     super.dispose();
   }
@@ -160,8 +179,38 @@ class _SummaryCardState extends State<SummaryCard>
                             ),
                           ),
                           const Spacer(),
+                          // Playing indicator
+                          if (_isPlaying)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: (isDark
+                                        ? AppTheme.primaryPurpleDark
+                                        : AppTheme.primaryPurple)
+                                    .withAlpha(30),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _buildPlayingAnimation(isDark),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Playing',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: isDark
+                                          ? AppTheme.primaryPurpleDark
+                                          : AppTheme.primaryPurple,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
                           // Read indicator
-                          if (isRead)
+                          else if (isRead)
                             Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 8, vertical: 4),
@@ -252,6 +301,36 @@ class _SummaryCardState extends State<SummaryCard>
             );
           },
         ),
+      ),
+    );
+  }
+
+  Widget _buildPlayingAnimation(bool isDark) {
+    return SizedBox(
+      width: 14,
+      height: 12,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: List.generate(3, (index) {
+          return TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0.3, end: 1.0),
+            duration: Duration(milliseconds: 300 + (index * 100)),
+            curve: Curves.easeInOut,
+            builder: (context, value, child) {
+              return AnimatedContainer(
+                duration: Duration(milliseconds: 300 + (index * 100)),
+                width: 2,
+                height: 12 * (0.3 + (0.7 * ((index + 1) / 3))),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? AppTheme.primaryPurpleDark
+                      : AppTheme.primaryPurple,
+                  borderRadius: BorderRadius.circular(1),
+                ),
+              );
+            },
+          );
+        }),
       ),
     );
   }

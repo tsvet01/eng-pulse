@@ -187,5 +187,63 @@ void main() {
         expect(UserService.getReadingHistory(), isEmpty);
       });
     });
+
+    group('TTS Settings', () {
+      test('getTtsSpeechRate returns default value initially', () {
+        final rate = UserService.getTtsSpeechRate();
+        expect(rate, 0.5);
+      });
+
+      test('setTtsSpeechRate updates preference', () async {
+        await UserService.setTtsSpeechRate(0.75);
+
+        expect(UserService.getTtsSpeechRate(), 0.75);
+      });
+
+      test('setTtsSpeechRate clamps value to valid range', () async {
+        await UserService.setTtsSpeechRate(1.5); // Above max
+        expect(UserService.getTtsSpeechRate(), 1.0);
+
+        await UserService.setTtsSpeechRate(-0.5); // Below min
+        expect(UserService.getTtsSpeechRate(), 0.0);
+      });
+
+      test('getTtsPitch returns default value initially', () {
+        final pitch = UserService.getTtsPitch();
+        expect(pitch, 1.0);
+      });
+
+      test('setTtsPitch updates preference', () async {
+        await UserService.setTtsPitch(1.5);
+
+        expect(UserService.getTtsPitch(), 1.5);
+      });
+
+      test('setTtsPitch clamps value to valid range', () async {
+        await UserService.setTtsPitch(3.0); // Above max
+        expect(UserService.getTtsPitch(), 2.0);
+
+        await UserService.setTtsPitch(0.1); // Below min
+        expect(UserService.getTtsPitch(), 0.5);
+      });
+
+      test('getTtsVoice returns null initially', () {
+        final voice = UserService.getTtsVoice();
+        expect(voice, isNull);
+      });
+
+      test('setTtsVoice updates preference', () async {
+        await UserService.setTtsVoice('en-US-Wavenet-A');
+
+        expect(UserService.getTtsVoice(), 'en-US-Wavenet-A');
+      });
+
+      test('setTtsVoice can be set to null', () async {
+        await UserService.setTtsVoice('some-voice');
+        await UserService.setTtsVoice(null);
+
+        expect(UserService.getTtsVoice(), isNull);
+      });
+    });
   });
 }

@@ -63,18 +63,21 @@ class UserPreferencesAdapter extends TypeAdapter<UserPreferences> {
       for (int i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),
     };
     return UserPreferences(
-      notificationsEnabled: fields[0] as bool,
-      dailyBriefingEnabled: fields[1] as bool,
-      preferredTime: fields[2] as String,
+      notificationsEnabled: fields[0] as bool? ?? true,
+      dailyBriefingEnabled: fields[1] as bool? ?? true,
+      preferredTime: fields[2] as String? ?? "08:00",
       preferredTopics: (fields[3] as List?)?.cast<String>(),
-      selectedModel: fields[4] as String,
+      selectedModel: fields[4] as String? ?? 'gemini',
+      ttsSpeechRate: fields[5] as double? ?? 0.5,
+      ttsPitch: fields[6] as double? ?? 1.0,
+      ttsVoice: fields[7] as String?,
     );
   }
 
   @override
   void write(BinaryWriter writer, UserPreferences obj) {
     writer
-      ..writeByte(5)
+      ..writeByte(8)
       ..writeByte(0)
       ..write(obj.notificationsEnabled)
       ..writeByte(1)
@@ -84,7 +87,13 @@ class UserPreferencesAdapter extends TypeAdapter<UserPreferences> {
       ..writeByte(3)
       ..write(obj.preferredTopics)
       ..writeByte(4)
-      ..write(obj.selectedModel);
+      ..write(obj.selectedModel)
+      ..writeByte(5)
+      ..write(obj.ttsSpeechRate)
+      ..writeByte(6)
+      ..write(obj.ttsPitch)
+      ..writeByte(7)
+      ..write(obj.ttsVoice);
   }
 
   @override
