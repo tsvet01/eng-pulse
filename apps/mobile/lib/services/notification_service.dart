@@ -4,6 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:http/http.dart' as http;
 
 /// Background message handler - must be top-level function
 @pragma('vm:entry-point')
@@ -23,6 +24,10 @@ class NotificationService {
 
   static String? get fcmToken => _fcmToken;
   static bool get isAvailable => _firebaseAvailable;
+
+  /// Backend API endpoint for FCM token registration
+  static const String _registerTokenUrl =
+      'https://us-central1-tsvet01.cloudfunctions.net/register-token';
 
   /// Initialize notification service
   /// Call this after Firebase.initializeApp()
@@ -48,8 +53,8 @@ class NotificationService {
       // Listen for token refresh
       _messaging!.onTokenRefresh.listen((token) {
         _fcmToken = token;
-        debugPrint('FCM Token refreshed: $token');
-        // TODO: Send new token to your server
+        debugPrint('FCM Token refreshed');
+        _registerTokenWithBackend(token);
       });
 
       // Handle foreground messages
@@ -129,10 +134,37 @@ class NotificationService {
   static Future<void> _getToken() async {
     try {
       _fcmToken = await _messaging!.getToken();
-      debugPrint('FCM Token: $_fcmToken');
-      // TODO: Send token to your server for push notifications
+      debugPrint('FCM Token obtained');
+      if (_fcmToken != null) {
+        await _registerTokenWithBackend(_fcmToken!);
+      }
     } catch (e) {
       debugPrint('Failed to get FCM token: $e');
+    }
+  }
+
+  /// Register FCM token with backend for push notifications
+  static Future<void> _registerTokenWithBackend(String token) async {
+    try {
+      final platform = Platform.isIOS ? 'ios' : (Platform.isAndroid ? 'android' : 'web');
+
+      final response = await http.post(
+        Uri.parse(_registerTokenUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'token': token,
+          'platform': platform,
+          'app_version': '1.0.0',
+        }),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        debugPrint('FCM token registered with backend');
+      } else {
+        debugPrint('Failed to register token: ${response.statusCode}');
+      }
+    } catch (e) {
+      debugPrint('Error registering token with backend: $e');
     }
   }
 

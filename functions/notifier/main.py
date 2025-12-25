@@ -4,8 +4,22 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from google.cloud import storage
+from google.cloud import firestore
+import firebase_admin
+from firebase_admin import credentials, messaging
 import markdown
 import bleach
+
+# Initialize Firebase Admin SDK (uses default credentials in Cloud Functions)
+_firebase_app = None
+
+
+def get_firebase_app():
+    """Lazy-load Firebase Admin app."""
+    global _firebase_app
+    if _firebase_app is None:
+        _firebase_app = firebase_admin.initialize_app()
+    return _firebase_app
 
 # Allowed HTML tags for email content sanitization
 ALLOWED_TAGS = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li',
@@ -32,6 +46,89 @@ def sanitize_filename(filename: str) -> str:
 def should_process_file(file_name: str) -> bool:
     """Check if file should be processed (summaries/*.md only)."""
     return file_name.startswith("summaries/") and file_name.endswith(".md")
+
+
+def send_fcm_notifications(title: str, body: str, article_url: str) -> int:
+    """
+    Send FCM push notifications to all registered devices.
+
+    Args:
+        title: Notification title
+        body: Notification body (summary snippet)
+        article_url: URL to the summary for deep linking
+
+    Returns:
+        Number of notifications sent successfully
+    """
+    try:
+        # Initialize Firebase if not already done
+        get_firebase_app()
+
+        # Get all active FCM tokens from Firestore
+        db = firestore.Client()
+        tokens_ref = db.collection("fcm_tokens").where("active", "==", True)
+        docs = tokens_ref.stream()
+
+        tokens = []
+        for doc in docs:
+            data = doc.to_dict()
+            if data.get("token"):
+                tokens.append(data["token"])
+
+        if not tokens:
+            print("No active FCM tokens found")
+            return 0
+
+        print(f"Sending FCM to {len(tokens)} devices")
+
+        # Batch send (FCM supports up to 500 per request)
+        batch_size = 500
+        success_count = 0
+
+        for i in range(0, len(tokens), batch_size):
+            batch_tokens = tokens[i:i + batch_size]
+
+            message = messaging.MulticastMessage(
+                notification=messaging.Notification(
+                    title=title,
+                    body=body,
+                ),
+                data={
+                    "article_url": article_url,
+                    "click_action": "FLUTTER_NOTIFICATION_CLICK",
+                },
+                tokens=batch_tokens,
+            )
+
+            response = messaging.send_each_for_multicast(message)
+            success_count += response.success_count
+
+            # Handle failed tokens (mark as inactive)
+            if response.failure_count > 0:
+                for idx, send_response in enumerate(response.responses):
+                    if not send_response.success:
+                        failed_token = batch_tokens[idx]
+                        error = send_response.exception
+                        print(f"Failed to send to token: {error}")
+
+                        # Mark token as inactive if it's invalid
+                        if hasattr(error, 'code') and error.code in (
+                            'messaging/invalid-registration-token',
+                            'messaging/registration-token-not-registered'
+                        ):
+                            try:
+                                db.collection("fcm_tokens").document(failed_token).update({
+                                    "active": False
+                                })
+                            except Exception as e:
+                                print(f"Failed to deactivate token: {e}")
+
+        print(f"FCM notifications sent: {success_count}/{len(tokens)}")
+        return success_count
+
+    except Exception as e:
+        print(f"Error sending FCM notifications: {e}")
+        return 0
 
 
 @functions_framework.cloud_event
@@ -61,6 +158,29 @@ def send_summary_email(cloud_event):
 
     # Send Email
     send_email(file_name, html_content)
+
+    # Send FCM push notifications
+    # Extract title from content (first line or heading)
+    title = "Daily Engineering Briefing"
+    lines = content.strip().split('\n')
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith('#'):
+            title = stripped.lstrip('#').strip()
+            break
+        elif stripped and not stripped.startswith('*'):
+            title = stripped[:80] + ('...' if len(stripped) > 80 else '')
+            break
+
+    # Create snippet for notification body
+    body = content[:150].replace('#', '').replace('*', '').strip()
+    if len(content) > 150:
+        body += '...'
+
+    # Public URL for the summary
+    article_url = f"https://storage.googleapis.com/{bucket_name}/{file_name}"
+
+    send_fcm_notifications(title, body, article_url)
 
 def send_email(subject_file, html_body):
     gmail_user = os.environ.get("GMAIL_USER")
