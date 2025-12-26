@@ -1,25 +1,30 @@
 import functions_framework
 import os
 import smtplib
+import json
+import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from google.cloud import storage
 from google.cloud import firestore
-import firebase_admin
-from firebase_admin import credentials, messaging
+from google.auth.transport.requests import Request
+from google.oauth2 import service_account
+import google.auth
 import markdown
 import bleach
 
-# Initialize Firebase Admin SDK (uses default credentials in Cloud Functions)
-_firebase_app = None
+# FCM HTTP v1 API endpoint
+FCM_API_URL = "https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
+PROJECT_ID = os.environ.get('GOOGLE_CLOUD_PROJECT', 'tsvet01')
 
 
-def get_firebase_app():
-    """Lazy-load Firebase Admin app."""
-    global _firebase_app
-    if _firebase_app is None:
-        _firebase_app = firebase_admin.initialize_app()
-    return _firebase_app
+def get_access_token():
+    """Get OAuth2 access token for FCM API using application default credentials."""
+    credentials, project = google.auth.default(
+        scopes=['https://www.googleapis.com/auth/firebase.messaging']
+    )
+    credentials.refresh(Request())
+    return credentials.token
 
 # Allowed HTML tags for email content sanitization
 ALLOWED_TAGS = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li',
@@ -48,6 +53,31 @@ def should_process_file(file_name: str) -> bool:
     return file_name.startswith("summaries/") and file_name.endswith(".md")
 
 
+def send_fcm_notification_http(token: str, title: str, body: str, article_url: str, access_token: str) -> bool:
+    """Send FCM notification using HTTP v1 API."""
+    url = FCM_API_URL.format(project_id=PROJECT_ID)
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json; UTF-8',
+    }
+    payload = {
+        'message': {
+            'token': token,
+            'notification': {
+                'title': title,
+                'body': body,
+            },
+            'data': {
+                'article_url': article_url,
+                'click_action': 'FLUTTER_NOTIFICATION_CLICK',
+            },
+        }
+    }
+
+    response = requests.post(url, headers=headers, json=payload)
+    return response.status_code == 200, response.text
+
+
 def send_fcm_notifications(title: str, body: str, article_url: str) -> int:
     """
     Send FCM push notifications to all registered devices.
@@ -61,8 +91,9 @@ def send_fcm_notifications(title: str, body: str, article_url: str) -> int:
         Number of notifications sent successfully
     """
     try:
-        # Initialize Firebase if not already done
-        get_firebase_app()
+        # Get access token for FCM API
+        access_token = get_access_token()
+        print(f"Got FCM access token")
 
         # Get all active FCM tokens from Firestore
         db = firestore.Client()
@@ -70,64 +101,46 @@ def send_fcm_notifications(title: str, body: str, article_url: str) -> int:
         docs = tokens_ref.stream()
 
         tokens = []
+        doc_ids = []
         for doc in docs:
             data = doc.to_dict()
             if data.get("token"):
                 tokens.append(data["token"])
+                doc_ids.append(doc.id)
 
         if not tokens:
             print("No active FCM tokens found")
             return 0
 
         print(f"Sending FCM to {len(tokens)} devices")
-
-        # Batch send (FCM supports up to 500 per request)
-        batch_size = 500
         success_count = 0
 
-        for i in range(0, len(tokens), batch_size):
-            batch_tokens = tokens[i:i + batch_size]
-
-            message = messaging.MulticastMessage(
-                notification=messaging.Notification(
-                    title=title,
-                    body=body,
-                ),
-                data={
-                    "article_url": article_url,
-                    "click_action": "FLUTTER_NOTIFICATION_CLICK",
-                },
-                tokens=batch_tokens,
+        for i, token in enumerate(tokens):
+            success, response_text = send_fcm_notification_http(
+                token, title, body, article_url, access_token
             )
-
-            response = messaging.send_each_for_multicast(message)
-            success_count += response.success_count
-
-            # Handle failed tokens (mark as inactive)
-            if response.failure_count > 0:
-                for idx, send_response in enumerate(response.responses):
-                    if not send_response.success:
-                        failed_token = batch_tokens[idx]
-                        error = send_response.exception
-                        print(f"Failed to send to token: {error}")
-
-                        # Mark token as inactive if it's invalid
-                        if hasattr(error, 'code') and error.code in (
-                            'messaging/invalid-registration-token',
-                            'messaging/registration-token-not-registered'
-                        ):
-                            try:
-                                db.collection("fcm_tokens").document(failed_token).update({
-                                    "active": False
-                                })
-                            except Exception as e:
-                                print(f"Failed to deactivate token: {e}")
+            if success:
+                success_count += 1
+                print(f"FCM sent successfully to device {i+1}")
+            else:
+                print(f"Failed to send FCM to device {i+1}: {response_text}")
+                # Mark invalid tokens as inactive
+                if 'UNREGISTERED' in response_text or 'INVALID_ARGUMENT' in response_text:
+                    try:
+                        db.collection("fcm_tokens").document(doc_ids[i]).update({
+                            "active": False
+                        })
+                        print(f"Marked token {doc_ids[i]} as inactive")
+                    except Exception as e:
+                        print(f"Failed to deactivate token: {e}")
 
         print(f"FCM notifications sent: {success_count}/{len(tokens)}")
         return success_count
 
     except Exception as e:
         print(f"Error sending FCM notifications: {e}")
+        import traceback
+        traceback.print_exc()
         return 0
 
 
