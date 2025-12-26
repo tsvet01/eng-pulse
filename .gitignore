@@ -31,3 +31,8 @@ gcp_key.json
 
 # Logs
 *.log
+
+# Firebase config files (contain API keys)
+apps/mobile/ios/Runner/GoogleService-Info.plist
+apps/mobile/android/app/google-services.json
+apps/mobile/lib/firebase_options.dart
