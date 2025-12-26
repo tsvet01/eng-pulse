@@ -17,10 +17,11 @@ void main() async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-    // Initialize notifications after Firebase
-    await NotificationService.init();
-    // Subscribe to daily briefings topic
-    await NotificationService.subscribeToTopic('daily_briefings');
+    // Initialize notifications after Firebase (non-blocking)
+    NotificationService.init().then((_) {
+      // Subscribe to daily briefings topic after init completes
+      NotificationService.subscribeToTopic('daily_briefings');
+    });
   } catch (e) {
     debugPrint('Firebase initialization failed: $e');
   }

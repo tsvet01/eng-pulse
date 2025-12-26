@@ -136,7 +136,8 @@ class NotificationService {
       _fcmToken = await _messaging!.getToken();
       debugPrint('FCM Token obtained');
       if (_fcmToken != null) {
-        await _registerTokenWithBackend(_fcmToken!);
+        // Fire and forget - don't block app startup
+        _registerTokenWithBackend(_fcmToken!);
       }
     } catch (e) {
       debugPrint('Failed to get FCM token: $e');
