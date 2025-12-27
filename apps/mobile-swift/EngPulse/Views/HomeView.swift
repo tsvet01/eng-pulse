@@ -10,7 +10,7 @@ struct HomeView: View {
         }
         return appState.summaries.filter { summary in
             summary.title.localizedCaseInsensitiveContains(searchText) ||
-            summary.summary.localizedCaseInsensitiveContains(searchText) ||
+            (summary.summarySnippet ?? "").localizedCaseInsensitiveContains(searchText) ||
             summary.source.localizedCaseInsensitiveContains(searchText)
         }
     }
@@ -64,7 +64,7 @@ struct SummaryCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Header with source and category
+            // Header with source and model
             HStack {
                 Text(summary.source)
                     .font(.caption)
@@ -73,7 +73,7 @@ struct SummaryCardView: View {
 
                 Spacer()
 
-                Label(summary.category.displayName, systemImage: summary.category.iconName)
+                Label(summary.modelDisplayName, systemImage: summary.category.iconName)
                     .font(.caption2)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
@@ -88,20 +88,22 @@ struct SummaryCardView: View {
                 .lineLimit(2)
 
             // Summary preview
-            Text(summary.summary)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .lineLimit(3)
+            if let snippet = summary.summarySnippet {
+                Text(snippet)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .lineLimit(3)
+            }
 
-            // Footer with date and read time
+            // Footer with date
             HStack {
-                Text(summary.publishedAt, style: .relative)
+                Text(summary.displayDate, style: .relative)
                     .font(.caption2)
                     .foregroundColor(.secondary)
 
                 Spacer()
 
-                Label("\(summary.readTimeMinutes) min", systemImage: "clock")
+                Text(summary.date)
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }

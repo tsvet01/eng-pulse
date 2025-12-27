@@ -2,86 +2,90 @@ import Foundation
 
 // MARK: - Summary Model
 struct Summary: Identifiable, Codable, Equatable {
-    let id: String
-    let title: String
+    var id: String { "\(date)-\(model ?? "unknown")" }
+    let date: String
     let url: String
-    let summary: String
-    let keyPoints: [String]
-    let source: String
-    let publishedAt: Date
-    let category: Category
-    let readTimeMinutes: Int
+    let title: String
+    let summarySnippet: String?
+    let originalUrl: String?
+    let model: String?
+    let selectedBy: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, url, summary
-        case keyPoints = "key_points"
-        case source
-        case publishedAt = "published_at"
-        case category
-        case readTimeMinutes = "read_time_minutes"
+        case date, url, title
+        case summarySnippet = "summary_snippet"
+        case originalUrl = "original_url"
+        case model
+        case selectedBy = "selected_by"
     }
 
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(String.self, forKey: .id)
-        title = try container.decode(String.self, forKey: .title)
-        url = try container.decode(String.self, forKey: .url)
-        summary = try container.decode(String.self, forKey: .summary)
-        keyPoints = try container.decodeIfPresent([String].self, forKey: .keyPoints) ?? []
-        source = try container.decode(String.self, forKey: .source)
-        category = try container.decodeIfPresent(Category.self, forKey: .category) ?? .general
-        readTimeMinutes = try container.decodeIfPresent(Int.self, forKey: .readTimeMinutes) ?? 5
-
-        // Parse date string
-        let dateString = try container.decode(String.self, forKey: .publishedAt)
-        let formatter = ISO8601DateFormatter()
-        publishedAt = formatter.date(from: dateString) ?? Date()
+    // Computed properties for UI
+    var displayDate: Date {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: date) ?? Date()
     }
 
-    // For creating test/preview data
-    init(
-        id: String,
-        title: String,
-        url: String,
-        summary: String,
-        keyPoints: [String],
-        source: String,
-        publishedAt: Date,
-        category: Category,
-        readTimeMinutes: Int
-    ) {
-        self.id = id
-        self.title = title
-        self.url = url
-        self.summary = summary
-        self.keyPoints = keyPoints
-        self.source = source
-        self.publishedAt = publishedAt
-        self.category = category
-        self.readTimeMinutes = readTimeMinutes
+    var source: String {
+        guard let urlString = originalUrl,
+              let url = URL(string: urlString),
+              let host = url.host else {
+            return "Unknown"
+        }
+        // Extract domain name without www
+        return host.replacingOccurrences(of: "www.", with: "")
+            .components(separatedBy: ".").first?.capitalized ?? host
+    }
+
+    var modelDisplayName: String {
+        guard let model = model else { return "Unknown" }
+        if model.contains("gemini") { return "Gemini" }
+        if model.contains("claude") { return "Claude" }
+        if model.contains("gpt") { return "GPT" }
+        return model
+    }
+
+    var category: Category {
+        // Infer category from title/content
+        let titleLower = title.lowercased()
+        if titleLower.contains("rust") || titleLower.contains("api") ||
+           titleLower.contains("tcp") || titleLower.contains("dns") ||
+           titleLower.contains("code") || titleLower.contains("wasm") {
+            return .engineering
+        }
+        if titleLower.contains("ai") || titleLower.contains("llm") ||
+           titleLower.contains("model") || titleLower.contains("agent") {
+            return .ai
+        }
+        if titleLower.contains("architecture") || titleLower.contains("design") ||
+           titleLower.contains("platform") {
+            return .architecture
+        }
+        return .general
     }
 }
 
 // MARK: - Category
 enum Category: String, Codable, CaseIterable {
     case engineering
-    case product
-    case leadership
-    case culture
-    case process
+    case ai
+    case architecture
     case general
 
     var displayName: String {
-        rawValue.capitalized
+        switch self {
+        case .engineering: return "Engineering"
+        case .ai: return "AI/ML"
+        case .architecture: return "Architecture"
+        case .general: return "General"
+        }
     }
 
     var iconName: String {
         switch self {
         case .engineering: return "hammer.fill"
-        case .product: return "shippingbox.fill"
-        case .leadership: return "person.3.fill"
-        case .culture: return "heart.fill"
-        case .process: return "gearshape.fill"
+        case .ai: return "brain.head.profile"
+        case .architecture: return "building.2.fill"
         case .general: return "doc.text.fill"
         }
     }
@@ -90,33 +94,25 @@ enum Category: String, Codable, CaseIterable {
 // MARK: - Preview Data
 extension Summary {
     static let preview = Summary(
-        id: "1",
-        title: "Building Scalable Systems at Scale",
-        url: "https://example.com/article",
-        summary: "An in-depth look at how modern tech companies build and maintain scalable systems that handle millions of requests.",
-        keyPoints: [
-            "Use horizontal scaling over vertical",
-            "Implement proper caching strategies",
-            "Monitor and measure everything"
-        ],
-        source: "Pragmatic Engineer",
-        publishedAt: Date(),
-        category: .engineering,
-        readTimeMinutes: 8
+        date: "2025-12-27",
+        url: "https://storage.googleapis.com/tsvet01-agent-brain/summaries/gemini/2025-12-27.md",
+        title: "The 3 a.m. Call That Changed The Way I Design APIs",
+        summarySnippet: "The guiding principle of reliable API design is simple...",
+        originalUrl: "https://thenewstack.io/the-3-a-m-call-that-changed-the-way-i-design-apis/",
+        model: "gemini-3-pro-preview",
+        selectedBy: "gemini-3-pro-preview"
     )
 
     static let previewList: [Summary] = [
         .preview,
         Summary(
-            id: "2",
-            title: "Product Management Best Practices",
-            url: "https://example.com/pm",
-            summary: "Essential practices for product managers in tech companies.",
-            keyPoints: ["Focus on outcomes", "Talk to customers"],
-            source: "Lenny's Newsletter",
-            publishedAt: Date().addingTimeInterval(-86400),
-            category: .product,
-            readTimeMinutes: 6
+            date: "2025-12-26",
+            url: "https://storage.googleapis.com/tsvet01-agent-brain/summaries/gemini/2025-12-26.md",
+            title: "Package managers keep using Git as a database",
+            summarySnippet: "Using Git as a database never works out...",
+            originalUrl: "https://nesbitt.io/2025/12/24/package-managers-keep-using-git-as-a-database.html",
+            model: "gemini-3-pro-preview",
+            selectedBy: "gemini-3-pro-preview"
         )
     ]
 }

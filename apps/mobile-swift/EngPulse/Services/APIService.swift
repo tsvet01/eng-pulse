@@ -2,16 +2,16 @@ import Foundation
 
 // MARK: - API Service
 actor APIService {
-    private let baseURL = "https://storage.googleapis.com/se-agent-summaries"
+    private let baseURL = "https://storage.googleapis.com/tsvet01-agent-brain"
     private let session: URLSession
 
     init(session: URLSession = .shared) {
         self.session = session
     }
 
-    /// Fetch summaries from the API
+    /// Fetch summaries from the manifest
     func fetchSummaries() async throws -> [Summary] {
-        let url = URL(string: "\(baseURL)/summaries.json")!
+        let url = URL(string: "\(baseURL)/manifest.json")!
         let (data, response) = try await session.data(from: url)
 
         guard let httpResponse = response as? HTTPURLResponse else {

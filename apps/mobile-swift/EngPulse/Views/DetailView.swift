@@ -2,7 +2,6 @@ import SwiftUI
 
 struct DetailView: View {
     let summary: Summary
-    @State private var showFullContent = false
     @State private var fullContent: String?
     @State private var isLoadingContent = false
     @Environment(\.openURL) private var openURL
@@ -17,11 +16,6 @@ struct DetailView: View {
 
                 // Summary
                 summarySection
-
-                // Key Points
-                if !summary.keyPoints.isEmpty {
-                    keyPointsSection
-                }
 
                 Divider()
 
@@ -38,11 +32,16 @@ struct DetailView: View {
         .navigationTitle("Article")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                ShareLink(item: URL(string: summary.url)!) {
-                    Image(systemName: "square.and.arrow.up")
+            if let originalUrl = summary.originalUrl, let url = URL(string: originalUrl) {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    ShareLink(item: url) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
                 }
             }
+        }
+        .task {
+            await loadFullContent()
         }
     }
 
@@ -57,7 +56,7 @@ struct DetailView: View {
 
                 Spacer()
 
-                Text(summary.publishedAt, style: .date)
+                Text(summary.date)
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -67,7 +66,7 @@ struct DetailView: View {
                 .fontWeight(.bold)
 
             HStack(spacing: 16) {
-                Label(summary.category.displayName, systemImage: summary.category.iconName)
+                Label(summary.modelDisplayName, systemImage: summary.category.iconName)
                     .font(.caption)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
@@ -75,77 +74,54 @@ struct DetailView: View {
                     .foregroundColor(.accentColor)
                     .cornerRadius(8)
 
-                Label("\(summary.readTimeMinutes) min read", systemImage: "clock")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-        }
-    }
-
-    private var summarySection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Summary")
-                .font(.headline)
-
-            Text(summary.summary)
-                .font(.body)
-                .foregroundColor(.secondary)
-                .lineSpacing(4)
-        }
-    }
-
-    private var keyPointsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Key Points")
-                .font(.headline)
-
-            ForEach(Array(summary.keyPoints.enumerated()), id: \.offset) { index, point in
-                HStack(alignment: .top, spacing: 12) {
-                    Text("\(index + 1)")
+                if let selectedBy = summary.selectedBy {
+                    Text("Selected by \(selectedBy.contains("gemini") ? "Gemini" : selectedBy.contains("claude") ? "Claude" : selectedBy)")
                         .font(.caption)
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                        .frame(width: 24, height: 24)
-                        .background(Color.accentColor)
-                        .clipShape(Circle())
-
-                    Text(point)
-                        .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
             }
         }
     }
 
+    private var summarySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Preview")
+                .font(.headline)
+
+            Text(summary.summarySnippet ?? "No preview available")
+                .font(.body)
+                .foregroundColor(.secondary)
+                .lineSpacing(4)
+        }
+    }
+
     private var actionsSection: some View {
         VStack(spacing: 12) {
-            Button {
-                openURL(URL(string: summary.url)!)
-            } label: {
-                Label("Read Original Article", systemImage: "safari")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-
-            Button {
-                Task { await loadFullContent() }
-            } label: {
-                if isLoadingContent {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
-                } else {
-                    Label("Load Full Content", systemImage: "doc.text")
+            if let originalUrl = summary.originalUrl, let url = URL(string: originalUrl) {
+                Button {
+                    openURL(url)
+                } label: {
+                    Label("Read Original Article", systemImage: "safari")
                         .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.borderedProminent)
+            }
+
+            Button {
+                if let url = URL(string: summary.url) {
+                    openURL(url)
+                }
+            } label: {
+                Label("View Full Summary", systemImage: "doc.text")
+                    .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
-            .disabled(isLoadingContent || fullContent != nil)
         }
     }
 
     private func fullContentSection(_ content: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Full Content")
+            Text("Full Summary")
                 .font(.headline)
 
             Text(content)
@@ -161,13 +137,15 @@ struct DetailView: View {
         isLoadingContent = true
         defer { isLoadingContent = false }
 
-        // Simulate loading full content
-        // In a real app, this would call an API
+        guard let url = URL(string: summary.url) else { return }
+
         do {
-            try await Task.sleep(nanoseconds: 1_000_000_000)
-            fullContent = "Full article content would be loaded here from the API. This is a placeholder demonstrating the async loading pattern in SwiftUI."
+            let (data, _) = try await URLSession.shared.data(from: url)
+            if let content = String(data: data, encoding: .utf8) {
+                fullContent = content
+            }
         } catch {
-            // Handle cancellation
+            print("Failed to load content: \(error)")
         }
     }
 }
