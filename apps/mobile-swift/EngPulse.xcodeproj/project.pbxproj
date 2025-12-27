@@ -16,6 +16,7 @@
 		A1000007 /* APIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000007 /* APIService.swift */; };
 		A1000008 /* CacheService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000008 /* CacheService.swift */; };
 		A1000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000009 /* Assets.xcassets */; };
+		A100000A /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000B /* NotificationService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -29,6 +30,8 @@
 		A2000008 /* CacheService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheService.swift; sourceTree = "<group>"; };
 		A2000009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A2000010 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A200000B /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
+		A200000C /* EngPulse.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = EngPulse.entitlements; sourceTree = "<group>"; };
 		A3000001 /* EngPulse.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EngPulse.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -60,6 +63,7 @@
 				A5000006 /* Services */,
 				A2000009 /* Assets.xcassets */,
 				A2000010 /* Info.plist */,
+				A200000C /* EngPulse.entitlements */,
 			);
 			path = EngPulse;
 			sourceTree = "<group>";
@@ -96,6 +100,7 @@
 			children = (
 				A2000007 /* APIService.swift */,
 				A2000008 /* CacheService.swift */,
+				A200000B /* NotificationService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -177,6 +182,7 @@
 				A1000006 /* Summary.swift in Sources */,
 				A1000007 /* APIService.swift in Sources */,
 				A1000008 /* CacheService.swift in Sources */,
+				A100000A /* NotificationService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -307,6 +313,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = EngPulse/EngPulse.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
@@ -337,6 +344,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = EngPulse/EngPulse.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";

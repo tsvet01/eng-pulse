@@ -2,7 +2,9 @@ import SwiftUI
 
 @main
 struct EngPulseApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appState = AppState()
+    @StateObject private var notificationService = NotificationService.shared
 
     init() {
         // Configure app appearance
@@ -13,6 +15,10 @@ struct EngPulseApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(appState)
+                .environmentObject(notificationService)
+                .task {
+                    await setupNotifications()
+                }
         }
     }
 
@@ -22,6 +28,57 @@ struct EngPulseApp: App {
         appearance.configureWithOpaqueBackground()
         UINavigationBar.appearance().standardAppearance = appearance
         UINavigationBar.appearance().scrollEdgeAppearance = appearance
+    }
+
+    private func setupNotifications() async {
+        // Set up notification delegate
+        UNUserNotificationCenter.current().delegate = notificationService
+
+        // Request authorization
+        let granted = await notificationService.requestAuthorization()
+        print("Notification permission: \(granted ? "granted" : "denied")")
+
+        // Subscribe to daily briefings topic
+        if granted {
+            notificationService.subscribeToTopic("daily_briefings")
+        }
+    }
+}
+
+// MARK: - App Delegate for Push Notifications
+class AppDelegate: NSObject, UIApplicationDelegate {
+
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        return true
+    }
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        Task { @MainActor in
+            NotificationService.shared.didRegisterForRemoteNotifications(deviceToken: deviceToken)
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        print("Failed to register for remote notifications: \(error)")
+    }
+
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any]
+    ) async -> UIBackgroundFetchResult {
+        Task { @MainActor in
+            NotificationService.shared.handleNotification(userInfo)
+        }
+        return .newData
     }
 }
 
