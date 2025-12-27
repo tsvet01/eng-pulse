@@ -38,8 +38,12 @@ struct HomeView: View {
             .toolbar {
                 if appState.isOffline {
                     ToolbarItem(placement: .navigationBarTrailing) {
-                        Label("Offline", systemImage: "wifi.slash")
-                            .foregroundColor(.orange)
+                        HStack(spacing: 4) {
+                            Image(systemName: "icloud.slash")
+                            Text("Cached")
+                                .font(.caption)
+                        }
+                        .foregroundColor(.orange)
                     }
                 }
             }

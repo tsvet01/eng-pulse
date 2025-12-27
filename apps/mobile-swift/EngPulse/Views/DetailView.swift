@@ -48,38 +48,30 @@ struct DetailView: View {
     // MARK: - Sections
 
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
+            // Source and date on one line
             HStack {
-                Label(summary.source, systemImage: "newspaper")
-                    .font(.subheadline)
+                Text(summary.source)
+                    .font(.caption)
                     .foregroundColor(.secondary)
-
-                Spacer()
-
+                Text("•")
+                    .foregroundColor(.secondary)
                 Text(summary.date)
                     .font(.caption)
                     .foregroundColor(.secondary)
+                Spacer()
+                Text(summary.modelDisplayName)
+                    .font(.caption)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.accentColor.opacity(0.1))
+                    .foregroundColor(.accentColor)
+                    .cornerRadius(6)
             }
 
             Text(summary.title)
-                .font(.title2)
-                .fontWeight(.bold)
-
-            HStack(spacing: 16) {
-                Label(summary.modelDisplayName, systemImage: summary.category.iconName)
-                    .font(.caption)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.accentColor.opacity(0.1))
-                    .foregroundColor(.accentColor)
-                    .cornerRadius(8)
-
-                if let selectedBy = summary.selectedBy {
-                    Text("Selected by \(selectedBy.contains("gemini") ? "Gemini" : selectedBy.contains("claude") ? "Claude" : selectedBy)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
+                .font(.headline)
+                .fontWeight(.semibold)
         }
     }
 

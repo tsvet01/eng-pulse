@@ -3,7 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
     @AppStorage("dailyBriefingTime") private var dailyBriefingTime = "08:00"
-    @AppStorage("selectedModel") private var selectedModel = "gemini-2.0-flash"
+    @AppStorage("selectedModel") private var selectedModel = "claude-opus-4-5"
 
     var body: some View {
         NavigationStack {
@@ -29,9 +29,11 @@ struct SettingsView: View {
                 // AI Model Section
                 Section {
                     Picker("AI Model", selection: $selectedModel) {
+                        Text("Claude Opus 4.5").tag("claude-opus-4-5")
+                        Text("Claude Sonnet 4").tag("claude-sonnet-4")
                         Text("Gemini 2.0 Flash").tag("gemini-2.0-flash")
                         Text("Gemini 1.5 Pro").tag("gemini-1.5-pro")
-                        Text("Gemini 1.5 Flash").tag("gemini-1.5-flash")
+                        Text("GPT-5.2").tag("gpt-5.2")
                     }
                 } header: {
                     Text("AI Settings")
@@ -61,7 +63,7 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
 
-                    Link(destination: URL(string: "https://github.com/anthropics/agent-gemini")!) {
+                    Link(destination: URL(string: "https://github.com/tsvet01/eng-pulse")!) {
                         HStack {
                             Text("Source Code")
                             Spacer()
