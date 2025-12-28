@@ -74,6 +74,7 @@ struct HomeViewContent: View {
             }
         }
         .navigationTitle("Eng Pulse")
+        .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Summary.self) { summary in
             DetailView(summary: summary)
         }
@@ -95,30 +96,13 @@ struct HomeViewContent: View {
         }
     }
 
-    private var modelFilterPicker: some View {
-        Picker("Model", selection: $selectedFilter) {
-            ForEach(ModelFilter.allCases, id: \.rawValue) { filter in
-                Text(filter.rawValue).tag(filter.rawValue)
-            }
-        }
-        .pickerStyle(.segmented)
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-    }
-
     private var summaryList: some View {
-        VStack(spacing: 0) {
-            modelFilterPicker
-
-            List(filteredSummaries) { summary in
-                NavigationLink(value: summary) {
-                    SummaryCardView(summary: summary)
-                }
-                .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+        List(filteredSummaries) { summary in
+            NavigationLink(value: summary) {
+                SummaryCardView(summary: summary)
             }
-            .listStyle(.plain)
         }
+        .listStyle(.plain)
     }
 }
 
@@ -127,54 +111,36 @@ struct SummaryCardView: View {
     let summary: Summary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header with source and model
+        VStack(alignment: .leading, spacing: 6) {
+            // Source and date
             HStack {
                 Text(summary.source)
                     .font(.caption)
-                    .fontWeight(.medium)
                     .foregroundColor(.secondary)
 
-                Spacer()
+                Text("·")
+                    .foregroundColor(.secondary)
 
-                Label(summary.modelDisplayName, systemImage: summary.category.iconName)
-                    .font(.caption2)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.accentColor.opacity(0.1))
-                    .foregroundColor(.accentColor)
-                    .cornerRadius(8)
+                Text(summary.displayDate, style: .relative)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
             // Title
             Text(summary.title)
-                .font(.headline)
+                .font(.subheadline)
+                .fontWeight(.medium)
                 .lineLimit(2)
 
             // Summary preview
             if let snippet = summary.summarySnippet {
                 Text(snippet)
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundColor(.secondary)
-                    .lineLimit(3)
-            }
-
-            // Footer with date
-            HStack {
-                Text(summary.displayDate, style: .relative)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-
-                Spacer()
-
-                Text(summary.date)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .lineLimit(2)
             }
         }
-        .padding()
-        .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
+        .padding(.vertical, 4)
     }
 }
 
