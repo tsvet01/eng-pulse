@@ -2,7 +2,8 @@ import Foundation
 
 // MARK: - Summary Model
 struct Summary: Identifiable, Codable, Equatable {
-    var id: String { "\(date)-\(model ?? "unknown")" }
+    // Use URL as unique ID since it's guaranteed unique per summary
+    var id: String { url }
     let date: String
     let url: String
     let title: String
@@ -19,11 +20,16 @@ struct Summary: Identifiable, Codable, Equatable {
         case selectedBy = "selected_by"
     }
 
-    // Computed properties for UI
-    var displayDate: Date {
+    // Cached date formatter for performance
+    private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.date(from: date) ?? Date()
+        return formatter
+    }()
+
+    // Computed properties for UI
+    var displayDate: Date {
+        Self.dateFormatter.date(from: date) ?? Date()
     }
 
     var source: String {

@@ -78,12 +78,22 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         print("Failed to register for remote notifications: \(error)")
     }
 
-    func application(
+    // Note: Swift 6 warning about non-Sendable [AnyHashable: Any] is unavoidable
+    // until Apple updates UIApplicationDelegate protocol to be Sendable-compatible
+    nonisolated func application(
         _ application: UIApplication,
         didReceiveRemoteNotification userInfo: [AnyHashable: Any]
     ) async -> UIBackgroundFetchResult {
-        Task { @MainActor in
-            NotificationService.shared.handleNotification(userInfo)
+        // Extract only the Sendable data we need before crossing actor boundary
+        let articleUrl = userInfo["article_url"] as? String
+        await MainActor.run {
+            if let url = articleUrl {
+                NotificationCenter.default.post(
+                    name: .didReceiveArticleNotification,
+                    object: nil,
+                    userInfo: ["url": url]
+                )
+            }
         }
         return .newData
     }
@@ -108,9 +118,10 @@ class AppState: ObservableObject {
             summaries = try await apiService.fetchSummaries()
             // Cache the summaries
             try await cacheService.cacheSummaries(summaries)
+            isOffline = false  // Successfully loaded from network
         } catch {
             // Try loading from cache on error
-            if let cached = try? await cacheService.getCachedSummaries() {
+            if let cached = try? await cacheService.getCachedSummaries(), !cached.isEmpty {
                 summaries = cached
                 isOffline = true
             } else {

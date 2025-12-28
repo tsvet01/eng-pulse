@@ -11,7 +11,7 @@ enum ModelFilter: String, CaseIterable {
         guard self != .all else { return true }
         guard let model = modelString?.lowercased() else { return false }
         switch self {
-        case .all: return true
+        case .all: return true // Unreachable but required for exhaustive switch
         case .gemini: return model.contains("gemini")
         case .claude: return model.contains("claude")
         case .gpt: return model.contains("gpt") || model.contains("openai")

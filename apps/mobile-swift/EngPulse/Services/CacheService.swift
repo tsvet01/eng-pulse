@@ -6,24 +6,38 @@ actor CacheService {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    private var cacheDirectory: URL {
-        fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+    // Compute directory URLs using nonisolated static helper
+    private nonisolated static var baseCacheDirectory: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("EngPulse", isDirectory: true)
+    }
+
+    private var cacheDirectory: URL {
+        Self.baseCacheDirectory
     }
 
     private var summariesFile: URL {
         cacheDirectory.appendingPathComponent("summaries.json")
     }
 
+    private var directoryCreated = false
+
     init() {
-        // Ensure cache directory exists
+        // Directory creation is deferred to first use
+    }
+
+    /// Ensure the cache directory exists
+    private func ensureDirectoryExists() {
+        guard !directoryCreated else { return }
         try? fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+        directoryCreated = true
     }
 
     // MARK: - Summaries Cache
 
     /// Cache summaries to disk
     func cacheSummaries(_ summaries: [Summary]) async throws {
+        ensureDirectoryExists()
         let data = try encoder.encode(summaries)
         try data.write(to: summariesFile)
     }
@@ -47,14 +61,33 @@ actor CacheService {
 
     /// Cache markdown content for a summary
     func cacheContent(_ content: String, for summaryId: String) async throws {
-        let contentFile = cacheDirectory.appendingPathComponent("content_\(summaryId).txt")
+        ensureDirectoryExists()
+        let safeFilename = sanitizeFilename(summaryId)
+        let contentFile = cacheDirectory.appendingPathComponent("content_\(safeFilename).txt")
         try content.write(to: contentFile, atomically: true, encoding: .utf8)
     }
 
     /// Get cached content for a summary
     func getCachedContent(for summaryId: String) async -> String? {
-        let contentFile = cacheDirectory.appendingPathComponent("content_\(summaryId).txt")
+        let safeFilename = sanitizeFilename(summaryId)
+        let contentFile = cacheDirectory.appendingPathComponent("content_\(safeFilename).txt")
         return try? String(contentsOf: contentFile, encoding: .utf8)
+    }
+
+    /// Sanitize a string for use as a filename
+    private func sanitizeFilename(_ input: String) -> String {
+        // Use hashValue for a simple, safe filename
+        // Replace unsafe characters and truncate to reasonable length
+        let safe = input
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: ":", with: "_")
+            .replacingOccurrences(of: "?", with: "_")
+            .replacingOccurrences(of: "&", with: "_")
+            .replacingOccurrences(of: "=", with: "_")
+            .replacingOccurrences(of: "%", with: "_")
+        // Use last 50 chars to keep uniqueness while limiting length
+        let suffix = String(safe.suffix(50))
+        return suffix.isEmpty ? "default" : suffix
     }
 
     // MARK: - Cache Management
@@ -62,21 +95,25 @@ actor CacheService {
     /// Clear all cached data
     func clearAll() async {
         try? fileManager.removeItem(at: cacheDirectory)
-        try? fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+        directoryCreated = false
+        ensureDirectoryExists()
     }
 
     /// Get cache size in bytes
     func getCacheSize() async -> Int64 {
-        guard let enumerator = fileManager.enumerator(at: cacheDirectory, includingPropertiesForKeys: [.fileSizeKey]) else {
+        guard let contents = try? fileManager.contentsOfDirectory(
+            at: cacheDirectory,
+            includingPropertiesForKeys: [.fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else {
             return 0
         }
 
         var totalSize: Int64 = 0
-        for case let fileURL as URL in enumerator {
-            guard let fileSize = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
-                continue
+        for fileURL in contents {
+            if let fileSize = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                totalSize += Int64(fileSize)
             }
-            totalSize += Int64(fileSize)
         }
 
         return totalSize

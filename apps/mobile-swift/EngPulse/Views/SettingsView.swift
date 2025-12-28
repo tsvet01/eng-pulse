@@ -3,7 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
     @AppStorage("dailyBriefingTime") private var dailyBriefingTime = "08:00"
-    @AppStorage("ttsSpeechRate") private var speechRate: Double = 0.5
+    @AppStorage("ttsSpeechRate") private var speechRate: Double = 0.55
     @AppStorage("ttsPitch") private var pitch: Double = 1.0
 
     @State private var showClearCacheAlert = false
@@ -86,12 +86,14 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
 
-                    Link(destination: URL(string: "https://github.com/tsvet01/eng-pulse")!) {
-                        HStack {
-                            Text("Source Code")
-                            Spacer()
-                            Image(systemName: "arrow.up.right.square")
-                                .foregroundColor(.secondary)
+                    if let url = URL(string: "https://github.com/tsvet01/eng-pulse") {
+                        Link(destination: url) {
+                            HStack {
+                                Text("Source Code")
+                                Spacer()
+                                Image(systemName: "arrow.up.right.square")
+                                    .foregroundColor(.secondary)
+                            }
                         }
                     }
                 } header: {
@@ -115,9 +117,11 @@ struct SettingsView: View {
     }
 
     private func clearCache() {
-        // Clear cache implementation
+        // Clear cache using shared instance via AppState
+        // Note: For proper DI, this should be injected via environment
         Task {
-            await CacheService().clearAll()
+            let cacheService = CacheService()
+            await cacheService.clearAll()
         }
     }
 }

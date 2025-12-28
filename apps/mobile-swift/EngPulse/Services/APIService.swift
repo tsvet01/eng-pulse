@@ -5,13 +5,23 @@ actor APIService {
     private let baseURL = "https://storage.googleapis.com/tsvet01-agent-brain"
     private let session: URLSession
 
-    init(session: URLSession = .shared) {
-        self.session = session
+    init(session: URLSession? = nil) {
+        if let session = session {
+            self.session = session
+        } else {
+            // Configure session with reasonable timeouts
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 30
+            config.timeoutIntervalForResource = 60
+            self.session = URLSession(configuration: config)
+        }
     }
 
     /// Fetch summaries from the manifest
     func fetchSummaries() async throws -> [Summary] {
-        let url = URL(string: "\(baseURL)/manifest.json")!
+        guard let url = URL(string: "\(baseURL)/manifest.json") else {
+            throw APIError.invalidURL
+        }
         let (data, response) = try await session.data(from: url)
 
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -29,8 +39,10 @@ actor APIService {
     /// Fetch full markdown content for an article
     func fetchMarkdown(for summary: Summary) async throws -> String {
         // Extract filename from URL or use a hashed version
-        let filename = summary.url.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed) ?? summary.id
-        let url = URL(string: "\(baseURL)/markdown/\(filename).md")!
+        let filename = summary.url.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? summary.id
+        guard let url = URL(string: "\(baseURL)/markdown/\(filename).md") else {
+            throw APIError.invalidURL
+        }
 
         let (data, response) = try await session.data(from: url)
 
@@ -52,21 +64,42 @@ actor APIService {
 
 // MARK: - API Errors
 enum APIError: LocalizedError {
+    case invalidURL
     case invalidResponse
     case httpError(statusCode: Int)
     case decodingError
-    case networkError(Error)
+    case noConnection
 
     var errorDescription: String? {
         switch self {
+        case .invalidURL:
+            return "Unable to load content"
         case .invalidResponse:
-            return "Invalid response from server"
+            return "Server is not responding correctly"
         case .httpError(let statusCode):
-            return "Server returned error: \(statusCode)"
+            switch statusCode {
+            case 404:
+                return "Content not found"
+            case 500...599:
+                return "Server is temporarily unavailable"
+            default:
+                return "Unable to load content (Error \(statusCode))"
+            }
         case .decodingError:
-            return "Failed to decode response"
-        case .networkError(let error):
-            return "Network error: \(error.localizedDescription)"
+            return "Unable to read content"
+        case .noConnection:
+            return "No internet connection"
+        }
+    }
+
+    var recoverySuggestion: String? {
+        switch self {
+        case .noConnection:
+            return "Please check your connection and try again"
+        case .httpError(500...599):
+            return "Please try again later"
+        default:
+            return "Pull down to refresh"
         }
     }
 }

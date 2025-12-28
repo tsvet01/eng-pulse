@@ -86,9 +86,6 @@ struct DetailView: View {
         .task {
             await loadFullContent()
         }
-        .onDisappear {
-            // Don't stop TTS when navigating away - let it continue
-        }
     }
 
     // MARK: - Sections
