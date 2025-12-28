@@ -62,9 +62,9 @@ class NotificationService: NSObject, ObservableObject {
         }
     }
 
-    /// Register token with backend
+    /// Register APNs token with backend
     private func registerTokenWithBackend(_ token: String) async {
-        guard let url = URL(string: "https://us-central1-tsvet01.cloudfunctions.net/register-fcm-token") else {
+        guard let url = URL(string: "https://us-central1-tsvet01.cloudfunctions.net/register-apns-token") else {
             return
         }
 
@@ -72,21 +72,33 @@ class NotificationService: NSObject, ObservableObject {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
+        // Detect if running in sandbox (debug) mode
+        #if DEBUG
+        let sandbox = true
+        #else
+        let sandbox = false
+        #endif
+
         let body: [String: Any] = [
             "token": token,
-            "platform": "ios",
-            "app": "EngPulseSwift"
+            "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0",
+            "sandbox": sandbox
         ]
 
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            let (_, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
 
-            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                print("Token registered with backend")
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 200 {
+                    print("APNs token registered with backend successfully")
+                } else {
+                    let responseStr = String(data: data, encoding: .utf8) ?? "no response"
+                    print("Token registration failed: HTTP \(httpResponse.statusCode) - \(responseStr)")
+                }
             }
         } catch {
-            print("Failed to register token: \(error)")
+            print("Failed to register APNs token: \(error)")
         }
     }
 

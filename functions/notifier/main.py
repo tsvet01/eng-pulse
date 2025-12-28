@@ -2,11 +2,15 @@ import functions_framework
 import os
 import smtplib
 import json
+import time
 import requests
+import httpx
+import jwt
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from google.cloud import storage
 from google.cloud import firestore
+from google.cloud import secretmanager
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 import google.auth
@@ -16,6 +20,17 @@ import bleach
 # FCM HTTP v1 API endpoint
 FCM_API_URL = "https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
 PROJECT_ID = os.environ.get('GOOGLE_CLOUD_PROJECT', 'tsvet01')
+
+# APNs configuration
+APNS_TOKENS_COLLECTION = "apns_tokens"
+APNS_PRODUCTION = "https://api.push.apple.com"
+APNS_SANDBOX = "https://api.sandbox.push.apple.com"
+BUNDLE_ID = "org.tsvetkov.EngPulse"
+
+# Lazy-loaded APNs credentials
+_apns_key = None
+_apns_key_id = None
+_apns_team_id = None
 
 
 def get_access_token():
@@ -144,6 +159,148 @@ def send_fcm_notifications(title: str, body: str, article_url: str) -> int:
         return 0
 
 
+# ============ APNs Functions ============
+
+def get_apns_credentials():
+    """Load APNs credentials from Secret Manager."""
+    global _apns_key, _apns_key_id, _apns_team_id
+
+    if _apns_key is not None:
+        return _apns_key, _apns_key_id, _apns_team_id
+
+    try:
+        client = secretmanager.SecretManagerServiceClient()
+
+        # Get the .p8 key content
+        key_path = f"projects/{PROJECT_ID}/secrets/apns-auth-key/versions/latest"
+        key_response = client.access_secret_version(request={"name": key_path})
+        _apns_key = key_response.payload.data.decode("UTF-8")
+
+        # Get Key ID
+        key_id_path = f"projects/{PROJECT_ID}/secrets/apns-key-id/versions/latest"
+        key_id_response = client.access_secret_version(request={"name": key_id_path})
+        _apns_key_id = key_id_response.payload.data.decode("UTF-8").strip()
+
+        # Get Team ID
+        team_id_path = f"projects/{PROJECT_ID}/secrets/apns-team-id/versions/latest"
+        team_id_response = client.access_secret_version(request={"name": team_id_path})
+        _apns_team_id = team_id_response.payload.data.decode("UTF-8").strip()
+
+        return _apns_key, _apns_key_id, _apns_team_id
+    except Exception as e:
+        print(f"Failed to load APNs credentials: {e}")
+        return None, None, None
+
+
+def create_apns_jwt():
+    """Create a JWT for APNs authentication."""
+    auth_key, key_id, team_id = get_apns_credentials()
+    if not all([auth_key, key_id, team_id]):
+        return None
+
+    token = jwt.encode(
+        {
+            "iss": team_id,
+            "iat": int(time.time())
+        },
+        auth_key,
+        algorithm="ES256",
+        headers={
+            "alg": "ES256",
+            "kid": key_id
+        }
+    )
+    return token
+
+
+def send_apns_notification(token: str, title: str, body: str, article_url: str, sandbox: bool = False):
+    """Send a notification to a single APNs device."""
+    try:
+        jwt_token = create_apns_jwt()
+        if not jwt_token:
+            return False, "No APNs credentials"
+
+        endpoint = APNS_SANDBOX if sandbox else APNS_PRODUCTION
+        url = f"{endpoint}/3/device/{token}"
+
+        headers = {
+            "authorization": f"bearer {jwt_token}",
+            "apns-topic": BUNDLE_ID,
+            "apns-push-type": "alert",
+            "apns-priority": "10",
+        }
+
+        payload = {
+            "aps": {
+                "alert": {
+                    "title": title,
+                    "body": body,
+                },
+                "sound": "default",
+                "badge": 1,
+            },
+            "article_url": article_url,
+        }
+
+        with httpx.Client(http2=True) as client:
+            response = client.post(url, headers=headers, json=payload)
+            if response.status_code == 200:
+                return True, ""
+            else:
+                error_data = response.json() if response.content else {}
+                reason = error_data.get("reason", f"HTTP {response.status_code}")
+                return False, reason
+
+    except Exception as e:
+        return False, str(e)
+
+
+def send_apns_notifications(title: str, body: str, article_url: str) -> int:
+    """Send APNs push notifications to all registered iOS devices."""
+    try:
+        db = firestore.Client()
+        tokens_ref = db.collection(APNS_TOKENS_COLLECTION).where("active", "==", True)
+        docs = list(tokens_ref.stream())
+
+        if not docs:
+            print("No active APNs tokens found")
+            return 0
+
+        print(f"Sending APNs to {len(docs)} devices")
+        success_count = 0
+
+        for doc in docs:
+            data = doc.to_dict()
+            token = data.get("token")
+            sandbox = data.get("sandbox", False)
+
+            if not token:
+                continue
+
+            success, reason = send_apns_notification(token, title, body, article_url, sandbox)
+
+            if success:
+                success_count += 1
+                print(f"APNs sent successfully")
+            else:
+                print(f"Failed to send APNs: {reason}")
+                if reason in ("BadDeviceToken", "Unregistered", "ExpiredToken"):
+                    try:
+                        doc.reference.update({"active": False})
+                        print(f"Marked token as inactive")
+                    except Exception as e:
+                        print(f"Failed to deactivate token: {e}")
+
+        print(f"APNs notifications sent: {success_count}/{len(docs)}")
+        return success_count
+
+    except Exception as e:
+        print(f"Error sending APNs notifications: {e}")
+        import traceback
+        traceback.print_exc()
+        return 0
+
+
 @functions_framework.cloud_event
 def send_summary_email(cloud_event):
     data = cloud_event.data
@@ -194,6 +351,9 @@ def send_summary_email(cloud_event):
     article_url = f"https://storage.googleapis.com/{bucket_name}/{file_name}"
 
     send_fcm_notifications(title, body, article_url)
+
+    # Also send APNs notifications to iOS Swift app users
+    send_apns_notifications(title, body, article_url)
 
 def send_email(subject_file, html_body):
     gmail_user = os.environ.get("GMAIL_USER")
