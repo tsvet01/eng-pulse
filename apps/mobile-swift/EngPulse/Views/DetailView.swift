@@ -120,15 +120,9 @@ struct DetailView: View {
     }
 
     private func fullContentSection(_ content: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Full Summary")
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .foregroundColor(.secondary)
-
-            markdownText(content)
+        VStack(alignment: .leading, spacing: 12) {
+            markdownView(content)
                 .font(.body)
-                .lineSpacing(4)
         }
         .padding(.top, 8)
     }
@@ -171,11 +165,58 @@ struct DetailView: View {
         .padding(.vertical, 24)
     }
 
-    private func markdownText(_ content: String) -> Text {
-        if let attributed = try? AttributedString(markdown: content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+    private func markdownView(_ content: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(Array(content.components(separatedBy: "\n\n").enumerated()), id: \.offset) { _, paragraph in
+                let trimmed = paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.hasPrefix("# ") {
+                    Text(trimmed.dropFirst(2))
+                        .font(.title2)
+                        .fontWeight(.bold)
+                } else if trimmed.hasPrefix("## ") {
+                    Text(trimmed.dropFirst(3))
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                } else if trimmed.hasPrefix("### ") {
+                    Text(trimmed.dropFirst(4))
+                        .font(.headline)
+                } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
+                    // List items
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(Array(trimmed.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
+                            let cleanLine = line.trimmingCharacters(in: .whitespaces)
+                            if cleanLine.hasPrefix("- ") || cleanLine.hasPrefix("* ") {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text("•")
+                                    inlineMarkdown(String(cleanLine.dropFirst(2)))
+                                }
+                            } else if !cleanLine.isEmpty {
+                                inlineMarkdown(cleanLine)
+                            }
+                        }
+                    }
+                } else if trimmed.hasPrefix(">") {
+                    // Blockquote
+                    HStack(spacing: 12) {
+                        Rectangle()
+                            .fill(Color.accentColor.opacity(0.5))
+                            .frame(width: 3)
+                        inlineMarkdown(trimmed.replacingOccurrences(of: "^>\\s*", with: "", options: .regularExpression))
+                            .foregroundColor(.secondary)
+                            .italic()
+                    }
+                } else if !trimmed.isEmpty {
+                    inlineMarkdown(trimmed)
+                }
+            }
+        }
+    }
+
+    private func inlineMarkdown(_ text: String) -> Text {
+        if let attributed = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
             return Text(attributed)
         }
-        return Text(content)
+        return Text(text)
     }
 
     // MARK: - TTS Player Bar
