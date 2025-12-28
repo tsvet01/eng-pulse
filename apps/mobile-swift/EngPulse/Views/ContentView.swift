@@ -36,7 +36,6 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .didReceiveArticleNotification)) { notification in
             if let url = notification.userInfo?["url"] as? String {
-                print("Received article notification: \(url)")
                 selectedTab = 0
                 navigateToArticle(url: url)
             }
@@ -49,17 +48,14 @@ struct ContentView: View {
 
     private func checkPendingArticle() {
         if let url = UserDefaults.standard.string(forKey: "pendingArticleUrl") {
-            print("Found pending article URL: \(url)")
             selectedTab = 0
             navigateToArticle(url: url)
         }
     }
 
     private func navigateToArticle(url: String) {
-        print("navigateToArticle: \(url), summaries: \(appState.summaries.count)")
         guard !appState.summaries.isEmpty else { return }
         if let summary = appState.summaries.first(where: { $0.url == url }) {
-            print("found: \(summary.title)")
             UserDefaults.standard.removeObject(forKey: "pendingArticleUrl")
             navigationPath.append(summary)
         }

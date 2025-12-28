@@ -153,7 +153,6 @@ extension NotificationService: UNUserNotificationCenterDelegate {
         }
 
         // Store URL in UserDefaults - ContentView will check on appear
-        print("Storing pending articleUrl: \(articleUrl)")
         UserDefaults.standard.set(articleUrl, forKey: "pendingArticleUrl")
 
         // Also post notification for immediate handling if view is active
