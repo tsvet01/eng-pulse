@@ -99,23 +99,14 @@ struct DetailView: View {
     // MARK: - Sections
 
     private var headerSection: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("\(summary.source) • \(summary.date)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Text(summary.title)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-            }
+        HStack(alignment: .center, spacing: 8) {
+            Text("\(summary.source) • \(summary.date)")
+                .font(.caption2)
+                .foregroundColor(.secondary)
             Spacer()
             Text(summary.modelDisplayName)
                 .font(.caption2)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Color.accentColor.opacity(0.1))
-                .foregroundColor(.accentColor)
-                .cornerRadius(4)
+                .foregroundColor(.secondary)
         }
     }
 
