@@ -20,9 +20,6 @@ struct DetailView: View {
         ZStack(alignment: .bottom) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    // Header
-                    headerSection
-
                     // Full Content (loading, error, or content)
                     if isLoadingContent {
                         loadingSection
@@ -32,22 +29,22 @@ struct DetailView: View {
                         fullContentSection(content)
                     }
 
-                    // See Original link at bottom
-                    if let originalUrl = summary.originalUrl, let url = URL(string: originalUrl) {
-                        Divider()
-                        Button {
-                            openURL(url)
-                        } label: {
-                            HStack {
-                                Text("See Original")
-                                    .font(.subheadline)
-                                Spacer()
-                                Image(systemName: "arrow.up.right")
-                                    .font(.caption)
-                            }
+                    // Footer with metadata and original link
+                    Divider()
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("\(summary.source) • \(summary.date) • \(summary.modelDisplayName)")
+                            .font(.caption2)
                             .foregroundColor(.secondary)
+
+                        if let originalUrl = summary.originalUrl, let url = URL(string: originalUrl) {
+                            Button {
+                                openURL(url)
+                            } label: {
+                                Text("See Original")
+                                    .font(.caption)
+                                    .foregroundColor(.accentColor)
+                            }
                         }
-                        .padding(.vertical, 8)
                     }
 
                     // Bottom padding for player bar
@@ -55,7 +52,8 @@ struct DetailView: View {
                         Color.clear.frame(height: 60)
                     }
                 }
-                .padding()
+                .padding(.horizontal)
+                .padding(.top, 8)
             }
 
             // TTS Player Bar
@@ -63,7 +61,6 @@ struct DetailView: View {
                 ttsPlayerBar
             }
         }
-        .navigationTitle("Article")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -95,18 +92,6 @@ struct DetailView: View {
     }
 
     // MARK: - Sections
-
-    private var headerSection: some View {
-        HStack(alignment: .center, spacing: 8) {
-            Text("\(summary.source) • \(summary.date)")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-            Spacer()
-            Text(summary.modelDisplayName)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-        }
-    }
 
     private func fullContentSection(_ content: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
