@@ -1,18 +1,51 @@
 import SwiftUI
 
+// Model filter options
+enum ModelFilter: String, CaseIterable {
+    case all = "All"
+    case gemini = "Gemini"
+    case claude = "Claude"
+    case gpt = "GPT"
+
+    func matches(_ modelString: String?) -> Bool {
+        guard self != .all else { return true }
+        guard let model = modelString?.lowercased() else { return false }
+        switch self {
+        case .all: return true
+        case .gemini: return model.contains("gemini")
+        case .claude: return model.contains("claude")
+        case .gpt: return model.contains("gpt") || model.contains("openai")
+        }
+    }
+}
+
 struct HomeView: View {
     @EnvironmentObject var appState: AppState
     @State private var searchText = ""
+    @AppStorage("selectedModelFilter") private var selectedFilter: String = ModelFilter.all.rawValue
+
+    private var modelFilter: ModelFilter {
+        ModelFilter(rawValue: selectedFilter) ?? .all
+    }
 
     var filteredSummaries: [Summary] {
-        if searchText.isEmpty {
-            return appState.summaries
+        var result = appState.summaries
+
+        // Apply model filter
+        if modelFilter != .all {
+            result = result.filter { modelFilter.matches($0.model) }
         }
-        return appState.summaries.filter { summary in
-            summary.title.localizedCaseInsensitiveContains(searchText) ||
-            (summary.summarySnippet ?? "").localizedCaseInsensitiveContains(searchText) ||
-            summary.source.localizedCaseInsensitiveContains(searchText)
+
+        // Apply search filter
+        if !searchText.isEmpty {
+            result = result.filter { summary in
+                summary.title.localizedCaseInsensitiveContains(searchText) ||
+                (summary.summarySnippet ?? "").localizedCaseInsensitiveContains(searchText) ||
+                summary.source.localizedCaseInsensitiveContains(searchText)
+            }
         }
+
+        return result
     }
 
     var body: some View {
@@ -50,15 +83,30 @@ struct HomeView: View {
         }
     }
 
-    private var summaryList: some View {
-        List(filteredSummaries) { summary in
-            NavigationLink(destination: DetailView(summary: summary)) {
-                SummaryCardView(summary: summary)
+    private var modelFilterPicker: some View {
+        Picker("Model", selection: $selectedFilter) {
+            ForEach(ModelFilter.allCases, id: \.rawValue) { filter in
+                Text(filter.rawValue).tag(filter.rawValue)
             }
-            .listRowSeparator(.hidden)
-            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
         }
-        .listStyle(.plain)
+        .pickerStyle(.segmented)
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+    }
+
+    private var summaryList: some View {
+        VStack(spacing: 0) {
+            modelFilterPicker
+
+            List(filteredSummaries) { summary in
+                NavigationLink(destination: DetailView(summary: summary)) {
+                    SummaryCardView(summary: summary)
+                }
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+            }
+            .listStyle(.plain)
+        }
     }
 }
 
