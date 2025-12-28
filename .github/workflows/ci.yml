@@ -99,6 +99,9 @@ jobs:
     - name: Get dependencies
       run: cd apps/mobile && flutter pub get
 
+    - name: Setup Firebase config for CI
+      run: cp apps/mobile/lib/firebase_options.dart.ci apps/mobile/lib/firebase_options.dart
+
     - name: Analyze code
       run: cd apps/mobile && flutter analyze
 
