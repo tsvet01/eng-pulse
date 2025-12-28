@@ -3,9 +3,10 @@ import SwiftUI
 struct SettingsView: View {
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
     @AppStorage("dailyBriefingTime") private var dailyBriefingTime = "08:00"
-    @AppStorage("selectedModel") private var selectedModel = "claude-opus-4-5"
     @AppStorage("ttsSpeechRate") private var speechRate: Double = 0.5
     @AppStorage("ttsPitch") private var pitch: Double = 1.0
+
+    @State private var showClearCacheAlert = false
 
     var body: some View {
         NavigationStack {
@@ -55,25 +56,10 @@ struct SettingsView: View {
                     Text("Receive a daily summary of the latest engineering articles.")
                 }
 
-                // AI Model Section
-                Section {
-                    Picker("AI Model", selection: $selectedModel) {
-                        Text("Claude Opus 4.5").tag("claude-opus-4-5")
-                        Text("Claude Sonnet 4").tag("claude-sonnet-4")
-                        Text("Gemini 2.0 Flash").tag("gemini-2.0-flash")
-                        Text("Gemini 1.5 Pro").tag("gemini-1.5-pro")
-                        Text("GPT-5.2").tag("gpt-5.2")
-                    }
-                } header: {
-                    Text("AI Settings")
-                } footer: {
-                    Text("Choose the AI model used for generating summaries.")
-                }
-
                 // Cache Section
                 Section {
                     Button(role: .destructive) {
-                        clearCache()
+                        showClearCacheAlert = true
                     } label: {
                         Label("Clear Cache", systemImage: "trash")
                     }
@@ -81,6 +67,14 @@ struct SettingsView: View {
                     Text("Storage")
                 } footer: {
                     Text("Clear cached summaries and content to free up space.")
+                }
+                .alert("Clear Cache?", isPresented: $showClearCacheAlert) {
+                    Button("Cancel", role: .cancel) { }
+                    Button("Clear", role: .destructive) {
+                        clearCache()
+                    }
+                } message: {
+                    Text("This will remove all downloaded articles. You'll need internet to read them again.")
                 }
 
                 // About Section

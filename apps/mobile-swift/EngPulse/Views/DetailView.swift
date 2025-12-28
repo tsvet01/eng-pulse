@@ -4,6 +4,7 @@ struct DetailView: View {
     let summary: Summary
     @State private var fullContent: String?
     @State private var isLoadingContent = false
+    @State private var loadingError: String?
     @Environment(\.openURL) private var openURL
     @ObservedObject private var ttsService = TTSService.shared
 
@@ -32,8 +33,12 @@ struct DetailView: View {
                     // Actions
                     actionsSection
 
-                    // Full Content (if loaded)
-                    if let content = fullContent {
+                    // Full Content (loading, error, or content)
+                    if isLoadingContent {
+                        loadingSection
+                    } else if let error = loadingError {
+                        errorSection(error)
+                    } else if let content = fullContent {
                         fullContentSection(content)
                     }
 
@@ -149,6 +154,44 @@ struct DetailView: View {
         .padding(.top, 8)
     }
 
+    private var loadingSection: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .scaleEffect(1.2)
+            Text("Loading full summary...")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 32)
+    }
+
+    private func errorSection(_ error: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.largeTitle)
+                .foregroundColor(.orange)
+            Text("Failed to load content")
+                .font(.subheadline)
+                .fontWeight(.medium)
+            Text(error)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+            Button {
+                Task {
+                    await loadFullContent()
+                }
+            } label: {
+                Label("Retry", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+            .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+    }
+
     private func markdownText(_ content: String) -> Text {
         if let attributed = try? AttributedString(markdown: content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
             return Text(attributed)
@@ -214,17 +257,23 @@ struct DetailView: View {
 
     private func loadFullContent() async {
         isLoadingContent = true
+        loadingError = nil
         defer { isLoadingContent = false }
 
-        guard let url = URL(string: summary.url) else { return }
+        guard let url = URL(string: summary.url) else {
+            loadingError = "Invalid URL"
+            return
+        }
 
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             if let content = String(data: data, encoding: .utf8) {
                 fullContent = content
+            } else {
+                loadingError = "Could not decode content"
             }
         } catch {
-            print("Failed to load content: \(error)")
+            loadingError = error.localizedDescription
         }
     }
 }
