@@ -24,7 +24,7 @@ APNS_PRODUCTION = "https://api.push.apple.com"
 APNS_SANDBOX = "https://api.sandbox.push.apple.com"
 
 # App bundle ID
-BUNDLE_ID = "org.tsvetkov.EngPulse"
+BUNDLE_ID = "org.tsvetkov.EngPulseSwift"
 
 # Secret Manager paths
 PROJECT_ID = os.environ.get('GOOGLE_CLOUD_PROJECT', 'tsvet01')
