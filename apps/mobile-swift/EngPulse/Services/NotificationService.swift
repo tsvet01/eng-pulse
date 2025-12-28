@@ -143,25 +143,28 @@ extension NotificationService: UNUserNotificationCenterDelegate {
     /// Handle notification tap
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse
-    ) async {
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
         let userInfo = response.notification.request.content.userInfo
 
-        // Extract article URL safely before switching to main actor
+        // Extract article URL safely
         guard let articleUrl = userInfo["article_url"] as? String else {
+            completionHandler()
             return
         }
 
         // Store URL in UserDefaults - ContentView will check on appear
         UserDefaults.standard.set(articleUrl, forKey: "pendingArticleUrl")
 
-        // Also post notification for immediate handling if view is active
-        await MainActor.run {
+        // Post notification on main thread
+        DispatchQueue.main.async {
             NotificationCenter.default.post(
                 name: .didReceiveArticleNotification,
                 object: nil,
                 userInfo: ["url": articleUrl]
             )
+            completionHandler()
         }
     }
 }

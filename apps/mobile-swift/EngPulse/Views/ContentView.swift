@@ -57,7 +57,10 @@ struct ContentView: View {
         guard !appState.summaries.isEmpty else { return }
         if let summary = appState.summaries.first(where: { $0.url == url }) {
             UserDefaults.standard.removeObject(forKey: "pendingArticleUrl")
-            navigationPath.append(summary)
+            // Defer navigation to next run loop to ensure UI is ready
+            DispatchQueue.main.async {
+                navigationPath.append(summary)
+            }
         }
     }
 }
