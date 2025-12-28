@@ -19,11 +19,9 @@ struct DetailView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 12) {
                     // Header
                     headerSection
-
-                    Divider()
 
                     // Full Content (loading, error, or content)
                     if isLoadingContent {
