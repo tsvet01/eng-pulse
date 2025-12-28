@@ -146,8 +146,19 @@ extension NotificationService: UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse
     ) async {
         let userInfo = response.notification.request.content.userInfo
+
+        // Extract article URL safely before switching to main actor
+        guard let articleUrl = userInfo["article_url"] as? String else {
+            return
+        }
+
+        // Post notification on main thread
         await MainActor.run {
-            NotificationService.shared.handleNotification(userInfo)
+            NotificationCenter.default.post(
+                name: .didReceiveArticleNotification,
+                object: nil,
+                userInfo: ["url": articleUrl]
+            )
         }
     }
 }

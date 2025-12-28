@@ -5,6 +5,7 @@ struct EngPulseApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appState = AppState()
     @StateObject private var notificationService = NotificationService.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         // Configure app appearance
@@ -19,6 +20,12 @@ struct EngPulseApp: App {
                 .task {
                     await setupNotifications()
                 }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                // Clear badge when app becomes active
+                UNUserNotificationCenter.current().setBadgeCount(0)
+            }
         }
     }
 
@@ -53,11 +60,6 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         return true
-    }
-
-    func applicationDidBecomeActive(_ application: UIApplication) {
-        // Clear badge when app becomes active
-        application.applicationIconBadgeNumber = 0
     }
 
     func application(
