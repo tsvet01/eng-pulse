@@ -2,15 +2,20 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
+    @EnvironmentObject var notificationService: NotificationService
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab = 0
+    @State private var navigationPath = NavigationPath()
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            HomeView()
-                .tabItem {
-                    Label("Feed", systemImage: "newspaper.fill")
-                }
-                .tag(0)
+            NavigationStack(path: $navigationPath) {
+                HomeViewContent(navigationPath: $navigationPath)
+            }
+            .tabItem {
+                Label("Feed", systemImage: "newspaper.fill")
+            }
+            .tag(0)
 
             SettingsView()
                 .tabItem {
@@ -21,10 +26,48 @@ struct ContentView: View {
         .task {
             await appState.loadSummaries()
         }
+        .onAppear {
+            checkPendingArticle()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                checkPendingArticle()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .didReceiveArticleNotification)) { notification in
+            if let url = notification.userInfo?["url"] as? String {
+                print("Received article notification: \(url)")
+                selectedTab = 0
+                navigateToArticle(url: url)
+            }
+        }
+        .onChange(of: appState.summaries) { _, summaries in
+            // Retry navigation when summaries load
+            checkPendingArticle()
+        }
+    }
+
+    private func checkPendingArticle() {
+        if let url = UserDefaults.standard.string(forKey: "pendingArticleUrl") {
+            print("Found pending article URL: \(url)")
+            selectedTab = 0
+            navigateToArticle(url: url)
+        }
+    }
+
+    private func navigateToArticle(url: String) {
+        print("navigateToArticle: \(url), summaries: \(appState.summaries.count)")
+        guard !appState.summaries.isEmpty else { return }
+        if let summary = appState.summaries.first(where: { $0.url == url }) {
+            print("found: \(summary.title)")
+            UserDefaults.standard.removeObject(forKey: "pendingArticleUrl")
+            navigationPath.append(summary)
+        }
     }
 }
 
 #Preview {
     ContentView()
         .environmentObject(AppState())
+        .environmentObject(NotificationService.shared)
 }

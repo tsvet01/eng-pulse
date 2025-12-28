@@ -19,10 +19,21 @@ enum ModelFilter: String, CaseIterable {
     }
 }
 
+// MARK: - HomeView (standalone with own NavigationStack)
 struct HomeView: View {
+    var body: some View {
+        NavigationStack {
+            HomeViewContent(navigationPath: .constant(NavigationPath()))
+        }
+    }
+}
+
+// MARK: - HomeViewContent (for use with external NavigationStack)
+struct HomeViewContent: View {
     @EnvironmentObject var appState: AppState
     @State private var searchText = ""
     @AppStorage("selectedModelFilter") private var selectedFilter: String = ModelFilter.all.rawValue
+    @Binding var navigationPath: NavigationPath
 
     private var modelFilter: ModelFilter {
         ModelFilter(rawValue: selectedFilter) ?? .all
@@ -49,35 +60,36 @@ struct HomeView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                if appState.isLoading && appState.summaries.isEmpty {
-                    LoadingView()
-                } else if let error = appState.errorMessage, appState.summaries.isEmpty {
-                    ErrorView(message: error) {
-                        Task { await appState.refreshSummaries() }
-                    }
-                } else if appState.summaries.isEmpty {
-                    EmptyStateView()
-                } else {
-                    summaryList
+        ZStack {
+            if appState.isLoading && appState.summaries.isEmpty {
+                LoadingView()
+            } else if let error = appState.errorMessage, appState.summaries.isEmpty {
+                ErrorView(message: error) {
+                    Task { await appState.refreshSummaries() }
                 }
+            } else if appState.summaries.isEmpty {
+                EmptyStateView()
+            } else {
+                summaryList
             }
-            .navigationTitle("Eng Pulse")
-            .searchable(text: $searchText, prompt: "Search summaries")
-            .refreshable {
-                await appState.refreshSummaries()
-            }
-            .toolbar {
-                if appState.isOffline {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "icloud.slash")
-                            Text("Cached")
-                                .font(.caption)
-                        }
-                        .foregroundColor(.orange)
+        }
+        .navigationTitle("Eng Pulse")
+        .navigationDestination(for: Summary.self) { summary in
+            DetailView(summary: summary)
+        }
+        .searchable(text: $searchText, prompt: "Search summaries")
+        .refreshable {
+            await appState.refreshSummaries()
+        }
+        .toolbar {
+            if appState.isOffline {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "icloud.slash")
+                        Text("Cached")
+                            .font(.caption)
                     }
+                    .foregroundColor(.orange)
                 }
             }
         }
@@ -99,7 +111,7 @@ struct HomeView: View {
             modelFilterPicker
 
             List(filteredSummaries) { summary in
-                NavigationLink(destination: DetailView(summary: summary)) {
+                NavigationLink(value: summary) {
                     SummaryCardView(summary: summary)
                 }
                 .listRowSeparator(.hidden)

@@ -1,7 +1,7 @@
 import Foundation
 
 // MARK: - Summary Model
-struct Summary: Identifiable, Codable, Equatable {
+struct Summary: Identifiable, Codable, Equatable, Hashable {
     // Use URL as unique ID since it's guaranteed unique per summary
     var id: String { url }
     let date: String

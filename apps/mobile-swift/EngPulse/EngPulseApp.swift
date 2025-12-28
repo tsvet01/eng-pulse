@@ -59,6 +59,8 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        // Set notification delegate early - critical for handling notification taps
+        UNUserNotificationCenter.current().delegate = NotificationService.shared
         return true
     }
 
@@ -106,6 +108,7 @@ class AppState: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var isOffline = false
+    @Published var pendingArticleUrl: String?
 
     private let apiService = APIService()
     private let cacheService = CacheService()
