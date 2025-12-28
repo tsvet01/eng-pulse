@@ -45,11 +45,19 @@ class UserPreferences extends HiveObject {
   @HiveField(4)
   String selectedModel; // 'gemini', 'openai', 'claude'
 
+  @HiveField(5)
+  double ttsSpeechRate; // 0.0 to 1.0
+
+  @HiveField(6)
+  double ttsPitch; // 0.5 to 2.0
+
   UserPreferences({
     this.notificationsEnabled = true,
     this.dailyBriefingEnabled = true,
     this.preferredTime = "08:00",
     List<String>? preferredTopics,
     this.selectedModel = 'gemini',
+    this.ttsSpeechRate = 0.5,
+    this.ttsPitch = 1.0,
   }) : preferredTopics = preferredTopics ?? [];
 }

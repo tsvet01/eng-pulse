@@ -17,6 +17,7 @@
 		A1000008 /* CacheService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000008 /* CacheService.swift */; };
 		A1000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000009 /* Assets.xcassets */; };
 		A100000A /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000B /* NotificationService.swift */; };
+		A100000D /* TTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000D /* TTSService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +33,7 @@
 		A2000010 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A200000B /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		A200000C /* EngPulse.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = EngPulse.entitlements; sourceTree = "<group>"; };
+		A200000D /* TTSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSService.swift; sourceTree = "<group>"; };
 		A3000001 /* EngPulse.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EngPulse.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -101,6 +103,7 @@
 				A2000007 /* APIService.swift */,
 				A2000008 /* CacheService.swift */,
 				A200000B /* NotificationService.swift */,
+				A200000D /* TTSService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -183,6 +186,7 @@
 				A1000007 /* APIService.swift in Sources */,
 				A1000008 /* CacheService.swift in Sources */,
 				A100000A /* NotificationService.swift in Sources */,
+				A100000D /* TTSService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

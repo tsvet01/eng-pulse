@@ -68,13 +68,15 @@ class UserPreferencesAdapter extends TypeAdapter<UserPreferences> {
       preferredTime: fields[2] as String,
       preferredTopics: (fields[3] as List?)?.cast<String>(),
       selectedModel: fields[4] as String,
+      ttsSpeechRate: fields[5] as double,
+      ttsPitch: fields[6] as double,
     );
   }
 
   @override
   void write(BinaryWriter writer, UserPreferences obj) {
     writer
-      ..writeByte(5)
+      ..writeByte(7)
       ..writeByte(0)
       ..write(obj.notificationsEnabled)
       ..writeByte(1)
@@ -84,7 +86,11 @@ class UserPreferencesAdapter extends TypeAdapter<UserPreferences> {
       ..writeByte(3)
       ..write(obj.preferredTopics)
       ..writeByte(4)
-      ..write(obj.selectedModel);
+      ..write(obj.selectedModel)
+      ..writeByte(5)
+      ..write(obj.ttsSpeechRate)
+      ..writeByte(6)
+      ..write(obj.ttsPitch);
   }
 
   @override

@@ -4,6 +4,7 @@ import '../models/reading_history.dart';
 import '../services/user_service.dart';
 import '../services/notification_service.dart';
 import '../services/cache_service.dart';
+import '../services/tts_service.dart';
 import '../services/build_info.dart';
 import '../theme/app_theme.dart';
 
@@ -82,6 +83,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   }
                 : null,
             icon: Icons.schedule_rounded,
+          ),
+
+          const SizedBox(height: 16),
+
+          // Listening Section (TTS)
+          _buildSectionHeader(context, 'Listening'),
+          _buildSliderTile(
+            context,
+            title: 'Speech Rate',
+            subtitle: _getSpeechRateLabel(_prefs.ttsSpeechRate),
+            value: _prefs.ttsSpeechRate,
+            min: 0.25,
+            max: 0.75,
+            icon: Icons.speed_rounded,
+            onChanged: (value) async {
+              setState(() {
+                _prefs.ttsSpeechRate = value;
+              });
+              await UserService.setTtsSpeechRate(value);
+              await TtsService.instance.setSpeechRate(value);
+            },
+          ),
+          _buildSliderTile(
+            context,
+            title: 'Pitch',
+            subtitle: _getPitchLabel(_prefs.ttsPitch),
+            value: _prefs.ttsPitch,
+            min: 0.5,
+            max: 1.5,
+            icon: Icons.graphic_eq_rounded,
+            onChanged: (value) async {
+              setState(() {
+                _prefs.ttsPitch = value;
+              });
+              await UserService.setTtsPitch(value);
+              await TtsService.instance.setPitch(value);
+            },
           ),
 
           const SizedBox(height: 16),
@@ -194,6 +232,87 @@ class _SettingsScreenState extends State<SettingsScreen> {
         onChanged: onChanged,
         activeTrackColor: (isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple).withAlpha(150),
         activeThumbColor: isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple,
+      ),
+    );
+  }
+
+  String _getSpeechRateLabel(double rate) {
+    if (rate < 0.4) return 'Slow';
+    if (rate > 0.6) return 'Fast';
+    return 'Normal';
+  }
+
+  String _getPitchLabel(double pitch) {
+    if (pitch < 0.8) return 'Low';
+    if (pitch > 1.2) return 'High';
+    return 'Normal';
+  }
+
+  Widget _buildSliderTile(
+    BuildContext context, {
+    required String title,
+    required String subtitle,
+    required double value,
+    required double min,
+    required double max,
+    required IconData icon,
+    required ValueChanged<double> onChanged,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: (isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple)
+                  .withAlpha(25),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              icon,
+              color: isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(title, style: Theme.of(context).textTheme.titleMedium),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: isDark ? AppTheme.darkTextTertiary : AppTheme.lightTextTertiary,
+                      ),
+                    ),
+                  ],
+                ),
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    activeTrackColor: isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple,
+                    inactiveTrackColor: (isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple).withAlpha(50),
+                    thumbColor: isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple,
+                    overlayColor: (isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple).withAlpha(30),
+                  ),
+                  child: Slider(
+                    value: value,
+                    min: min,
+                    max: max,
+                    onChanged: onChanged,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
