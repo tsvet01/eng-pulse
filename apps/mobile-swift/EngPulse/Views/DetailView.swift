@@ -25,14 +25,6 @@ struct DetailView: View {
 
                     Divider()
 
-                    // Summary
-                    summarySection
-
-                    Divider()
-
-                    // Actions
-                    actionsSection
-
                     // Full Content (loading, error, or content)
                     if isLoadingContent {
                         loadingSection
@@ -40,6 +32,24 @@ struct DetailView: View {
                         errorSection(error)
                     } else if let content = fullContent {
                         fullContentSection(content)
+                    }
+
+                    // See Original link at bottom
+                    if let originalUrl = summary.originalUrl, let url = URL(string: originalUrl) {
+                        Divider()
+                        Button {
+                            openURL(url)
+                        } label: {
+                            HStack {
+                                Text("See Original")
+                                    .font(.subheadline)
+                                Spacer()
+                                Image(systemName: "arrow.up.right")
+                                    .font(.caption)
+                            }
+                            .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 8)
                     }
 
                     // Bottom padding for player bar
@@ -106,37 +116,6 @@ struct DetailView: View {
                 .background(Color.accentColor.opacity(0.1))
                 .foregroundColor(.accentColor)
                 .cornerRadius(4)
-        }
-    }
-
-    private var summarySection: some View {
-        Text(summary.summarySnippet ?? "No preview available")
-            .font(.subheadline)
-            .foregroundColor(.secondary)
-            .lineSpacing(4)
-    }
-
-    private var actionsSection: some View {
-        VStack(spacing: 12) {
-            if let originalUrl = summary.originalUrl, let url = URL(string: originalUrl) {
-                Button {
-                    openURL(url)
-                } label: {
-                    Label("Read Original Article", systemImage: "safari")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-            }
-
-            Button {
-                if let url = URL(string: summary.url) {
-                    openURL(url)
-                }
-            } label: {
-                Label("View Full Summary", systemImage: "doc.text")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
         }
     }
 

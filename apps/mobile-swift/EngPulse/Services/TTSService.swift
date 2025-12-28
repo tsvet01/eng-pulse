@@ -20,8 +20,8 @@ class TTSService: NSObject, ObservableObject {
     @Published var progress: Double = 0.0
     @Published var currentArticleUrl: String?
 
-    // Settings
-    @AppStorage("ttsSpeechRate") var speechRate: Double = 0.5
+    // Settings (0.55 = faster than default for quicker reading)
+    @AppStorage("ttsSpeechRate") var speechRate: Double = 0.55
     @AppStorage("ttsPitch") var pitch: Double = 1.0
 
     private var currentText: String?
