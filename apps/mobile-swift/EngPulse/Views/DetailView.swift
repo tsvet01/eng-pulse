@@ -140,28 +140,30 @@ struct DetailView: View {
     }
 
     private func markdownView(_ content: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             ForEach(Array(content.components(separatedBy: "\n\n").enumerated()), id: \.offset) { _, paragraph in
                 let trimmed = paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed.hasPrefix("# ") {
                     Text(trimmed.dropFirst(2))
-                        .font(.title2)
+                        .font(.title3)
                         .fontWeight(.bold)
                 } else if trimmed.hasPrefix("## ") {
                     Text(trimmed.dropFirst(3))
-                        .font(.title3)
+                        .font(.headline)
                         .fontWeight(.semibold)
                 } else if trimmed.hasPrefix("### ") {
                     Text(trimmed.dropFirst(4))
-                        .font(.headline)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
                 } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
                     // List items
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 4) {
                         ForEach(Array(trimmed.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
                             let cleanLine = line.trimmingCharacters(in: .whitespaces)
                             if cleanLine.hasPrefix("- ") || cleanLine.hasPrefix("* ") {
-                                HStack(alignment: .top, spacing: 8) {
+                                HStack(alignment: .top, spacing: 6) {
                                     Text("•")
+                                        .foregroundColor(.secondary)
                                     inlineMarkdown(String(cleanLine.dropFirst(2)))
                                 }
                             } else if !cleanLine.isEmpty {
@@ -171,19 +173,67 @@ struct DetailView: View {
                     }
                 } else if trimmed.hasPrefix(">") {
                     // Blockquote
-                    HStack(spacing: 12) {
+                    HStack(spacing: 8) {
                         Rectangle()
-                            .fill(Color.accentColor.opacity(0.5))
+                            .fill(Color.accentColor.opacity(0.4))
                             .frame(width: 3)
                         inlineMarkdown(trimmed.replacingOccurrences(of: "^>\\s*", with: "", options: .regularExpression))
                             .foregroundColor(.secondary)
                             .italic()
                     }
+                    .padding(.vertical, 4)
+                } else if trimmed.contains("|") && trimmed.contains("\n") {
+                    // Table
+                    tableView(trimmed)
+                } else if trimmed.hasPrefix("```") {
+                    // Code block
+                    let code = trimmed
+                        .replacingOccurrences(of: "^```\\w*\\n?", with: "", options: .regularExpression)
+                        .replacingOccurrences(of: "\\n?```$", with: "", options: .regularExpression)
+                    Text(code)
+                        .font(.system(.caption, design: .monospaced))
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(6)
                 } else if !trimmed.isEmpty {
                     inlineMarkdown(trimmed)
                 }
             }
         }
+    }
+
+    private func tableView(_ content: String) -> some View {
+        let rows = content.components(separatedBy: "\n").filter { !$0.isEmpty }
+        let dataRows = rows.filter { !$0.contains("---") && !$0.contains(":-") }
+
+        return VStack(spacing: 0) {
+            ForEach(Array(dataRows.enumerated()), id: \.offset) { rowIndex, row in
+                let cells = row.components(separatedBy: "|")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+
+                HStack(spacing: 0) {
+                    ForEach(Array(cells.enumerated()), id: \.offset) { _, cell in
+                        Text(cell)
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(rowIndex == 0 ? Color(.systemGray5) : Color(.systemGray6).opacity(0.5))
+                            .fontWeight(rowIndex == 0 ? .semibold : .regular)
+                    }
+                }
+                if rowIndex < dataRows.count - 1 {
+                    Divider()
+                }
+            }
+        }
+        .cornerRadius(6)
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color(.systemGray4), lineWidth: 0.5)
+        )
     }
 
     private func inlineMarkdown(_ text: String) -> Text {
