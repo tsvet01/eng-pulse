@@ -48,43 +48,31 @@ struct DetailView: View {
     // MARK: - Sections
 
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Source and date on one line
-            HStack {
-                Text(summary.source)
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(summary.source) • \(summary.date)")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                Text("•")
-                    .foregroundColor(.secondary)
-                Text(summary.date)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Spacer()
-                Text(summary.modelDisplayName)
-                    .font(.caption)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.accentColor.opacity(0.1))
-                    .foregroundColor(.accentColor)
-                    .cornerRadius(6)
+                Text(summary.title)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
             }
-
-            Text(summary.title)
-                .font(.headline)
-                .fontWeight(.semibold)
+            Spacer()
+            Text(summary.modelDisplayName)
+                .font(.caption2)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.accentColor.opacity(0.1))
+                .foregroundColor(.accentColor)
+                .cornerRadius(4)
         }
     }
 
     private var summarySection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Preview")
-                .font(.headline)
-
-            Text(summary.summarySnippet ?? "No preview available")
-                .font(.body)
-                .foregroundColor(.secondary)
-                .lineSpacing(4)
-        }
+        Text(summary.summarySnippet ?? "No preview available")
+            .font(.subheadline)
+            .foregroundColor(.secondary)
+            .lineSpacing(4)
     }
 
     private var actionsSection: some View {
@@ -114,13 +102,22 @@ struct DetailView: View {
     private func fullContentSection(_ content: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Full Summary")
-                .font(.headline)
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .foregroundColor(.secondary)
 
-            Text(content)
+            markdownText(content)
                 .font(.body)
-                .lineSpacing(6)
+                .lineSpacing(4)
         }
-        .padding(.top)
+        .padding(.top, 8)
+    }
+
+    private func markdownText(_ content: String) -> Text {
+        if let attributed = try? AttributedString(markdown: content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+            return Text(attributed)
+        }
+        return Text(content)
     }
 
     // MARK: - Actions
