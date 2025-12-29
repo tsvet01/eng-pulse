@@ -212,13 +212,15 @@ cd apps/mobile && flutter run
 
 Active issues to be aware of:
 
-1. ~~**#6** - Make Gemini model configurable~~ (RESOLVED: GEMINI_MODEL env var)
-2. **#7** - Complete FCM token registration
-3. **#8** - Add observability infrastructure
+1. **#6** - Environment-based API URL configuration (hardcoded URLs in both apps)
+2. **#7** - Complete FCM token registration (Flutter only; Swift uses APNs)
+3. **#8** - Add observability infrastructure (crash reporting, analytics)
 4. **#9** - Replace :latest Docker tags with versioned tags
-5. ~~**#12** - Shared code duplicated between agents~~ (RESOLVED: gemini-engine now in libs/)
-6. **#13** - Flutter services lack unit tests
-7. **#14** - Add integration tests for agents
+
+Resolved:
+- ~~#12 - Shared code duplicated~~ (RESOLVED: gemini-engine in libs/)
+- ~~#13 - Flutter unit tests~~ (CLOSED)
+- ~~Gemini model config~~ (RESOLVED: GEMINI_MODEL env var)
 
 See GitHub Issues for full list.
 
