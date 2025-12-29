@@ -21,11 +21,12 @@ Eng Pulse is a complete system for curating, summarizing, and delivering daily s
                         │  (Data Store)   │
                         └─────────────────┘
                                  │
-                                 ▼
-                        ┌─────────────────┐
-                        │  Mobile App     │
-                        │  (Flutter)      │
-                        └─────────────────┘
+                 ┌───────────────┴───────────────┐
+                 ▼                               ▼
+        ┌─────────────────┐             ┌─────────────────┐
+        │  Mobile App     │             │  Mobile App     │
+        │  (Flutter)      │             │  (Swift/iOS)    │
+        └─────────────────┘             └─────────────────┘
 ```
 
 ## Components
@@ -36,7 +37,8 @@ Eng Pulse is a complete system for curating, summarizing, and delivering daily s
 | [daily-agent](./apps/daily-agent/) | Daily article selection and summarization | Rust |
 | [explorer-agent](./apps/explorer-agent/) | RSS/blog source discovery and management | Rust |
 | [notifier](./functions/notifier/) | Email notification on new summaries | Python |
-| [mobile](./apps/mobile/) | Mobile app for reading digests | Flutter |
+| [mobile](./apps/mobile/) | Cross-platform mobile app | Flutter |
+| [mobile-swift](./apps/mobile-swift/) | Native iOS app with TTS | Swift |
 
 ## Quick Start
 
@@ -44,7 +46,8 @@ Eng Pulse is a complete system for curating, summarizing, and delivering daily s
 
 - Rust 1.83+
 - Python 3.11+
-- Flutter 3.x+
+- Flutter 3.x+ (for Flutter app)
+- Xcode 15+ (for Swift app)
 - Google Cloud SDK
 - Gemini API key
 
@@ -73,9 +76,14 @@ cargo run
 cd apps/explorer-agent
 cargo run
 
-# Mobile App
+# Mobile App (Flutter)
 cd apps/mobile
 flutter run
+
+# Mobile App (Swift) - requires Xcode
+cd apps/mobile-swift
+open EngPulse.xcodeproj
+# Then build and run from Xcode
 ```
 
 ## Architecture
@@ -163,7 +171,8 @@ eng-pulse/
 ├── apps/
 │   ├── daily-agent/       # Daily summarization agent (Rust)
 │   ├── explorer-agent/    # Source discovery agent (Rust)
-│   └── mobile/            # Flutter mobile app
+│   ├── mobile/            # Flutter mobile app
+│   └── mobile-swift/      # Native iOS app (Swift)
 ├── libs/
 │   └── gemini-engine/     # Shared Rust crate
 ├── functions/

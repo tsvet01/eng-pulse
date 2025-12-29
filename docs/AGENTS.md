@@ -12,7 +12,8 @@ Eng Pulse is an AI-powered daily engineering digest system with these components
 | `daily-agent` | `apps/daily-agent/` | Rust | Daily article summarization |
 | `explorer-agent` | `apps/explorer-agent/` | Rust | Source discovery/management |
 | `notifier` | `functions/notifier/` | Python | Email notifications |
-| `mobile` | `apps/mobile/` | Flutter/Dart | Mobile app |
+| `mobile` | `apps/mobile/` | Flutter/Dart | Cross-platform mobile app |
+| `mobile-swift` | `apps/mobile-swift/` | Swift | Native iOS app with TTS |
 
 ## Architecture Decisions
 
@@ -84,12 +85,33 @@ await CacheService.init();
 final summaries = CacheService.getCachedSummaries();
 ```
 
-### Firebase (Optional)
+### Firebase (Optional - Flutter)
 
-Firebase is optional in the mobile app. When not configured:
+Firebase is optional in the Flutter app. When not configured:
 - App runs normally without push notifications
 - `NotificationService.isAvailable` returns `false`
 - Use `flutterfire configure` to enable Firebase
+
+### Swift App Patterns
+
+The native iOS app uses SwiftUI with these patterns:
+
+```swift
+// Use @MainActor for observable state
+@MainActor
+class AppState: ObservableObject {
+    @Published var summaries: [Summary] = []
+}
+
+// Use @AppStorage for persisted preferences
+@AppStorage("ttsSpeechRate") private var speechRate: Double = 0.55
+
+// Handle notification delegate setup early
+func application(_:didFinishLaunchingWithOptions:) -> Bool {
+    UNUserNotificationCenter.current().delegate = NotificationService.shared
+    return true
+}
+```
 
 ## Common Tasks
 
@@ -117,6 +139,14 @@ When modifying:
 2. Add service method in `lib/services/`
 3. Create/update screen in `lib/screens/`
 4. Follow existing widget patterns in `lib/widgets/`
+
+### Adding Swift Features
+
+1. Create model in `EngPulse/Models/` if needed
+2. Add service in `EngPulse/Services/`
+3. Create/update view in `EngPulse/Views/`
+4. Use `@MainActor` for observable classes
+5. Use `@AppStorage` for persisted preferences
 
 ## Pre-Commit Protections
 
@@ -199,8 +229,11 @@ See GitHub Issues for full list.
 | Rust modules | snake_case | `fetcher.rs` |
 | Dart files | snake_case | `api_service.dart` |
 | Dart classes | PascalCase | `ApiService` |
+| Swift files | PascalCase | `APIService.swift` |
+| Swift classes | PascalCase | `APIService` |
 | Constants (Rust) | SCREAMING_SNAKE | `MAX_RETRY_SECS` |
 | Constants (Dart) | camelCase with _ prefix | `_manifestUrl` |
+| Constants (Swift) | lowerCamelCase | `baseURL` |
 
 ## Environment Variables
 
@@ -245,7 +278,9 @@ cd functions/notifier && ./deploy.sh
 | `apps/daily-agent/src/main.rs` | Daily agent orchestration |
 | `apps/daily-agent/src/fetcher.rs` | RSS/HN fetching logic |
 | `apps/explorer-agent/src/main.rs` | Source discovery logic |
-| `apps/mobile/lib/services/api_service.dart` | Mobile API client |
+| `apps/mobile/lib/services/api_service.dart` | Flutter API client |
+| `apps/mobile-swift/EngPulse/EngPulseApp.swift` | Swift app entry point |
+| `apps/mobile-swift/EngPulse/Services/` | Swift services (API, Cache, TTS) |
 | `.github/workflows/ci.yml` | CI configuration |
 | `.github/workflows/deploy.yml` | Deployment configuration |
 
@@ -309,6 +344,9 @@ cd apps/daily-agent && cargo run
 
 # Flutter app
 cd apps/mobile && flutter run
+
+# Swift app (open in Xcode)
+cd apps/mobile-swift && open EngPulse.xcodeproj
 ```
 
 ### Validate Before Commit

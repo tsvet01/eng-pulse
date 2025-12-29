@@ -308,4 +308,5 @@ Requires proper signing with Apple Developer account for physical devices.
 ## Related Components
 
 - [daily-agent](../daily-agent/) - Generates the summaries
+- [mobile-swift](../mobile-swift/) - Native iOS version with TTS
 - [notifier](../../functions/notifier/) - Sends email notifications
