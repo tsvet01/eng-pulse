@@ -38,8 +38,7 @@ struct EngPulseApp: App {
     }
 
     private func setupNotifications() async {
-        // Set up notification delegate
-        UNUserNotificationCenter.current().delegate = notificationService
+        // Note: Delegate is set in AppDelegate.didFinishLaunchingWithOptions (must be early for notification taps)
 
         // Request authorization
         let granted = await notificationService.requestAuthorization()
@@ -137,5 +136,9 @@ class AppState: ObservableObject {
 
     func refreshSummaries() async {
         await loadSummaries()
+    }
+
+    func clearCache() async {
+        await cacheService.clearAll()
     }
 }

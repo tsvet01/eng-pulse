@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @EnvironmentObject var appState: AppState
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
     @AppStorage("dailyBriefingTime") private var dailyBriefingTime = "08:00"
     @AppStorage("ttsSpeechRate") private var speechRate: Double = 0.55
@@ -82,7 +83,7 @@ struct SettingsView: View {
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.0.0")
+                        Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0")
                             .foregroundColor(.secondary)
                     }
 
@@ -118,15 +119,13 @@ struct SettingsView: View {
     }
 
     private func clearCache() {
-        // Clear cache using shared instance via AppState
-        // Note: For proper DI, this should be injected via environment
         Task {
-            let cacheService = CacheService()
-            await cacheService.clearAll()
+            await appState.clearCache()
         }
     }
 }
 
 #Preview {
     SettingsView()
+        .environmentObject(AppState())
 }

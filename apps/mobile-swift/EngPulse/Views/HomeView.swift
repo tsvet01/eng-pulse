@@ -8,13 +8,13 @@ enum ModelFilter: String, CaseIterable {
     case gpt = "GPT"
 
     func matches(_ modelString: String?) -> Bool {
-        guard self != .all else { return true }
+        if self == .all { return true }
         guard let model = modelString?.lowercased() else { return false }
-        switch self {
-        case .all: return true // Unreachable but required for exhaustive switch
-        case .gemini: return model.contains("gemini")
-        case .claude: return model.contains("claude")
-        case .gpt: return model.contains("gpt") || model.contains("openai")
+        return switch self {
+        case .all: true
+        case .gemini: model.contains("gemini")
+        case .claude: model.contains("claude")
+        case .gpt: model.contains("gpt") || model.contains("openai")
         }
     }
 }
