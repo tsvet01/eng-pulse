@@ -38,9 +38,8 @@ actor APIService {
 
     /// Fetch full markdown content for an article
     func fetchMarkdown(for summary: Summary) async throws -> String {
-        // Extract filename from URL or use a hashed version
-        let filename = summary.url.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? summary.id
-        guard let url = URL(string: "\(baseURL)/markdown/\(filename).md") else {
+        // summary.url is already the full GCS URL to the markdown file
+        guard let url = URL(string: summary.url) else {
             throw APIError.invalidURL
         }
 
