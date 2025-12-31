@@ -353,7 +353,7 @@ async fn is_relevant_with_gemini(client: &reqwest::Client, api_key: &str, name: 
     );
 
     let response = call_gemini_with_retry(client, api_key, prompt).await?;
-    Ok(response.trim().to_lowercase() == "yes")
+    Ok(response.trim().to_lowercase().starts_with("yes"))
 }
 
 /// Clean Gemini JSON response by removing markdown code fences

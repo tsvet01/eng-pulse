@@ -68,7 +68,7 @@ def should_process_file(file_name: str) -> bool:
     return file_name.startswith("summaries/") and file_name.endswith(".md")
 
 
-def send_fcm_notification_http(token: str, title: str, body: str, article_url: str, access_token: str) -> bool:
+def send_fcm_notification_http(token: str, title: str, body: str, article_url: str, access_token: str) -> tuple[bool, str]:
     """Send FCM notification using HTTP v1 API."""
     url = FCM_API_URL.format(project_id=PROJECT_ID)
     headers = {

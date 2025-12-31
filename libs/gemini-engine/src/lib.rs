@@ -185,7 +185,8 @@ fn is_transient_error(err: &str) -> bool {
         "timeout",
         "connection",
         "rate limit",
-        "429",
+        "408",  // Request Timeout
+        "429",  // Too Many Requests
         "500",
         "502",
         "503",
@@ -536,6 +537,7 @@ mod tests {
 
     #[test]
     fn test_is_transient_error_server_errors() {
+        assert!(is_transient_error("HTTP 408 Request Timeout"));
         assert!(is_transient_error("HTTP 500 Internal Server Error"));
         assert!(is_transient_error("502 Bad Gateway"));
         assert!(is_transient_error("503 Service Unavailable"));
