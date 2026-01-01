@@ -6,6 +6,7 @@ REGION="us-central1"
 REPO_NAME="agent-repo"
 IMAGE_NAME="se-daily-agent"
 SERVICE_NAME="se-daily-agent-job"
+IMAGE_TAG=$(git rev-parse HEAD)
 
 # Always activate the correct project first
 echo "🔧 Activating GCP project: $PROJECT_ID"
@@ -54,7 +55,7 @@ else
 fi
 
 # 4. Build and Push Image
-IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${IMAGE_NAME}:latest"
+IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${IMAGE_NAME}:${IMAGE_TAG}"
 echo "Building and Pushing image to $IMAGE_URI..."
 # Use --platform linux/amd64 to ensure it runs on Cloud Run (which is x86_64)
 # Build from project root to include libs/gemini-engine shared crate

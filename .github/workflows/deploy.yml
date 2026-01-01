@@ -17,6 +17,7 @@ env:
   PROJECT_ID: tsvet01
   REGION: us-central1
   REPO_NAME: agent-repo
+  IMAGE_TAG: ${{ github.sha }}
 
 jobs:
   deploy-agents:
@@ -40,7 +41,7 @@ jobs:
       run: |
         gcloud builds submit \
           --config=apps/daily-agent/cloudbuild.yaml \
-          --substitutions=_IMAGE_TAG=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:latest \
+          --substitutions=_IMAGE_TAG=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:${{ env.IMAGE_TAG }} \
           --machine-type=E2_HIGHCPU_8 \
           .
 
@@ -54,7 +55,7 @@ jobs:
           --clear-secrets || true
         # Then deploy with the secret
         gcloud run jobs deploy se-daily-agent-job \
-          --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:latest \
+          --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:${{ env.IMAGE_TAG }} \
           --region ${{ env.REGION }} \
           --project ${{ env.PROJECT_ID }} \
           --set-secrets GEMINI_API_KEY=gemini-api-key:latest \
@@ -65,7 +66,7 @@ jobs:
       run: |
         gcloud builds submit \
           --config=apps/explorer-agent/cloudbuild.yaml \
-          --substitutions=_IMAGE_TAG=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-explorer-agent:latest \
+          --substitutions=_IMAGE_TAG=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-explorer-agent:${{ env.IMAGE_TAG }} \
           --machine-type=E2_HIGHCPU_8 \
           .
 
@@ -79,7 +80,7 @@ jobs:
           --clear-secrets || true
         # Then deploy with the secret
         gcloud run jobs deploy se-explorer-agent-job \
-          --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-explorer-agent:latest \
+          --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-explorer-agent:${{ env.IMAGE_TAG }} \
           --region ${{ env.REGION }} \
           --project ${{ env.PROJECT_ID }} \
           --set-secrets GEMINI_API_KEY=gemini-api-key:latest \

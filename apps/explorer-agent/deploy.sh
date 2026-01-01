@@ -6,6 +6,7 @@ REGION="us-central1"
 REPO_NAME="agent-repo"
 IMAGE_NAME="se-explorer-agent"
 SERVICE_NAME="se-explorer-agent-job"
+IMAGE_TAG=$(git rev-parse HEAD)
 
 # Always activate the correct project first
 echo "🔧 Activating GCP project: $PROJECT_ID"
@@ -29,7 +30,7 @@ echo "🚀 Deploying Explorer Agent to GCP Project: $PROJECT_ID"
 gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
 
 # 2. Build and Push Image
-IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${IMAGE_NAME}:latest"
+IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${IMAGE_NAME}:${IMAGE_TAG}"
 echo "Building and Pushing image to $IMAGE_URI..."
 # Build from project root to include libs/gemini-engine shared crate
 cd ../..
