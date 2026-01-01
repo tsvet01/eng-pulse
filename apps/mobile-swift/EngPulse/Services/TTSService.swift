@@ -1,45 +1,75 @@
 import Foundation
 import AVFoundation
 import SwiftUI
+import Combine
 
 // MARK: - TTS State
 enum TTSState {
     case stopped
+    case loading    // Downloading from Cloud TTS
     case playing
     case paused
 }
 
 // MARK: - TTS Service
 @MainActor
-class TTSService: NSObject, ObservableObject {
+class TTSService: ObservableObject {
     static let shared = TTSService()
 
-    private let synthesizer = AVSpeechSynthesizer()
+    private var cloudTTS: CloudTTSService?
+    private let cacheService = CacheService()
+    private let audioPlayer = AudioPlayerService()
 
     @Published var state: TTSState = .stopped
     @Published var progress: Double = 0.0
     @Published var currentArticleUrl: String?
+    @Published var errorMessage: String?
 
-    // Settings (0.55 = faster than default for quicker reading)
+    // Settings
     @AppStorage("ttsSpeechRate") var speechRate: Double = 0.55
     @AppStorage("ttsPitch") var pitch: Double = 1.0
+    @AppStorage("ttsVoice") var selectedVoice: String = Neural2Voice.maleJ.rawValue
 
     private var currentText: String?
-    private var currentUtterance: AVSpeechUtterance?
+    private var currentCacheKey: String?
+    private var cancellables = Set<AnyCancellable>()
 
-    private override init() {
-        super.init()
-        synthesizer.delegate = self
-        configureAudioSession()
+    private init() {
+        // Load API key from Info.plist
+        if let apiKey = Bundle.main.infoDictionary?["GoogleCloudTTSAPIKey"] as? String,
+           !apiKey.isEmpty,
+           apiKey != "YOUR_API_KEY" {
+            self.cloudTTS = CloudTTSService(apiKey: apiKey)
+        } else {
+            print("Warning: Google Cloud TTS API key not configured in Info.plist")
+        }
+
+        setupAudioPlayerObservers()
     }
 
-    private func configureAudioSession() {
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowBluetoothA2DP])
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            print("Audio session configuration error: \(error)")
-        }
+    private func setupAudioPlayerObservers() {
+        // Forward audio player state
+        audioPlayer.$isPlaying
+            .receive(on: RunLoop.main)
+            .sink { [weak self] isPlaying in
+                guard let self = self else { return }
+                if self.state == .playing && !isPlaying {
+                    // Playback finished
+                    self.state = .stopped
+                    self.currentArticleUrl = nil
+                } else if self.state == .paused && isPlaying {
+                    self.state = .playing
+                }
+            }
+            .store(in: &cancellables)
+
+        // Forward progress
+        audioPlayer.$progress
+            .receive(on: RunLoop.main)
+            .sink { [weak self] progress in
+                self?.progress = progress
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Public Methods
@@ -47,39 +77,91 @@ class TTSService: NSObject, ObservableObject {
     func speak(_ text: String, articleUrl: String? = nil) {
         stop()
 
+        guard cloudTTS != nil else {
+            errorMessage = "TTS not configured. Add API key to Info.plist."
+            return
+        }
+
         let cleanedText = cleanTextForSpeech(text)
         currentText = cleanedText
         currentArticleUrl = articleUrl
+        errorMessage = nil
 
-        let utterance = AVSpeechUtterance(string: cleanedText)
-        utterance.rate = Float(speechRate) * AVSpeechUtteranceDefaultSpeechRate
-        utterance.pitchMultiplier = Float(pitch)
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        Task {
+            await performSpeak(cleanedText)
+        }
+    }
 
-        currentUtterance = utterance
-        state = .playing
-        synthesizer.speak(utterance)
+    private func performSpeak(_ text: String) async {
+        guard let cloudTTS = cloudTTS else { return }
+
+        state = .loading
+
+        do {
+            // Generate configuration from current settings
+            let config = TTSConfiguration.fromAppStorage(
+                rate: speechRate,
+                pitch: pitch,
+                voice: selectedVoice
+            )
+
+            // Generate cache key
+            let cacheKey = await cacheService.generateAudioCacheKey(text: text, configKey: config.cacheKey)
+            currentCacheKey = cacheKey
+
+            // Check cache first
+            if let cachedURL = await cacheService.getCachedAudioURL(for: cacheKey) {
+                try audioPlayer.play(from: cachedURL)
+                state = .playing
+                return
+            }
+
+            // Not cached - call Cloud TTS API
+            let audioData = try await cloudTTS.synthesize(text: text, config: config)
+
+            // Cache the audio
+            try await cacheService.cacheAudio(audioData, for: cacheKey)
+
+            // Play from cache
+            if let audioURL = await cacheService.getCachedAudioURL(for: cacheKey) {
+                try audioPlayer.play(from: audioURL)
+                state = .playing
+
+                // Cleanup old cache in background
+                Task.detached(priority: .background) { [cacheService] in
+                    await cacheService.cleanupOldAudio()
+                }
+            } else {
+                throw CloudTTSError.decodingError
+            }
+
+        } catch {
+            errorMessage = error.localizedDescription
+            state = .stopped
+            print("TTS error: \(error)")
+        }
     }
 
     func pause() {
         guard state == .playing else { return }
-        synthesizer.pauseSpeaking(at: .immediate)
+        audioPlayer.pause()
         state = .paused
     }
 
     func resume() {
         guard state == .paused else { return }
-        synthesizer.continueSpeaking()
+        audioPlayer.resume()
         state = .playing
     }
 
     func stop() {
-        synthesizer.stopSpeaking(at: .immediate)
+        audioPlayer.stop()
         state = .stopped
         progress = 0.0
         currentArticleUrl = nil
         currentText = nil
-        currentUtterance = nil
+        currentCacheKey = nil
+        errorMessage = nil
     }
 
     func togglePlayPause(_ text: String, articleUrl: String? = nil) {
@@ -93,7 +175,7 @@ class TTSService: NSObject, ObservableObject {
     }
 
     func isPlayingArticle(_ url: String) -> Bool {
-        state == .playing && currentArticleUrl == url
+        (state == .playing || state == .loading) && currentArticleUrl == url
     }
 
     // MARK: - Text Cleaning
@@ -138,51 +220,5 @@ class TTSService: NSObject, ObservableObject {
         cleaned = cleaned.replacingOccurrences(of: " {2,}", with: " ", options: .regularExpression)
 
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-}
-
-// MARK: - AVSpeechSynthesizerDelegate
-extension TTSService: AVSpeechSynthesizerDelegate {
-    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
-        Task { @MainActor in
-            self.state = .playing
-        }
-    }
-
-    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        Task { @MainActor in
-            self.state = .stopped
-            self.progress = 0.0
-            self.currentArticleUrl = nil
-        }
-    }
-
-    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        Task { @MainActor in
-            self.state = .stopped
-            self.progress = 0.0
-            self.currentArticleUrl = nil
-        }
-    }
-
-    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didPause utterance: AVSpeechUtterance) {
-        Task { @MainActor in
-            self.state = .paused
-        }
-    }
-
-    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didContinue utterance: AVSpeechUtterance) {
-        Task { @MainActor in
-            self.state = .playing
-        }
-    }
-
-    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, willSpeakRangeOfSpeechString characterRange: NSRange, utterance: AVSpeechUtterance) {
-        Task { @MainActor in
-            let totalLength = utterance.speechString.count
-            if totalLength > 0 {
-                self.progress = Double(characterRange.location + characterRange.length) / Double(totalLength)
-            }
-        }
     }
 }

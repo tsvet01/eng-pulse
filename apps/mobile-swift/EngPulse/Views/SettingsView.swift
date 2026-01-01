@@ -6,6 +6,7 @@ struct SettingsView: View {
     @AppStorage("dailyBriefingTime") private var dailyBriefingTime = "08:00"
     @AppStorage("ttsSpeechRate") private var speechRate: Double = 0.55
     @AppStorage("ttsPitch") private var pitch: Double = 1.0
+    @AppStorage("ttsVoice") private var selectedVoice: String = Neural2Voice.maleJ.rawValue
 
     @State private var showClearCacheAlert = false
 
@@ -33,10 +34,16 @@ struct SettingsView: View {
                         }
                         Slider(value: $pitch, in: 0.5...1.5, step: 0.1)
                     }
+
+                    Picker("Voice", selection: $selectedVoice) {
+                        ForEach(Neural2Voice.allCases) { voice in
+                            Text(voice.displayName).tag(voice.rawValue)
+                        }
+                    }
                 } header: {
                     Text("Listening")
                 } footer: {
-                    Text("Adjust text-to-speech voice settings for article reading.")
+                    Text("Uses Google Cloud Neural2 voices for natural-sounding speech.")
                 }
 
                 // Notifications Section

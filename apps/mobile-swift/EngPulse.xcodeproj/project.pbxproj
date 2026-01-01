@@ -18,6 +18,9 @@
 		A1000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000009 /* Assets.xcassets */; };
 		A100000A /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000B /* NotificationService.swift */; };
 		A100000D /* TTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000D /* TTSService.swift */; };
+		A100000E /* TTSConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000E /* TTSConfiguration.swift */; };
+		A100000F /* CloudTTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000F /* CloudTTSService.swift */; };
+		A1000010 /* AudioPlayerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000010A /* AudioPlayerService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -34,6 +37,9 @@
 		A200000B /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		A200000C /* EngPulse.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = EngPulse.entitlements; sourceTree = "<group>"; };
 		A200000D /* TTSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSService.swift; sourceTree = "<group>"; };
+		A200000E /* TTSConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSConfiguration.swift; sourceTree = "<group>"; };
+		A200000F /* CloudTTSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudTTSService.swift; sourceTree = "<group>"; };
+		A2000010A /* AudioPlayerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayerService.swift; sourceTree = "<group>"; };
 		A3000001 /* EngPulse.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EngPulse.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -93,6 +99,7 @@
 			isa = PBXGroup;
 			children = (
 				A2000006 /* Summary.swift */,
+				A200000E /* TTSConfiguration.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -101,7 +108,9 @@
 			isa = PBXGroup;
 			children = (
 				A2000007 /* APIService.swift */,
+				A2000010A /* AudioPlayerService.swift */,
 				A2000008 /* CacheService.swift */,
+				A200000F /* CloudTTSService.swift */,
 				A200000B /* NotificationService.swift */,
 				A200000D /* TTSService.swift */,
 			);
@@ -187,6 +196,9 @@
 				A1000008 /* CacheService.swift in Sources */,
 				A100000A /* NotificationService.swift in Sources */,
 				A100000D /* TTSService.swift in Sources */,
+				A100000E /* TTSConfiguration.swift in Sources */,
+				A100000F /* CloudTTSService.swift in Sources */,
+				A1000010 /* AudioPlayerService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

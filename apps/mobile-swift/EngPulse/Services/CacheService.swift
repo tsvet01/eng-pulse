@@ -90,6 +90,61 @@ actor CacheService {
         return suffix.isEmpty ? "default" : suffix
     }
 
+    // MARK: - Audio Cache (TTS)
+
+    /// Cache audio data for TTS
+    func cacheAudio(_ audioData: Data, for cacheKey: String) async throws {
+        ensureDirectoryExists()
+        let audioFile = cacheDirectory.appendingPathComponent("audio_\(cacheKey).mp3")
+        try audioData.write(to: audioFile)
+    }
+
+    /// Get cached audio URL if it exists
+    func getCachedAudioURL(for cacheKey: String) async -> URL? {
+        let audioFile = cacheDirectory.appendingPathComponent("audio_\(cacheKey).mp3")
+        return fileManager.fileExists(atPath: audioFile.path) ? audioFile : nil
+    }
+
+    /// Check if audio is cached
+    func hasAudio(for cacheKey: String) -> Bool {
+        let audioFile = cacheDirectory.appendingPathComponent("audio_\(cacheKey).mp3")
+        return fileManager.fileExists(atPath: audioFile.path)
+    }
+
+    /// Generate cache key from text and TTS configuration string
+    func generateAudioCacheKey(text: String, configKey: String) -> String {
+        // Use simple hash of text + config for consistent key
+        let combined = "\(text)_\(configKey)"
+        let hash = combined.hashValue
+        // Make hash positive and convert to hex
+        return String(format: "%08x_%@", abs(hash), configKey)
+    }
+
+    /// Clean up old audio cache files (keep most recent)
+    func cleanupOldAudio(keepCount: Int = 20) async {
+        guard let contents = try? fileManager.contentsOfDirectory(
+            at: cacheDirectory,
+            includingPropertiesForKeys: [.creationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        let audioFiles = contents.filter { $0.lastPathComponent.hasPrefix("audio_") }
+
+        guard audioFiles.count > keepCount else { return }
+
+        // Sort by creation date (newest first)
+        let sortedFiles = audioFiles.sorted { file1, file2 in
+            let date1 = (try? file1.resourceValues(forKeys: [.creationDateKey]))?.creationDate ?? Date.distantPast
+            let date2 = (try? file2.resourceValues(forKeys: [.creationDateKey]))?.creationDate ?? Date.distantPast
+            return date1 > date2
+        }
+
+        // Delete files beyond keepCount
+        for file in sortedFiles.dropFirst(keepCount) {
+            try? fileManager.removeItem(at: file)
+        }
+    }
+
     // MARK: - Cache Management
 
     /// Clear all cached data

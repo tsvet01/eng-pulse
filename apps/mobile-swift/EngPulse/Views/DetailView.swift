@@ -16,6 +16,10 @@ struct DetailView: View {
         ttsService.state == .paused && ttsService.currentArticleUrl == summary.url
     }
 
+    private var isLoadingTTS: Bool {
+        ttsService.state == .loading && ttsService.currentArticleUrl == summary.url
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             ScrollView {
@@ -60,6 +64,28 @@ struct DetailView: View {
             if ttsService.state != .stopped && ttsService.currentArticleUrl == summary.url {
                 ttsPlayerBar
             }
+
+            // TTS Error Banner
+            if let error = ttsService.errorMessage {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        Text(error)
+                            .font(.caption)
+                        Spacer()
+                        Button {
+                            ttsService.stop()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding()
+                    .background(.ultraThinMaterial)
+                }
+            }
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -70,8 +96,14 @@ struct DetailView: View {
                         Button {
                             toggleTTS()
                         } label: {
-                            Image(systemName: isPlaying ? "pause.fill" : (isPaused ? "play.fill" : "speaker.wave.2.fill"))
+                            if isLoadingTTS {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: isPlaying ? "pause.fill" : (isPaused ? "play.fill" : "speaker.wave.2.fill"))
+                            }
                         }
+                        .disabled(isLoadingTTS)
                     }
 
                     // Share button
@@ -257,9 +289,15 @@ struct DetailView: View {
                 Button {
                     toggleTTS()
                 } label: {
-                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                        .font(.title2)
+                    if isLoadingTTS {
+                        ProgressView()
+                            .scaleEffect(0.9)
+                    } else {
+                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                            .font(.title2)
+                    }
                 }
+                .disabled(isLoadingTTS)
 
                 // Title
                 VStack(alignment: .leading, spacing: 2) {
@@ -267,7 +305,7 @@ struct DetailView: View {
                         .font(.caption)
                         .fontWeight(.medium)
                         .lineLimit(1)
-                    Text(isPlaying ? "Playing..." : "Paused")
+                    Text(isLoadingTTS ? "Generating audio..." : (isPlaying ? "Playing..." : "Paused"))
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
