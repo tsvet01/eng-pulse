@@ -101,11 +101,22 @@ This generates `firebase_options.dart` with your credentials.
 
 ### API Endpoint
 
-The app fetches data from a GCS bucket. Configure in `lib/services/api_service.dart`:
+The app fetches data from a GCS bucket. Configure via `--dart-define` at build time:
 
-```dart
-static const String defaultBucket = 'your-bucket-name';
+```bash
+# Development/staging bucket
+flutter run --dart-define=GCS_BUCKET=my-staging-bucket
+
+# Production (default if not specified)
+flutter run  # Uses tsvet01-agent-brain
 ```
+
+For release builds:
+```bash
+flutter build ios --dart-define=GCS_BUCKET=my-bucket --release
+```
+
+The bucket name can also be set in the build script or CI/CD pipeline.
 
 ### UTF-8 Support
 
@@ -246,13 +257,20 @@ chmod +x build.sh
 # Release build
 ./build.sh --release
 
+# Use staging bucket
+./build.sh --bucket my-staging-bucket
+
 # Combined
-./build.sh -d <device-id> --release
+./build.sh -d <device-id> --release --bucket my-bucket
+
+# Or via environment variable
+GCS_BUCKET=my-staging-bucket ./build.sh
 ```
 
 The script injects:
 - `GIT_COMMIT` - Short git commit hash (e.g., `3290cc2`)
 - `BUILD_TIME` - UTC build timestamp (e.g., `2025-01-15 14:30 UTC`)
+- `GCS_BUCKET` - Optional bucket override for dev/staging
 
 These appear in **Settings → About → Build**.
 

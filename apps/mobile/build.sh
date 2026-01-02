@@ -1,5 +1,6 @@
 #!/bin/bash
 # Build script that injects git commit and build time
+# Usage: ./build.sh [-d device] [--release] [--bucket bucket-name]
 
 set -e
 
@@ -12,6 +13,7 @@ echo "Build time: $BUILD_TIME"
 # Parse arguments
 DEVICE=""
 MODE="debug"
+BUCKET=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -23,11 +25,18 @@ while [[ $# -gt 0 ]]; do
       MODE="release"
       shift
       ;;
+    --bucket)
+      BUCKET="$2"
+      shift 2
+      ;;
     *)
       shift
       ;;
   esac
 done
+
+# Support GCS_BUCKET env var as fallback
+BUCKET="${BUCKET:-$GCS_BUCKET}"
 
 # Build command
 CMD="flutter run"
@@ -41,6 +50,11 @@ if [ "$MODE" = "release" ]; then
 fi
 
 CMD="$CMD --dart-define=GIT_COMMIT=$GIT_COMMIT --dart-define=BUILD_TIME=$BUILD_TIME"
+
+if [ -n "$BUCKET" ]; then
+  CMD="$CMD --dart-define=GCS_BUCKET=$BUCKET"
+  echo "Using bucket: $BUCKET"
+fi
 
 echo "Running: $CMD"
 exec $CMD

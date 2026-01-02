@@ -6,12 +6,16 @@ import 'cache_service.dart';
 import 'connectivity_service.dart';
 
 class ApiService {
-  /// GCS bucket name - can be overridden for testing or different environments
-  static const String defaultBucket = 'tsvet01-agent-brain';
+  /// GCS bucket name - configurable via --dart-define=GCS_BUCKET=name
+  /// Defaults to production bucket if not specified
+  static const String bucket = String.fromEnvironment(
+    'GCS_BUCKET',
+    defaultValue: 'tsvet01-agent-brain',
+  );
 
   /// Constructs the manifest URL from bucket name
   static String get manifestUrl =>
-      'https://storage.googleapis.com/$defaultBucket/manifest.json';
+      'https://storage.googleapis.com/$bucket/manifest.json';
 
   /// HTTP client - can be injected for testing
   final http.Client _client;
