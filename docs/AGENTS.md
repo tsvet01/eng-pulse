@@ -210,19 +210,15 @@ cd apps/mobile && flutter run
 
 ## Known Technical Debt
 
-Active issues to be aware of:
-
-1. **#6** - Environment-based API URL configuration (hardcoded URLs in both apps)
-2. **#7** - Complete FCM token registration (Flutter only; Swift uses APNs)
-3. **#8** - Add observability infrastructure (crash reporting, analytics)
-4. **#9** - Replace :latest Docker tags with versioned tags
+See GitHub Issues for active issues.
 
 Resolved:
-- ~~#12 - Shared code duplicated~~ (RESOLVED: gemini-engine in libs/)
-- ~~#13 - Flutter unit tests~~ (CLOSED)
-- ~~Gemini model config~~ (RESOLVED: GEMINI_MODEL env var)
-
-See GitHub Issues for full list.
+- ~~#6~~ - Environment-based API URL configuration (RESOLVED: `--dart-define=GCS_BUCKET`)
+- ~~#7~~ - FCM token registration (CLOSED: Swift uses APNs, Flutter optional)
+- ~~#8~~ - Observability infrastructure (RESOLVED: monitoring script + structured logging)
+- ~~#9~~ - Docker versioned tags (RESOLVED: git SHA tags)
+- ~~#12~~ - Shared code duplicated (RESOLVED: gemini-engine in libs/)
+- ~~#13~~ - Flutter unit tests (CLOSED)
 
 ## File Naming Conventions
 
@@ -272,6 +268,60 @@ cd functions/notifier && ./deploy.sh
 - PRs run checks only (no deployment)
 - See `.github/workflows/` for details
 
+## Observability
+
+### Setup Monitoring
+
+Run the monitoring setup script to create alerts and dashboard:
+
+```bash
+# Set notification email (optional)
+export NOTIFICATION_EMAIL=your@email.com
+
+# Run setup
+./scripts/setup-monitoring.sh
+```
+
+This creates:
+- **Alert Policies**: Job failures, function errors, missing summaries (36h)
+- **Dashboard**: Execution counts, errors, GCS operations
+- **Notification Channel**: Email alerts (if configured)
+
+### Viewing Logs
+
+```bash
+# Daily agent logs
+gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="se-daily-agent-job"' --limit=50
+
+# Explorer agent logs
+gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="se-explorer-agent-job"' --limit=50
+
+# Notifier function logs
+gcloud logging read 'resource.type="cloud_function" AND resource.labels.function_name="se-daily-notifier"' --limit=50
+
+# Errors only
+gcloud logging read 'severity>=ERROR' --limit=50
+```
+
+### Structured Logging
+
+All components emit structured JSON logs:
+- **Rust agents**: Uses `tracing` with structured fields
+- **Python notifier**: Custom JSON formatter with severity/component
+
+Example log queries in Cloud Logging:
+```
+jsonPayload.component="notifier"
+jsonPayload.success_count>0
+severity="ERROR"
+```
+
+### Dashboard Links
+
+- **Dashboard**: https://console.cloud.google.com/monitoring/dashboards?project=tsvet01
+- **Alerts**: https://console.cloud.google.com/monitoring/alerting?project=tsvet01
+- **Logs**: https://console.cloud.google.com/logs/query?project=tsvet01
+
 ## Important Files
 
 | File | Purpose |
@@ -283,6 +333,7 @@ cd functions/notifier && ./deploy.sh
 | `apps/mobile/lib/services/api_service.dart` | Flutter API client |
 | `apps/mobile-swift/EngPulse/EngPulseApp.swift` | Swift app entry point |
 | `apps/mobile-swift/EngPulse/Services/` | Swift services (API, Cache, TTS) |
+| `scripts/setup-monitoring.sh` | Observability setup (alerts, dashboard) |
 | `.github/workflows/ci.yml` | CI configuration |
 | `.github/workflows/deploy.yml` | Deployment configuration |
 

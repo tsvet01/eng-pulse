@@ -3,6 +3,8 @@ import os
 import smtplib
 import json
 import time
+import logging
+import sys
 import requests
 import httpx
 import jwt
@@ -16,6 +18,46 @@ from google.oauth2 import service_account
 import google.auth
 import markdown
 import bleach
+
+
+# Configure structured JSON logging for Cloud Functions
+class JSONFormatter(logging.Formatter):
+    def format(self, record):
+        log_obj = {
+            "severity": record.levelname,
+            "message": record.getMessage(),
+            "component": "notifier",
+        }
+        if hasattr(record, "extra"):
+            log_obj.update(record.extra)
+        if record.exc_info:
+            log_obj["exception"] = self.formatException(record.exc_info)
+        return json.dumps(log_obj)
+
+
+logger = logging.getLogger("notifier")
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(JSONFormatter())
+logger.handlers = [handler]
+
+
+def log_info(message: str, **kwargs):
+    """Log info with structured data."""
+    record = logger.makeRecord(
+        "notifier", logging.INFO, "", 0, message, (), None
+    )
+    record.extra = kwargs
+    logger.handle(record)
+
+
+def log_error(message: str, **kwargs):
+    """Log error with structured data."""
+    record = logger.makeRecord(
+        "notifier", logging.ERROR, "", 0, message, (), None
+    )
+    record.extra = kwargs
+    logger.handle(record)
 
 # FCM HTTP v1 API endpoint
 FCM_API_URL = "https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
@@ -108,7 +150,7 @@ def send_fcm_notifications(title: str, body: str, article_url: str) -> int:
     try:
         # Get access token for FCM API
         access_token = get_access_token()
-        print(f"Got FCM access token")
+        log_info("Got FCM access token")
 
         # Get all active FCM tokens from Firestore
         db = firestore.Client()
@@ -124,10 +166,10 @@ def send_fcm_notifications(title: str, body: str, article_url: str) -> int:
                 doc_ids.append(doc.id)
 
         if not tokens:
-            print("No active FCM tokens found")
+            log_info("No active FCM tokens found")
             return 0
 
-        print(f"Sending FCM to {len(tokens)} devices")
+        log_info("Sending FCM notifications", device_count=len(tokens))
         success_count = 0
 
         for i, token in enumerate(tokens):
@@ -136,24 +178,23 @@ def send_fcm_notifications(title: str, body: str, article_url: str) -> int:
             )
             if success:
                 success_count += 1
-                print(f"FCM sent successfully to device {i+1}")
             else:
-                print(f"Failed to send FCM to device {i+1}: {response_text}")
+                log_error("Failed to send FCM", device_index=i+1, error=response_text)
                 # Mark invalid tokens as inactive
                 if 'UNREGISTERED' in response_text or 'INVALID_ARGUMENT' in response_text:
                     try:
                         db.collection("fcm_tokens").document(doc_ids[i]).update({
                             "active": False
                         })
-                        print(f"Marked token {doc_ids[i]} as inactive")
+                        log_info("Marked FCM token as inactive", token_id=doc_ids[i])
                     except Exception as e:
-                        print(f"Failed to deactivate token: {e}")
+                        log_error("Failed to deactivate FCM token", error=str(e))
 
-        print(f"FCM notifications sent: {success_count}/{len(tokens)}")
+        log_info("FCM notifications complete", success=success_count, total=len(tokens))
         return success_count
 
     except Exception as e:
-        print(f"Error sending FCM notifications: {e}")
+        log_error("Error sending FCM notifications", error=str(e))
         import traceback
         traceback.print_exc()
         return 0
@@ -188,7 +229,7 @@ def get_apns_credentials():
 
         return _apns_key, _apns_key_id, _apns_team_id
     except Exception as e:
-        print(f"Failed to load APNs credentials: {e}")
+        log_error("Failed to load APNs credentials", error=str(e))
         return None, None, None
 
 
@@ -263,10 +304,10 @@ def send_apns_notifications(title: str, body: str, article_url: str) -> int:
         docs = list(tokens_ref.stream())
 
         if not docs:
-            print("No active APNs tokens found")
+            log_info("No active APNs tokens found")
             return 0
 
-        print(f"Sending APNs to {len(docs)} devices")
+        log_info("Sending APNs notifications", device_count=len(docs))
         success_count = 0
 
         for doc in docs:
@@ -281,21 +322,20 @@ def send_apns_notifications(title: str, body: str, article_url: str) -> int:
 
             if success:
                 success_count += 1
-                print(f"APNs sent successfully")
             else:
-                print(f"Failed to send APNs: {reason}")
+                log_error("Failed to send APNs", reason=reason)
                 if reason in ("BadDeviceToken", "Unregistered", "ExpiredToken"):
                     try:
                         doc.reference.update({"active": False})
-                        print(f"Marked token as inactive")
+                        log_info("Marked APNs token as inactive")
                     except Exception as e:
-                        print(f"Failed to deactivate token: {e}")
+                        log_error("Failed to deactivate APNs token", error=str(e))
 
-        print(f"APNs notifications sent: {success_count}/{len(docs)}")
+        log_info("APNs notifications complete", success=success_count, total=len(docs))
         return success_count
 
     except Exception as e:
-        print(f"Error sending APNs notifications: {e}")
+        log_error("Error sending APNs notifications", error=str(e))
         import traceback
         traceback.print_exc()
         return 0
@@ -307,14 +347,17 @@ def send_summary_email(cloud_event):
     bucket_name = data["bucket"]
     file_name = data["name"]
 
-    print(f"Event ID: {cloud_event['id']}")
-    print(f"Event Type: {cloud_event['type']}")
-    print(f"Bucket: {bucket_name}")
-    print(f"File: {file_name}")
+    log_info(
+        "Processing GCS event",
+        event_id=cloud_event["id"],
+        event_type=cloud_event["type"],
+        bucket=bucket_name,
+        file=file_name,
+    )
 
     # Only process files in 'summaries/' folder
     if not should_process_file(file_name):
-        print("Not a summary file. Skipping.")
+        log_info("Skipping non-summary file", file=file_name)
         return
 
     # Download content
@@ -401,4 +444,4 @@ def send_email(subject_file, html_body):
         server.starttls()
         server.login(gmail_user, gmail_password)
         server.sendmail(gmail_user, dest_email, msg.as_string())
-        print(f"Email sent successfully to {dest_email}")
+        log_info("Email sent successfully", recipient=dest_email)
