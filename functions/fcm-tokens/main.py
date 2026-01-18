@@ -157,12 +157,13 @@ def unregister_token(request: Request):
             return (jsonify({"error": "Invalid FCM token format"}), 400, cors_headers)
 
         # Mark as inactive in Firestore (soft delete)
+        # Use set with merge=True to avoid exception if document doesn't exist
         db = get_db()
         doc_ref = db.collection(TOKENS_COLLECTION).document(token)
-        doc_ref.update({
+        doc_ref.set({
             "active": False,
             "unregistered_at": datetime.now(timezone.utc),
-        })
+        }, merge=True)
 
         print(f"Token unregistered")
 

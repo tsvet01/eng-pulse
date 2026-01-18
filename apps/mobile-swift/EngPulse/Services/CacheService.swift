@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 // MARK: - Cache Service
 actor CacheService {
@@ -113,11 +114,13 @@ actor CacheService {
 
     /// Generate cache key from text and TTS configuration string
     func generateAudioCacheKey(text: String, configKey: String) -> String {
-        // Use simple hash of text + config for consistent key
+        // Use stable SHA256 hash instead of hashValue which changes per app launch
         let combined = "\(text)_\(configKey)"
-        let hash = combined.hashValue
-        // Make hash positive and convert to hex
-        return String(format: "%08x_%@", abs(hash), configKey)
+        let data = Data(combined.utf8)
+        let hash = SHA256.hash(data: data)
+        // Take first 8 bytes for compact key
+        let hashPrefix = hash.prefix(8).map { String(format: "%02x", $0) }.joined()
+        return "\(hashPrefix)_\(configKey)"
     }
 
     /// Clean up old audio cache files (keep most recent)

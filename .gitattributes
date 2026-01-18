@@ -1,3 +1,5 @@
 # Override GitHub linguist language detection
-# Mark Flutter app as not counted in repo language stats
+# Mark mobile apps as not counted in repo language stats
+# so Rust (the core engine) shows as primary language
 apps/mobile/** linguist-vendored
+apps/mobile-swift/** linguist-vendored

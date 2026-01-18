@@ -131,7 +131,7 @@ def send_fcm_notification_http(token: str, title: str, body: str, article_url: s
         }
     }
 
-    response = requests.post(url, headers=headers, json=payload)
+    response = requests.post(url, headers=headers, json=payload, timeout=10)
     return response.status_code == 200, response.text
 
 
@@ -283,7 +283,7 @@ def send_apns_notification(token: str, title: str, body: str, article_url: str, 
             "article_url": article_url,
         }
 
-        with httpx.Client(http2=True) as client:
+        with httpx.Client(http2=True, timeout=10.0) as client:
             response = client.post(url, headers=headers, json=payload)
             if response.status_code == 200:
                 return True, ""

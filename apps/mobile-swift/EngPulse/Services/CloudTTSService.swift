@@ -73,12 +73,16 @@ actor CloudTTSService {
                     // Single sentence is too long - split by words
                     let words = sentence.components(separatedBy: " ")
                     for word in words {
-                        let testWord = currentChunk.isEmpty ? word : "\(currentChunk) \(word)"
+                        // Truncate extremely long words that exceed limit on their own
+                        let safeWord = word.utf8.count > maxBytes
+                            ? String(word.prefix(maxBytes / 4))  // Conservative truncation for multi-byte chars
+                            : word
+                        let testWord = currentChunk.isEmpty ? safeWord : "\(currentChunk) \(safeWord)"
                         if testWord.utf8.count > maxBytes {
                             if !currentChunk.isEmpty {
                                 chunks.append(currentChunk)
                             }
-                            currentChunk = word
+                            currentChunk = safeWord
                         } else {
                             currentChunk = testWord
                         }
@@ -103,19 +107,44 @@ actor CloudTTSService {
         let chunks = chunkText(text)
 
         if chunks.count == 1 {
-            return try await synthesizeChunk(chunks[0], config: config)
+            return try await synthesizeChunk(chunks[0], config: config, encoding: "MP3")
         } else {
-            // Synthesize chunks and concatenate MP3 data
-            var audioData = Data()
-            for chunk in chunks {
-                let chunkData = try await synthesizeChunk(chunk, config: config)
-                audioData.append(chunkData)
+            // For multi-chunk, use LINEAR16 (WAV) which can be properly concatenated
+            // MP3 files cannot be simply appended - they have headers that cause corruption
+            var pcmData = Data()
+            var wavHeader: Data?
+
+            for (index, chunk) in chunks.enumerated() {
+                let chunkData = try await synthesizeChunk(chunk, config: config, encoding: "LINEAR16")
+
+                if index == 0 {
+                    // Keep the full WAV file for the first chunk (includes header)
+                    wavHeader = chunkData.prefix(44)  // WAV header is 44 bytes
+                    pcmData.append(chunkData.suffix(from: 44))
+                } else {
+                    // Strip WAV header from subsequent chunks, keep only PCM data
+                    pcmData.append(chunkData.suffix(from: 44))
+                }
             }
-            return audioData
+
+            // Rebuild WAV header with correct file size
+            guard var header = wavHeader else {
+                throw CloudTTSError.decodingError
+            }
+
+            // Update file size at bytes 4-7 (little endian): total size - 8
+            let fileSize = UInt32(pcmData.count + 36)
+            header.replaceSubrange(4..<8, with: withUnsafeBytes(of: fileSize.littleEndian) { Data($0) })
+
+            // Update data chunk size at bytes 40-43 (little endian)
+            let dataSize = UInt32(pcmData.count)
+            header.replaceSubrange(40..<44, with: withUnsafeBytes(of: dataSize.littleEndian) { Data($0) })
+
+            return header + pcmData
         }
     }
 
-    private func synthesizeChunk(_ text: String, config: TTSConfiguration) async throws -> Data {
+    private func synthesizeChunk(_ text: String, config: TTSConfiguration, encoding: String = "MP3") async throws -> Data {
         guard let url = URL(string: "https://texttospeech.googleapis.com/v1/text:synthesize?key=\(apiKey)") else {
             throw CloudTTSError.invalidURL
         }
@@ -127,7 +156,7 @@ actor CloudTTSService {
                 name: config.voiceName
             ),
             audioConfig: SynthesizeRequest.AudioConfig(
-                audioEncoding: "MP3",
+                audioEncoding: encoding,
                 speakingRate: config.speakingRate,
                 pitch: config.pitch
             )
