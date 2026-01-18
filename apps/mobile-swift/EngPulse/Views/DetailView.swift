@@ -123,11 +123,46 @@ struct DetailView: View {
     // MARK: - Sections
 
     private func fullContentSection(_ content: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
+            // Listen button - prominent CTA
+            listenButton
+
+            // Content
             markdownView(content)
                 .font(.body)
         }
         .padding(.top, 8)
+    }
+
+    private var listenButton: some View {
+        Button {
+            toggleTTS()
+        } label: {
+            HStack(spacing: 12) {
+                if isLoadingTTS {
+                    ProgressView()
+                        .tint(.white)
+                } else {
+                    Image(systemName: isPlaying ? "stop.fill" : (isPaused ? "play.fill" : "headphones"))
+                        .font(.title3)
+                }
+
+                Text(isLoadingTTS ? "Generating Audio..." : (isPlaying ? "Stop Listening" : (isPaused ? "Resume" : "Listen to Summary")))
+                    .fontWeight(.semibold)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(
+                LinearGradient(
+                    colors: isPlaying ? [.red, .red.opacity(0.8)] : [.accentColor, .accentColor.opacity(0.8)],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .foregroundColor(.white)
+            .cornerRadius(12)
+        }
+        .disabled(isLoadingTTS)
     }
 
     private var loadingSection: some View {
@@ -169,48 +204,78 @@ struct DetailView: View {
     }
 
     private func markdownView(_ content: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             ForEach(Array(content.components(separatedBy: "\n\n").enumerated()), id: \.offset) { _, paragraph in
                 let trimmed = paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed.hasPrefix("# ") {
-                    Text(trimmed.dropFirst(2))
-                        .font(.title3)
+                    inlineMarkdown(String(trimmed.dropFirst(2)))
+                        .font(.title2)
                         .fontWeight(.bold)
+                        .padding(.top, 8)
                 } else if trimmed.hasPrefix("## ") {
-                    Text(trimmed.dropFirst(3))
+                    inlineMarkdown(String(trimmed.dropFirst(3)))
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                        .padding(.top, 6)
+                } else if trimmed.hasPrefix("### ") {
+                    inlineMarkdown(String(trimmed.dropFirst(4)))
                         .font(.headline)
                         .fontWeight(.semibold)
-                } else if trimmed.hasPrefix("### ") {
-                    Text(trimmed.dropFirst(4))
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
+                        .padding(.top, 4)
                 } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
-                    // List items
-                    VStack(alignment: .leading, spacing: 4) {
+                    // Unordered list items
+                    VStack(alignment: .leading, spacing: 6) {
                         ForEach(Array(trimmed.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
                             let cleanLine = line.trimmingCharacters(in: .whitespaces)
                             if cleanLine.hasPrefix("- ") || cleanLine.hasPrefix("* ") {
-                                HStack(alignment: .top, spacing: 6) {
+                                HStack(alignment: .top, spacing: 8) {
                                     Text("•")
-                                        .foregroundColor(.secondary)
+                                        .foregroundColor(.accentColor)
+                                        .fontWeight(.bold)
                                     inlineMarkdown(String(cleanLine.dropFirst(2)))
+                                }
+                                .padding(.leading, 4)
+                            } else if !cleanLine.isEmpty {
+                                inlineMarkdown(cleanLine)
+                                    .padding(.leading, 16)
+                            }
+                        }
+                    }
+                } else if trimmed.first?.isNumber == true && trimmed.contains(". ") {
+                    // Numbered list items
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(Array(trimmed.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
+                            let cleanLine = line.trimmingCharacters(in: .whitespaces)
+                            if let dotIndex = cleanLine.firstIndex(of: "."),
+                               cleanLine[cleanLine.startIndex..<dotIndex].allSatisfy({ $0.isNumber }) {
+                                let textStart = cleanLine.index(after: dotIndex)
+                                let text = String(cleanLine[textStart...]).trimmingCharacters(in: .whitespaces)
+                                let number = String(cleanLine[..<dotIndex])
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text("\(number).")
+                                        .foregroundColor(.accentColor)
+                                        .fontWeight(.medium)
+                                        .frame(width: 24, alignment: .trailing)
+                                    inlineMarkdown(text)
                                 }
                             } else if !cleanLine.isEmpty {
                                 inlineMarkdown(cleanLine)
+                                    .padding(.leading, 32)
                             }
                         }
                     }
                 } else if trimmed.hasPrefix(">") {
                     // Blockquote
-                    HStack(spacing: 8) {
-                        Rectangle()
-                            .fill(Color.accentColor.opacity(0.4))
-                            .frame(width: 3)
+                    HStack(alignment: .top, spacing: 12) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Color.accentColor)
+                            .frame(width: 4)
                         inlineMarkdown(trimmed.replacingOccurrences(of: "^>\\s*", with: "", options: .regularExpression))
                             .foregroundColor(.secondary)
                             .italic()
                     }
-                    .padding(.vertical, 4)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 4)
                 } else if trimmed.contains("|") && trimmed.contains("\n") {
                     // Table
                     tableView(trimmed)
@@ -219,14 +284,21 @@ struct DetailView: View {
                     let code = trimmed
                         .replacingOccurrences(of: "^```\\w*\\n?", with: "", options: .regularExpression)
                         .replacingOccurrences(of: "\\n?```$", with: "", options: .regularExpression)
-                    Text(code)
-                        .font(.system(.caption, design: .monospaced))
-                        .padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(6)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        Text(code)
+                            .font(.system(.caption, design: .monospaced))
+                            .padding(12)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(8)
+                } else if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+                    // Horizontal rule
+                    Divider()
+                        .padding(.vertical, 8)
                 } else if !trimmed.isEmpty {
                     inlineMarkdown(trimmed)
+                        .lineSpacing(4)
                 }
             }
         }
@@ -331,7 +403,13 @@ struct DetailView: View {
 
     private func toggleTTS() {
         guard let content = fullContent else { return }
-        ttsService.togglePlayPause(content, articleUrl: summary.url)
+        if isPlaying {
+            // Stop completely when showing "Stop Listening"
+            ttsService.stop()
+        } else {
+            // Start or resume
+            ttsService.togglePlayPause(content, articleUrl: summary.url)
+        }
     }
 
     private func loadFullContent() async {
