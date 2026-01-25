@@ -1,5 +1,6 @@
 # Override GitHub linguist language detection
-# Mark mobile apps as not counted in repo language stats
-# so Rust (the core engine) shows as primary language
+# Mark mobile apps and cloud functions as not counted in repo language stats
+# so Rust (the core agents) shows as primary language
 apps/mobile/** linguist-vendored
 apps/mobile-swift/** linguist-vendored
+functions/** linguist-vendored
