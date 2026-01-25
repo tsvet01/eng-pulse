@@ -104,6 +104,7 @@ struct DetailView: View {
                             }
                         }
                         .disabled(isLoadingTTS)
+                        .accessibilityLabel(isLoadingTTS ? "Generating audio" : (isPlaying ? "Pause audio" : (isPaused ? "Resume audio" : "Listen to summary")))
                     }
 
                     // Share button
@@ -111,6 +112,7 @@ struct DetailView: View {
                         ShareLink(item: url) {
                             Image(systemName: "square.and.arrow.up")
                         }
+                        .accessibilityLabel("Share article")
                     }
                 }
             }
@@ -163,18 +165,22 @@ struct DetailView: View {
             .cornerRadius(12)
         }
         .disabled(isLoadingTTS)
+        .accessibilityLabel(isLoadingTTS ? "Generating audio, please wait" : (isPlaying ? "Stop listening" : (isPaused ? "Resume listening" : "Listen to summary")))
+        .accessibilityHint(isPlaying ? "Stops audio playback" : (isPaused ? "Continues from where you left off" : "Plays the summary as audio"))
     }
 
     private var loadingSection: some View {
         VStack(spacing: 12) {
             ProgressView()
                 .scaleEffect(1.2)
+                .accessibilityLabel("Loading")
             Text("Loading full summary...")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 32)
+        .accessibilityElement(children: .combine)
     }
 
     private func errorSection(_ error: String) -> some View {
@@ -182,10 +188,11 @@ struct DetailView: View {
             Image(systemName: "exclamationmark.triangle")
                 .font(.largeTitle)
                 .foregroundColor(.orange)
-            Text("Failed to load content")
+                .accessibilityHidden(true)
+            Text("Unable to load summary")
                 .font(.subheadline)
                 .fontWeight(.medium)
-            Text(error)
+            Text("Check your internet connection and try again.")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -194,13 +201,14 @@ struct DetailView: View {
                     await loadFullContent()
                 }
             } label: {
-                Label("Retry", systemImage: "arrow.clockwise")
+                Label("Try Again", systemImage: "arrow.clockwise")
             }
             .buttonStyle(.bordered)
             .padding(.top, 4)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)
+        .accessibilityElement(children: .combine)
     }
 
     private func markdownView(_ content: String) -> some View {
@@ -370,6 +378,7 @@ struct DetailView: View {
                     }
                 }
                 .disabled(isLoadingTTS)
+                .accessibilityLabel(isPlaying ? "Pause" : "Play")
 
                 // Title
                 VStack(alignment: .leading, spacing: 2) {
@@ -381,6 +390,9 @@ struct DetailView: View {
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(summary.title), \(isLoadingTTS ? "generating audio" : (isPlaying ? "playing" : "paused"))")
+                .accessibilityValue("\(Int(ttsService.progress * 100)) percent complete")
 
                 Spacer()
 
@@ -392,6 +404,7 @@ struct DetailView: View {
                         .font(.title2)
                         .foregroundColor(.secondary)
                 }
+                .accessibilityLabel("Stop playback")
             }
             .padding(.horizontal)
             .padding(.vertical, 10)

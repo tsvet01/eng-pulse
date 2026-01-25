@@ -174,9 +174,12 @@ struct LoadingView: View {
         VStack(spacing: 16) {
             ProgressView()
                 .scaleEffect(1.5)
+                .accessibilityLabel("Loading")
             Text("Loading summaries...")
                 .foregroundColor(.secondary)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Loading summaries, please wait")
     }
 }
 
@@ -190,6 +193,7 @@ struct ErrorView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 48))
                 .foregroundColor(.orange)
+                .accessibilityHidden(true)
 
             Text("Something went wrong")
                 .font(.headline)
@@ -202,7 +206,9 @@ struct ErrorView: View {
 
             Button("Try Again", action: retryAction)
                 .buttonStyle(.borderedProminent)
+                .accessibilityHint("Attempts to reload the summaries")
         }
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -213,6 +219,7 @@ struct EmptyStateView: View {
             Image(systemName: "newspaper")
                 .font(.system(size: 48))
                 .foregroundColor(.secondary)
+                .accessibilityHidden(true)
 
             Text("No summaries yet")
                 .font(.headline)
@@ -223,6 +230,8 @@ struct EmptyStateView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("No summaries yet. Check back later for the latest engineering insights.")
     }
 }
 

@@ -205,28 +205,28 @@ enum CloudTTSError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidURL:
-            return "Invalid API URL"
+            return "Unable to connect to audio service. Please try again."
         case .invalidResponse:
-            return "Invalid response from TTS service"
+            return "Audio service returned an unexpected response. Please try again."
         case .httpError(let statusCode):
             switch statusCode {
             case 400:
-                return "Invalid request to TTS service"
+                return "Unable to generate audio. Please try a shorter text."
             case 401, 403:
-                return "TTS API key is invalid or missing"
+                return "Audio service is not available. Please check app settings."
             case 429:
-                return "TTS quota exceeded - try again later"
+                return "Audio service is busy. Please try again in a few moments."
             case 500...599:
-                return "TTS service temporarily unavailable"
+                return "Audio service is temporarily unavailable. Please try again later."
             default:
-                return "TTS service error (\(statusCode))"
+                return "Unable to generate audio. Please try again."
             }
-        case .apiError(let message):
-            return message
+        case .apiError:
+            return "Audio generation failed. Please try again."
         case .decodingError:
-            return "Failed to decode audio"
+            return "Unable to process audio. Please try again."
         case .noAPIKey:
-            return "Google Cloud TTS API key not configured"
+            return "Audio playback is not available. Please check app settings."
         }
     }
 }

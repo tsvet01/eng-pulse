@@ -9,6 +9,49 @@ from flask import jsonify, Request
 from google.cloud import firestore
 from datetime import datetime, timezone
 import re
+import json
+import logging
+import sys
+
+
+# Configure structured JSON logging for Cloud Functions
+class JSONFormatter(logging.Formatter):
+    def format(self, record):
+        log_obj = {
+            "severity": record.levelname,
+            "message": record.getMessage(),
+            "component": "fcm-tokens",
+        }
+        if hasattr(record, "extra"):
+            log_obj.update(record.extra)
+        if record.exc_info:
+            log_obj["exception"] = self.formatException(record.exc_info)
+        return json.dumps(log_obj)
+
+
+logger = logging.getLogger("fcm-tokens")
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(JSONFormatter())
+logger.handlers = [handler]
+
+
+def log_info(message: str, **kwargs):
+    """Log info with structured data."""
+    record = logger.makeRecord(
+        "fcm-tokens", logging.INFO, "", 0, message, (), None
+    )
+    record.extra = kwargs
+    logger.handle(record)
+
+
+def log_error(message: str, **kwargs):
+    """Log error with structured data."""
+    record = logger.makeRecord(
+        "fcm-tokens", logging.ERROR, "", 0, message, (), None
+    )
+    record.extra = kwargs
+    logger.handle(record)
 
 # Firestore collection for FCM tokens
 TOKENS_COLLECTION = "fcm_tokens"
@@ -107,7 +150,7 @@ def register_token(request: Request):
             "active": True,
         }, merge=True)
 
-        print(f"Token registered: platform={platform}, app_version={app_version}")
+        log_info("FCM token registered", platform=platform, app_version=app_version)
 
         return (jsonify({
             "success": True,
@@ -115,7 +158,7 @@ def register_token(request: Request):
         }), 200, cors_headers)
 
     except Exception as e:
-        print(f"Error registering token: {e}")
+        log_error("Error registering FCM token", error=str(e))
         return (jsonify({"error": "Internal server error"}), 500, cors_headers)
 
 
@@ -165,7 +208,7 @@ def unregister_token(request: Request):
             "unregistered_at": datetime.now(timezone.utc),
         }, merge=True)
 
-        print(f"Token unregistered")
+        log_info("FCM token unregistered")
 
         return (jsonify({
             "success": True,
@@ -173,5 +216,5 @@ def unregister_token(request: Request):
         }), 200, cors_headers)
 
     except Exception as e:
-        print(f"Error unregistering token: {e}")
+        log_error("Error unregistering FCM token", error=str(e))
         return (jsonify({"error": "Internal server error"}), 500, cors_headers)

@@ -78,7 +78,7 @@ class TTSService: ObservableObject {
         stop()
 
         guard cloudTTS != nil else {
-            errorMessage = "TTS not configured. Add API key to Info.plist."
+            errorMessage = "Audio playback is not available. Please check app settings."
             return
         }
 

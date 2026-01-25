@@ -15,6 +15,49 @@ import time
 import httpx
 import re
 import os
+import json
+import logging
+import sys
+
+
+# Configure structured JSON logging for Cloud Functions
+class JSONFormatter(logging.Formatter):
+    def format(self, record):
+        log_obj = {
+            "severity": record.levelname,
+            "message": record.getMessage(),
+            "component": "apns-notifier",
+        }
+        if hasattr(record, "extra"):
+            log_obj.update(record.extra)
+        if record.exc_info:
+            log_obj["exception"] = self.formatException(record.exc_info)
+        return json.dumps(log_obj)
+
+
+logger = logging.getLogger("apns-notifier")
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(JSONFormatter())
+logger.handlers = [handler]
+
+
+def log_info(message: str, **kwargs):
+    """Log info with structured data."""
+    record = logger.makeRecord(
+        "apns-notifier", logging.INFO, "", 0, message, (), None
+    )
+    record.extra = kwargs
+    logger.handle(record)
+
+
+def log_error(message: str, **kwargs):
+    """Log error with structured data."""
+    record = logger.makeRecord(
+        "apns-notifier", logging.ERROR, "", 0, message, (), None
+    )
+    record.extra = kwargs
+    logger.handle(record)
 
 # Firestore collection for APNs tokens
 APNS_TOKENS_COLLECTION = "apns_tokens"
@@ -158,7 +201,7 @@ def register_apns_token(request: Request):
             "active": True,
         }, merge=True)
 
-        print(f"APNs token registered: sandbox={sandbox}, app_version={app_version}")
+        log_info("APNs token registered", sandbox=sandbox, app_version=app_version)
 
         return (jsonify({
             "success": True,
@@ -166,7 +209,7 @@ def register_apns_token(request: Request):
         }), 200, cors_headers)
 
     except Exception as e:
-        print(f"Error registering APNs token: {e}")
+        log_error("Error registering APNs token", error=str(e))
         return (jsonify({"error": "Internal server error"}), 500, cors_headers)
 
 
@@ -229,10 +272,10 @@ def send_apns_notifications(title: str, body: str, article_url: str) -> int:
         docs = list(tokens_ref.stream())
 
         if not docs:
-            print("No active APNs tokens found")
+            log_info("No active APNs tokens found")
             return 0
 
-        print(f"Sending APNs to {len(docs)} devices")
+        log_info("Sending APNs notifications", device_count=len(docs))
         success_count = 0
 
         for doc in docs:
@@ -249,22 +292,21 @@ def send_apns_notifications(title: str, body: str, article_url: str) -> int:
 
             if success:
                 success_count += 1
-                print(f"APNs sent successfully to device")
             else:
-                print(f"Failed to send APNs: {reason}")
+                log_error("Failed to send APNs", reason=reason)
                 # Mark invalid tokens as inactive
                 if reason in ("BadDeviceToken", "Unregistered", "ExpiredToken"):
                     try:
                         doc.reference.update({"active": False})
-                        print(f"Marked token as inactive")
+                        log_info("Marked APNs token as inactive")
                     except Exception as e:
-                        print(f"Failed to deactivate token: {e}")
+                        log_error("Failed to deactivate APNs token", error=str(e))
 
-        print(f"APNs notifications sent: {success_count}/{len(docs)}")
+        log_info("APNs notifications complete", success=success_count, total=len(docs))
         return success_count
 
     except Exception as e:
-        print(f"Error sending APNs notifications: {e}")
+        log_error("Error sending APNs notifications", error=str(e))
         import traceback
         traceback.print_exc()
         return 0
@@ -308,5 +350,5 @@ def trigger_apns_notification(request: Request):
         }), 200, cors_headers)
 
     except Exception as e:
-        print(f"Error triggering APNs: {e}")
+        log_error("Error triggering APNs", error=str(e))
         return (jsonify({"error": str(e)}), 500, cors_headers)
