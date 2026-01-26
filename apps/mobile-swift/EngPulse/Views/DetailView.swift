@@ -436,14 +436,18 @@ struct DetailView: View {
         }
 
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 30  // 30 second timeout
+            let (data, _) = try await URLSession.shared.data(for: request)
             if let content = String(data: data, encoding: .utf8) {
                 fullContent = content
             } else {
                 loadingError = "Could not decode content"
             }
+        } catch let error as URLError where error.code == .timedOut {
+            loadingError = "Request timed out. Please try again."
         } catch {
-            loadingError = error.localizedDescription
+            loadingError = "Unable to load content. Check your connection."
         }
     }
 }

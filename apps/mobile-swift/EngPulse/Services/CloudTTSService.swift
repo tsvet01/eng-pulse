@@ -2,6 +2,12 @@ import Foundation
 
 // MARK: - Cloud TTS Service
 actor CloudTTSService {
+    // MARK: - Constants
+    private static let wavHeaderSize = 44
+    private static let maxChunkBytes = 4500  // API limit is 5000, using 4500 for safety margin
+    private static let requestTimeout: TimeInterval = 30
+    private static let resourceTimeout: TimeInterval = 120
+
     private let session: URLSession
     private let apiKey: String
 
@@ -11,8 +17,8 @@ actor CloudTTSService {
             self.session = session
         } else {
             let config = URLSessionConfiguration.default
-            config.timeoutIntervalForRequest = 30
-            config.timeoutIntervalForResource = 120
+            config.timeoutIntervalForRequest = Self.requestTimeout
+            config.timeoutIntervalForResource = Self.resourceTimeout
             self.session = URLSession(configuration: config)
         }
     }
@@ -47,7 +53,7 @@ actor CloudTTSService {
     // MARK: - Text Chunking
 
     /// Split text into chunks under 5000 bytes for API limit
-    private func chunkText(_ text: String, maxBytes: Int = 4500) -> [String] {
+    private func chunkText(_ text: String, maxBytes: Int = Self.maxChunkBytes) -> [String] {
         // If text fits in one chunk, return it
         if text.utf8.count <= maxBytes {
             return [text]
@@ -119,11 +125,11 @@ actor CloudTTSService {
 
                 if index == 0 {
                     // Keep the full WAV file for the first chunk (includes header)
-                    wavHeader = chunkData.prefix(44)  // WAV header is 44 bytes
-                    pcmData.append(chunkData.suffix(from: 44))
+                    wavHeader = chunkData.prefix(Self.wavHeaderSize)
+                    pcmData.append(chunkData.suffix(from: Self.wavHeaderSize))
                 } else {
                     // Strip WAV header from subsequent chunks, keep only PCM data
-                    pcmData.append(chunkData.suffix(from: 44))
+                    pcmData.append(chunkData.suffix(from: Self.wavHeaderSize))
                 }
             }
 
@@ -132,20 +138,20 @@ actor CloudTTSService {
                 throw CloudTTSError.decodingError
             }
 
-            // Update file size at bytes 4-7 (little endian): total size - 8
-            let fileSize = UInt32(pcmData.count + 36)
+            // Update file size at bytes 4-7 (little endian): total size - 8 (RIFF header)
+            let fileSize = UInt32(pcmData.count + Self.wavHeaderSize - 8)
             header.replaceSubrange(4..<8, with: withUnsafeBytes(of: fileSize.littleEndian) { Data($0) })
 
             // Update data chunk size at bytes 40-43 (little endian)
             let dataSize = UInt32(pcmData.count)
-            header.replaceSubrange(40..<44, with: withUnsafeBytes(of: dataSize.littleEndian) { Data($0) })
+            header.replaceSubrange(40..<Self.wavHeaderSize, with: withUnsafeBytes(of: dataSize.littleEndian) { Data($0) })
 
             return header + pcmData
         }
     }
 
     private func synthesizeChunk(_ text: String, config: TTSConfiguration, encoding: String = "MP3") async throws -> Data {
-        guard let url = URL(string: "https://texttospeech.googleapis.com/v1/text:synthesize?key=\(apiKey)") else {
+        guard let url = URL(string: "https://texttospeech.googleapis.com/v1/text:synthesize") else {
             throw CloudTTSError.invalidURL
         }
 
@@ -165,6 +171,7 @@ actor CloudTTSService {
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         urlRequest.httpBody = try JSONEncoder().encode(request)
 
         let (data, response) = try await session.data(for: urlRequest)

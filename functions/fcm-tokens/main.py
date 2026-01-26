@@ -72,10 +72,10 @@ def is_valid_fcm_token(token: str) -> bool:
     """Basic validation for FCM token format."""
     if not token or not isinstance(token, str):
         return False
-    # FCM tokens are typically 100-200+ characters, alphanumeric with some special chars
-    if len(token) < 50 or len(token) > 500:
+    # FCM tokens are typically 152-163 characters, using 100-300 for safety margin
+    if len(token) < 100 or len(token) > 300:
         return False
-    # Should only contain safe characters
+    # Should only contain safe characters (alphanumeric, underscore, colon, hyphen)
     if not re.match(r'^[A-Za-z0-9_:\-]+$', token):
         return False
     return True
