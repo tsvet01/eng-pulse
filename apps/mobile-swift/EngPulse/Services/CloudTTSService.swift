@@ -53,7 +53,7 @@ actor CloudTTSService {
     // MARK: - Text Chunking
 
     /// Split text into chunks under 5000 bytes for API limit
-    private func chunkText(_ text: String, maxBytes: Int = Self.maxChunkBytes) -> [String] {
+    private func chunkText(_ text: String, maxBytes: Int = 4500) -> [String] {
         // If text fits in one chunk, return it
         if text.utf8.count <= maxBytes {
             return [text]
