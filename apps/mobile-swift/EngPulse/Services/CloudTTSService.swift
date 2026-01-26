@@ -3,10 +3,20 @@ import Foundation
 // MARK: - Cloud TTS Service
 actor CloudTTSService {
     // MARK: - Constants
-    private static let wavHeaderSize = 44
-    private static let maxChunkBytes = 4500  // API limit is 5000, using 4500 for safety margin
-    private static let requestTimeout: TimeInterval = 30
-    private static let resourceTimeout: TimeInterval = 120
+    private enum Constants {
+        /// Standard RIFF WAV header size in bytes (44 bytes for PCM format)
+        static let wavHeaderSize = 44
+
+        /// Google Cloud TTS API chunk size limit with safety margin
+        /// API limit is 5000 bytes, we use 4500 to account for multi-byte UTF-8 characters
+        static let maxChunkBytes = 4500
+
+        /// Network request timeout for TTS synthesis
+        static let requestTimeout: TimeInterval = 30
+
+        /// Resource download timeout for audio files
+        static let resourceTimeout: TimeInterval = 120
+    }
 
     private let session: URLSession
     private let apiKey: String
@@ -17,8 +27,8 @@ actor CloudTTSService {
             self.session = session
         } else {
             let config = URLSessionConfiguration.default
-            config.timeoutIntervalForRequest = Self.requestTimeout
-            config.timeoutIntervalForResource = Self.resourceTimeout
+            config.timeoutIntervalForRequest = Constants.requestTimeout
+            config.timeoutIntervalForResource = Constants.resourceTimeout
             self.session = URLSession(configuration: config)
         }
     }
@@ -53,7 +63,7 @@ actor CloudTTSService {
     // MARK: - Text Chunking
 
     /// Split text into chunks under 5000 bytes for API limit
-    private func chunkText(_ text: String, maxBytes: Int = 4500) -> [String] {
+    private func chunkText(_ text: String, maxBytes: Int = Constants.maxChunkBytes) -> [String] {
         // If text fits in one chunk, return it
         if text.utf8.count <= maxBytes {
             return [text]
@@ -125,11 +135,11 @@ actor CloudTTSService {
 
                 if index == 0 {
                     // Keep the full WAV file for the first chunk (includes header)
-                    wavHeader = chunkData.prefix(Self.wavHeaderSize)
-                    pcmData.append(chunkData.suffix(from: Self.wavHeaderSize))
+                    wavHeader = chunkData.prefix(Constants.wavHeaderSize)
+                    pcmData.append(chunkData.suffix(from: Constants.wavHeaderSize))
                 } else {
                     // Strip WAV header from subsequent chunks, keep only PCM data
-                    pcmData.append(chunkData.suffix(from: Self.wavHeaderSize))
+                    pcmData.append(chunkData.suffix(from: Constants.wavHeaderSize))
                 }
             }
 
@@ -139,12 +149,12 @@ actor CloudTTSService {
             }
 
             // Update file size at bytes 4-7 (little endian): total size - 8 (RIFF header)
-            let fileSize = UInt32(pcmData.count + Self.wavHeaderSize - 8)
+            let fileSize = UInt32(pcmData.count + Constants.wavHeaderSize - 8)
             header.replaceSubrange(4..<8, with: withUnsafeBytes(of: fileSize.littleEndian) { Data($0) })
 
             // Update data chunk size at bytes 40-43 (little endian)
             let dataSize = UInt32(pcmData.count)
-            header.replaceSubrange(40..<Self.wavHeaderSize, with: withUnsafeBytes(of: dataSize.littleEndian) { Data($0) })
+            header.replaceSubrange(40..<Constants.wavHeaderSize, with: withUnsafeBytes(of: dataSize.littleEndian) { Data($0) })
 
             return header + pcmData
         }

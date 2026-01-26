@@ -1,10 +1,16 @@
+"""
+Notifier Cloud Function
+
+Handles:
+1. GCS event notifications for new summary files
+2. Email notifications via Gmail
+3. FCM push notifications to mobile apps
+4. APNs push notifications to iOS Swift app
+"""
 import functions_framework
 import os
 import smtplib
-import json
 import time
-import logging
-import sys
 import requests
 import httpx
 import jwt
@@ -14,50 +20,18 @@ from google.cloud import storage
 from google.cloud import firestore
 from google.cloud import secretmanager
 from google.auth.transport.requests import Request
-from google.oauth2 import service_account
 import google.auth
 import markdown
 import bleach
+import sys
 
+# Add shared module to path for Cloud Functions deployment
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-# Configure structured JSON logging for Cloud Functions
-class JSONFormatter(logging.Formatter):
-    def format(self, record):
-        log_obj = {
-            "severity": record.levelname,
-            "message": record.getMessage(),
-            "component": "notifier",
-        }
-        if hasattr(record, "extra"):
-            log_obj.update(record.extra)
-        if record.exc_info:
-            log_obj["exception"] = self.formatException(record.exc_info)
-        return json.dumps(log_obj)
+from shared.logging_config import CloudFunctionLogger
 
-
-logger = logging.getLogger("notifier")
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler(sys.stdout)
-handler.setFormatter(JSONFormatter())
-logger.handlers = [handler]
-
-
-def log_info(message: str, **kwargs):
-    """Log info with structured data."""
-    record = logger.makeRecord(
-        "notifier", logging.INFO, "", 0, message, (), None
-    )
-    record.extra = kwargs
-    logger.handle(record)
-
-
-def log_error(message: str, **kwargs):
-    """Log error with structured data."""
-    record = logger.makeRecord(
-        "notifier", logging.ERROR, "", 0, message, (), None
-    )
-    record.extra = kwargs
-    logger.handle(record)
+# Initialize logger
+logger = CloudFunctionLogger("notifier")
 
 # FCM HTTP v1 API endpoint
 FCM_API_URL = "https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
@@ -65,9 +39,9 @@ PROJECT_ID = os.environ.get('GOOGLE_CLOUD_PROJECT', 'tsvet01')
 
 # APNs configuration
 APNS_TOKENS_COLLECTION = "apns_tokens"
-APNS_PRODUCTION = "https://api.push.apple.com"
-APNS_SANDBOX = "https://api.sandbox.push.apple.com"
-BUNDLE_ID = "org.tsvetkov.EngPulseSwift"
+APNS_PRODUCTION_URL = "https://api.push.apple.com"
+APNS_SANDBOX_URL = "https://api.sandbox.push.apple.com"
+BUNDLE_ID = os.environ.get('APNS_BUNDLE_ID', 'org.tsvetkov.EngPulseSwift')
 
 # Lazy-loaded APNs credentials
 _apns_key = None
@@ -82,6 +56,7 @@ def get_access_token():
     )
     credentials.refresh(Request())
     return credentials.token
+
 
 # Allowed HTML tags for email content sanitization
 ALLOWED_TAGS = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li',
@@ -150,7 +125,7 @@ def send_fcm_notifications(title: str, body: str, article_url: str) -> int:
     try:
         # Get access token for FCM API
         access_token = get_access_token()
-        log_info("Got FCM access token")
+        logger.info("Got FCM access token")
 
         # Get all active FCM tokens from Firestore
         db = firestore.Client()
@@ -166,10 +141,10 @@ def send_fcm_notifications(title: str, body: str, article_url: str) -> int:
                 doc_ids.append(doc.id)
 
         if not tokens:
-            log_info("No active FCM tokens found")
+            logger.info("No active FCM tokens found")
             return 0
 
-        log_info("Sending FCM notifications", device_count=len(tokens))
+        logger.info("Sending FCM notifications", device_count=len(tokens))
         success_count = 0
 
         for i, token in enumerate(tokens):
@@ -179,22 +154,22 @@ def send_fcm_notifications(title: str, body: str, article_url: str) -> int:
             if success:
                 success_count += 1
             else:
-                log_error("Failed to send FCM", device_index=i+1, error=response_text)
+                logger.error("Failed to send FCM", device_index=i+1, error=response_text)
                 # Mark invalid tokens as inactive
                 if 'UNREGISTERED' in response_text or 'INVALID_ARGUMENT' in response_text:
                     try:
                         db.collection("fcm_tokens").document(doc_ids[i]).update({
                             "active": False
                         })
-                        log_info("Marked FCM token as inactive", token_id=doc_ids[i])
+                        logger.info("Marked FCM token as inactive", token_id=doc_ids[i])
                     except Exception as e:
-                        log_error("Failed to deactivate FCM token", error=str(e))
+                        logger.error("Failed to deactivate FCM token", error=str(e))
 
-        log_info("FCM notifications complete", success=success_count, total=len(tokens))
+        logger.info("FCM notifications complete", success=success_count, total=len(tokens))
         return success_count
 
     except Exception as e:
-        log_error("Error sending FCM notifications", error=str(e))
+        logger.error("Error sending FCM notifications", error=str(e))
         import traceback
         traceback.print_exc()
         return 0
@@ -229,7 +204,7 @@ def get_apns_credentials():
 
         return _apns_key, _apns_key_id, _apns_team_id
     except Exception as e:
-        log_error("Failed to load APNs credentials", error=str(e))
+        logger.error("Failed to load APNs credentials", error=str(e))
         return None, None, None
 
 
@@ -261,7 +236,7 @@ def send_apns_notification(token: str, title: str, body: str, article_url: str, 
         if not jwt_token:
             return False, "No APNs credentials"
 
-        endpoint = APNS_SANDBOX if sandbox else APNS_PRODUCTION
+        endpoint = APNS_SANDBOX_URL if sandbox else APNS_PRODUCTION_URL
         url = f"{endpoint}/3/device/{token}"
 
         headers = {
@@ -304,10 +279,10 @@ def send_apns_notifications(title: str, body: str, article_url: str) -> int:
         docs = list(tokens_ref.stream())
 
         if not docs:
-            log_info("No active APNs tokens found")
+            logger.info("No active APNs tokens found")
             return 0
 
-        log_info("Sending APNs notifications", device_count=len(docs))
+        logger.info("Sending APNs notifications", device_count=len(docs))
         success_count = 0
 
         for doc in docs:
@@ -323,19 +298,19 @@ def send_apns_notifications(title: str, body: str, article_url: str) -> int:
             if success:
                 success_count += 1
             else:
-                log_error("Failed to send APNs", reason=reason)
+                logger.error("Failed to send APNs", reason=reason)
                 if reason in ("BadDeviceToken", "Unregistered", "ExpiredToken"):
                     try:
                         doc.reference.update({"active": False})
-                        log_info("Marked APNs token as inactive")
+                        logger.info("Marked APNs token as inactive")
                     except Exception as e:
-                        log_error("Failed to deactivate APNs token", error=str(e))
+                        logger.error("Failed to deactivate APNs token", error=str(e))
 
-        log_info("APNs notifications complete", success=success_count, total=len(docs))
+        logger.info("APNs notifications complete", success=success_count, total=len(docs))
         return success_count
 
     except Exception as e:
-        log_error("Error sending APNs notifications", error=str(e))
+        logger.error("Error sending APNs notifications", error=str(e))
         import traceback
         traceback.print_exc()
         return 0
@@ -347,7 +322,7 @@ def send_summary_email(cloud_event):
     bucket_name = data["bucket"]
     file_name = data["name"]
 
-    log_info(
+    logger.info(
         "Processing GCS event",
         event_id=cloud_event["id"],
         event_type=cloud_event["type"],
@@ -357,7 +332,7 @@ def send_summary_email(cloud_event):
 
     # Only process files in 'summaries/' folder
     if not should_process_file(file_name):
-        log_info("Skipping non-summary file", file=file_name)
+        logger.info("Skipping non-summary file", file=file_name)
         return
 
     # Download content
@@ -397,6 +372,7 @@ def send_summary_email(cloud_event):
 
     # Also send APNs notifications to iOS Swift app users
     send_apns_notifications(title, body, article_url)
+
 
 def send_email(subject_file, html_body):
     gmail_user = os.environ.get("GMAIL_USER")
@@ -444,4 +420,4 @@ def send_email(subject_file, html_body):
         server.starttls()
         server.login(gmail_user, gmail_password)
         server.sendmail(gmail_user, dest_email, msg.as_string())
-        log_info("Email sent successfully", recipient=dest_email)
+        logger.info("Email sent successfully", recipient=dest_email)

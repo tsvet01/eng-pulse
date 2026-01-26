@@ -74,7 +74,8 @@ class TTSService: ObservableObject {
 
     // MARK: - Public Methods
 
-    func speak(_ text: String, articleUrl: String? = nil) {
+    /// Start speaking text, stopping any current playback first
+    func startSpeaking(_ text: String, articleUrl: String? = nil) {
         stop()
 
         guard cloudTTS != nil else {
@@ -170,7 +171,7 @@ class TTSService: ObservableObject {
         } else if state == .paused && currentArticleUrl == articleUrl {
             resume()
         } else {
-            speak(text, articleUrl: articleUrl)
+            startSpeaking(text, articleUrl: articleUrl)
         }
     }
 
