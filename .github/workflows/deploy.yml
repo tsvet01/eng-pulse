@@ -104,6 +104,9 @@ jobs:
     - name: Set up Cloud SDK
       uses: google-github-actions/setup-gcloud@v2
 
+    - name: Bundle shared module
+      run: cp -r functions/shared functions/notifier/shared
+
     - name: Deploy Notifier Function
       run: |
         cd functions/notifier
