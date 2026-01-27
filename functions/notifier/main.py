@@ -39,8 +39,8 @@ PROJECT_ID = os.environ.get('GOOGLE_CLOUD_PROJECT', 'tsvet01')
 
 # APNs configuration
 APNS_TOKENS_COLLECTION = "apns_tokens"
-APNS_PRODUCTION_URL = "https://api.push.apple.com"
-APNS_SANDBOX_URL = "https://api.sandbox.push.apple.com"
+APNS_PRODUCTION_URL = os.environ.get('APNS_PRODUCTION_URL', 'https://api.push.apple.com')
+APNS_SANDBOX_URL = os.environ.get('APNS_SANDBOX_URL', 'https://api.sandbox.push.apple.com')
 BUNDLE_ID = os.environ.get('APNS_BUNDLE_ID', 'org.tsvetkov.EngPulseSwift')
 
 # Lazy-loaded APNs credentials

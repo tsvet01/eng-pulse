@@ -34,9 +34,9 @@ logger = CloudFunctionLogger("apns-notifier")
 # Firestore collection for APNs tokens
 APNS_TOKENS_COLLECTION = "apns_tokens"
 
-# APNs endpoints
-APNS_PRODUCTION_URL = "https://api.push.apple.com"
-APNS_SANDBOX_URL = "https://api.sandbox.push.apple.com"
+# APNs endpoints (configurable for testing/proxy scenarios)
+APNS_PRODUCTION_URL = os.environ.get('APNS_PRODUCTION_URL', 'https://api.push.apple.com')
+APNS_SANDBOX_URL = os.environ.get('APNS_SANDBOX_URL', 'https://api.sandbox.push.apple.com')
 
 # App bundle ID (configurable for different environments)
 BUNDLE_ID = os.environ.get('APNS_BUNDLE_ID', 'org.tsvetkov.EngPulseSwift')
