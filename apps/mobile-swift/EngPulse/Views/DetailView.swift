@@ -1,6 +1,30 @@
 import SwiftUI
 
 struct DetailView: View {
+    // MARK: - Layout Constants
+    private enum Layout {
+        /// Height of the TTS player bar at bottom of screen
+        static let playerBarHeight: CGFloat = 60
+
+        /// Vertical padding for prominent CTA buttons
+        static let buttonVerticalPadding: CGFloat = 14
+
+        /// Padding around player controls
+        static let playerControlPadding: CGFloat = 10
+
+        /// Progress bar height
+        static let progressBarHeight: CGFloat = 2
+
+        /// Corner radius for buttons
+        static let buttonCornerRadius: CGFloat = 12
+
+        /// Corner radius for table cells
+        static let tableCellCornerRadius: CGFloat = 6
+
+        /// Blockquote accent bar width
+        static let blockquoteBarWidth: CGFloat = 4
+    }
+
     let summary: Summary
     @State private var fullContent: String?
     @State private var isLoadingContent = false
@@ -53,7 +77,7 @@ struct DetailView: View {
 
                     // Bottom padding for player bar
                     if ttsService.state != .stopped && ttsService.currentArticleUrl == summary.url {
-                        Color.clear.frame(height: 60)
+                        Color.clear.frame(height: Layout.playerBarHeight)
                     }
                 }
                 .padding(.horizontal)
@@ -153,7 +177,7 @@ struct DetailView: View {
                     .fontWeight(.semibold)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
+            .padding(.vertical, Layout.buttonVerticalPadding)
             .background(
                 LinearGradient(
                     colors: isPlaying ? [.red, .red.opacity(0.8)] : [.accentColor, .accentColor.opacity(0.8)],
@@ -162,7 +186,7 @@ struct DetailView: View {
                 )
             )
             .foregroundColor(.white)
-            .cornerRadius(12)
+            .cornerRadius(Layout.buttonCornerRadius)
         }
         .disabled(isLoadingTTS)
         .accessibilityLabel(isLoadingTTS ? "Generating audio, please wait" : (isPlaying ? "Stop listening" : (isPaused ? "Resume listening" : "Listen to summary")))
@@ -277,7 +301,7 @@ struct DetailView: View {
                     HStack(alignment: .top, spacing: 12) {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(Color.accentColor)
-                            .frame(width: 4)
+                            .frame(width: Layout.blockquoteBarWidth)
                         inlineMarkdown(trimmed.replacingOccurrences(of: "^>\\s*", with: "", options: .regularExpression))
                             .foregroundColor(.secondary)
                             .italic()
@@ -338,9 +362,9 @@ struct DetailView: View {
                 }
             }
         }
-        .cornerRadius(6)
+        .cornerRadius(Layout.tableCellCornerRadius)
         .overlay(
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: Layout.tableCellCornerRadius)
                 .stroke(Color(.systemGray4), lineWidth: 0.5)
         )
     }
@@ -362,7 +386,7 @@ struct DetailView: View {
                     .fill(Color.accentColor)
                     .frame(width: geometry.size.width * ttsService.progress)
             }
-            .frame(height: 2)
+            .frame(height: Layout.progressBarHeight)
 
             HStack(spacing: 16) {
                 // Play/Pause button
@@ -407,7 +431,7 @@ struct DetailView: View {
                 .accessibilityLabel("Stop playback")
             }
             .padding(.horizontal)
-            .padding(.vertical, 10)
+            .padding(.vertical, Layout.playerControlPadding)
         }
         .background(.ultraThinMaterial)
     }

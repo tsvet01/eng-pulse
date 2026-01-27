@@ -30,7 +30,7 @@ struct HomeView: View {
 
 // MARK: - HomeViewContent (for use with external NavigationStack)
 struct HomeViewContent: View {
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var summariesStore: AppState
     @State private var searchText = ""
     @AppStorage("selectedModelFilter") private var selectedFilter: String = ModelFilter.all.rawValue
     @Binding var navigationPath: NavigationPath
@@ -40,7 +40,7 @@ struct HomeViewContent: View {
     }
 
     var filteredSummaries: [Summary] {
-        var result = appState.summaries
+        var result = summariesStore.summaries
 
         // Apply model filter
         if modelFilter != .all {
@@ -61,13 +61,13 @@ struct HomeViewContent: View {
 
     var body: some View {
         ZStack {
-            if appState.isLoading && appState.summaries.isEmpty {
+            if summariesStore.isLoading && summariesStore.summaries.isEmpty {
                 LoadingView()
-            } else if let error = appState.errorMessage, appState.summaries.isEmpty {
+            } else if let error = summariesStore.errorMessage, summariesStore.summaries.isEmpty {
                 ErrorView(message: error) {
-                    Task { await appState.refreshSummaries() }
+                    Task { await summariesStore.refreshSummaries() }
                 }
-            } else if appState.summaries.isEmpty {
+            } else if summariesStore.summaries.isEmpty {
                 EmptyStateView()
             } else {
                 summaryList
@@ -80,7 +80,7 @@ struct HomeViewContent: View {
         }
         .searchable(text: $searchText, prompt: "Search summaries")
         .refreshable {
-            await appState.refreshSummaries()
+            await summariesStore.refreshSummaries()
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
@@ -107,7 +107,7 @@ struct HomeViewContent: View {
                 }
             }
 
-            if appState.isOffline {
+            if summariesStore.isOffline {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 4) {
                         Image(systemName: "icloud.slash")

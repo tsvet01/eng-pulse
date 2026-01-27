@@ -6,65 +6,37 @@ Handles:
 2. Sending push notifications via Apple's APNs HTTP/2 API
 """
 import functions_framework
-from flask import jsonify, Request
+from flask import Request
 from google.cloud import firestore
 from google.cloud import secretmanager
 from datetime import datetime, timezone
 import jwt
 import time
 import httpx
-import re
 import os
-import json
-import logging
 import sys
 
+# Add shared module to path for Cloud Functions deployment
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-# Configure structured JSON logging for Cloud Functions
-class JSONFormatter(logging.Formatter):
-    def format(self, record):
-        log_obj = {
-            "severity": record.levelname,
-            "message": record.getMessage(),
-            "component": "apns-notifier",
-        }
-        if hasattr(record, "extra"):
-            log_obj.update(record.extra)
-        if record.exc_info:
-            log_obj["exception"] = self.formatException(record.exc_info)
-        return json.dumps(log_obj)
+from shared.logging_config import CloudFunctionLogger
+from shared.http_utils import (
+    handle_cors_preflight,
+    json_response,
+    error_response,
+    cors_headers,
+)
+from shared.validation import TokenValidator
 
-
-logger = logging.getLogger("apns-notifier")
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler(sys.stdout)
-handler.setFormatter(JSONFormatter())
-logger.handlers = [handler]
-
-
-def log_info(message: str, **kwargs):
-    """Log info with structured data."""
-    record = logger.makeRecord(
-        "apns-notifier", logging.INFO, "", 0, message, (), None
-    )
-    record.extra = kwargs
-    logger.handle(record)
-
-
-def log_error(message: str, **kwargs):
-    """Log error with structured data."""
-    record = logger.makeRecord(
-        "apns-notifier", logging.ERROR, "", 0, message, (), None
-    )
-    record.extra = kwargs
-    logger.handle(record)
+# Initialize logger
+logger = CloudFunctionLogger("apns-notifier")
 
 # Firestore collection for APNs tokens
 APNS_TOKENS_COLLECTION = "apns_tokens"
 
-# APNs endpoints
-APNS_PRODUCTION = "https://api.push.apple.com"
-APNS_SANDBOX = "https://api.sandbox.push.apple.com"
+# APNs endpoints (configurable for testing/proxy scenarios)
+APNS_PRODUCTION_URL = os.environ.get('APNS_PRODUCTION_URL', 'https://api.push.apple.com')
+APNS_SANDBOX_URL = os.environ.get('APNS_SANDBOX_URL', 'https://api.sandbox.push.apple.com')
 
 # App bundle ID (configurable for different environments)
 BUNDLE_ID = os.environ.get('APNS_BUNDLE_ID', 'org.tsvetkov.EngPulseSwift')
@@ -133,19 +105,6 @@ def create_apns_jwt():
     return token
 
 
-def is_valid_apns_token(token: str) -> bool:
-    """Basic validation for APNs device token format."""
-    if not token or not isinstance(token, str):
-        return False
-    # APNs tokens are 64 hex characters
-    if len(token) != 64:
-        return False
-    # Should only contain hex characters
-    if not re.match(r'^[a-fA-F0-9]+$', token):
-        return False
-    return True
-
-
 @functions_framework.http
 def register_apns_token(request: Request):
     """
@@ -160,31 +119,23 @@ def register_apns_token(request: Request):
     """
     # Handle CORS preflight
     if request.method == "OPTIONS":
-        headers = {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type",
-            "Access-Control-Max-Age": "3600",
-        }
-        return ("", 204, headers)
-
-    cors_headers = {"Access-Control-Allow-Origin": "*"}
+        return handle_cors_preflight()
 
     if request.method != "POST":
-        return (jsonify({"error": "Method not allowed"}), 405, cors_headers)
+        return error_response("Method not allowed", 405)
 
     try:
         data = request.get_json(silent=True)
         if not data:
-            return (jsonify({"error": "Invalid JSON body"}), 400, cors_headers)
+            return error_response("Invalid JSON body")
 
         token = data.get("token", "").strip().lower()
         app_version = data.get("app_version", "").strip()
         sandbox = data.get("sandbox", False)
 
-        # Validate token
-        if not is_valid_apns_token(token):
-            return (jsonify({"error": "Invalid APNs token format"}), 400, cors_headers)
+        # Validate token using shared validator
+        if not TokenValidator.is_valid_apns_token(token):
+            return error_response("Invalid APNs token format")
 
         # Store in Firestore
         db = get_db()
@@ -201,16 +152,16 @@ def register_apns_token(request: Request):
             "active": True,
         }, merge=True)
 
-        log_info("APNs token registered", sandbox=sandbox, app_version=app_version)
+        logger.info("APNs token registered", sandbox=sandbox, app_version=app_version)
 
-        return (jsonify({
+        return json_response({
             "success": True,
             "message": "APNs token registered successfully"
-        }), 200, cors_headers)
+        })
 
     except Exception as e:
-        log_error("Error registering APNs token", error=str(e))
-        return (jsonify({"error": "Internal server error"}), 500, cors_headers)
+        logger.error("Error registering APNs token", error=str(e))
+        return error_response("Internal server error", 500)
 
 
 def send_apns_notification(token: str, title: str, body: str, article_url: str, sandbox: bool = False) -> tuple[bool, str]:
@@ -223,7 +174,7 @@ def send_apns_notification(token: str, title: str, body: str, article_url: str, 
     try:
         jwt_token = create_apns_jwt()
 
-        endpoint = APNS_SANDBOX if sandbox else APNS_PRODUCTION
+        endpoint = APNS_SANDBOX_URL if sandbox else APNS_PRODUCTION_URL
         url = f"{endpoint}/3/device/{token}"
 
         headers = {
@@ -272,10 +223,10 @@ def send_apns_notifications(title: str, body: str, article_url: str) -> int:
         docs = list(tokens_ref.stream())
 
         if not docs:
-            log_info("No active APNs tokens found")
+            logger.info("No active APNs tokens found")
             return 0
 
-        log_info("Sending APNs notifications", device_count=len(docs))
+        logger.info("Sending APNs notifications", device_count=len(docs))
         success_count = 0
 
         for doc in docs:
@@ -293,20 +244,20 @@ def send_apns_notifications(title: str, body: str, article_url: str) -> int:
             if success:
                 success_count += 1
             else:
-                log_error("Failed to send APNs", reason=reason)
+                logger.error("Failed to send APNs", reason=reason)
                 # Mark invalid tokens as inactive
                 if reason in ("BadDeviceToken", "Unregistered", "ExpiredToken"):
                     try:
                         doc.reference.update({"active": False})
-                        log_info("Marked APNs token as inactive")
+                        logger.info("Marked APNs token as inactive")
                     except Exception as e:
-                        log_error("Failed to deactivate APNs token", error=str(e))
+                        logger.error("Failed to deactivate APNs token", error=str(e))
 
-        log_info("APNs notifications complete", success=success_count, total=len(docs))
+        logger.info("APNs notifications complete", success=success_count, total=len(docs))
         return success_count
 
     except Exception as e:
-        log_error("Error sending APNs notifications", error=str(e))
+        logger.error("Error sending APNs notifications", error=str(e))
         import traceback
         traceback.print_exc()
         return 0
@@ -324,17 +275,11 @@ def trigger_apns_notification(request: Request):
         "article_url": "https://..."
     }
     """
-    cors_headers = {"Access-Control-Allow-Origin": "*"}
-
     if request.method == "OPTIONS":
-        return ("", 204, {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type",
-        })
+        return handle_cors_preflight()
 
     if request.method != "POST":
-        return (jsonify({"error": "Method not allowed"}), 405, cors_headers)
+        return error_response("Method not allowed", 405)
 
     try:
         data = request.get_json(silent=True) or {}
@@ -344,11 +289,11 @@ def trigger_apns_notification(request: Request):
 
         count = send_apns_notifications(title, body, article_url)
 
-        return (jsonify({
+        return json_response({
             "success": True,
             "notifications_sent": count
-        }), 200, cors_headers)
+        })
 
     except Exception as e:
-        log_error("Error triggering APNs", error=str(e))
-        return (jsonify({"error": str(e)}), 500, cors_headers)
+        logger.error("Error triggering APNs", error=str(e))
+        return error_response(str(e), 500)
