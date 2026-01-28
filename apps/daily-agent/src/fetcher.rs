@@ -330,4 +330,47 @@ mod tests {
         let cloned = source.clone();
         assert_eq!(source, cloned);
     }
+
+    #[tokio::test]
+    async fn test_fetch_rss_with_mock_server() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let mock_server = MockServer::start().await;
+        
+        // Use current time to ensure freshness check passes
+        let now = Utc::now().to_rfc2822();
+
+        let rss_content = format!(r#"
+            <rss version="2.0">
+                <channel>
+                    <title>Test Feed</title>
+                    <item>
+                        <title>Mock Article</title>
+                        <link>https://example.com/mock</link>
+                        <pubDate>{}</pubDate>
+                    </item>
+                </channel>
+            </rss>
+        "#, now);
+
+        Mock::given(method("GET"))
+            .and(path("/feed.xml"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(rss_content))
+            .mount(&mock_server)
+            .await;
+
+        let source = SourceConfig {
+            name: "Mock Source".to_string(),
+            source_type: "rss".to_string(),
+            url: format!("{}/feed.xml", mock_server.uri()),
+        };
+
+        let client = create_http_client().unwrap();
+        let articles = fetch_from_source(&source, &client).await.unwrap();
+
+        assert_eq!(articles.len(), 1);
+        assert_eq!(articles[0].title, "Mock Article");
+        assert_eq!(articles[0].url, "https://example.com/mock");
+    }
 }
