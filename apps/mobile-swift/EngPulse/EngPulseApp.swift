@@ -5,6 +5,7 @@ struct EngPulseApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appState = AppState()
     @StateObject private var notificationService = NotificationService.shared
+    @StateObject private var ttsService = TTSService()
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -17,6 +18,7 @@ struct EngPulseApp: App {
             ContentView()
                 .environmentObject(appState)
                 .environmentObject(notificationService)
+                .environmentObject(ttsService)
                 .task {
                     await setupNotifications()
                 }

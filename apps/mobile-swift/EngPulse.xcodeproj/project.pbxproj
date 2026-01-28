@@ -25,6 +25,11 @@
 		B1000002 /* DetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002 /* DetailViewModel.swift */; };
 		B1000003 /* MarkdownRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000003 /* MarkdownRendererTests.swift */; };
 		B1000004 /* DetailViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000004 /* DetailViewModelTests.swift */; };
+		C1000001 /* TextCleaner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000001 /* TextCleaner.swift */; };
+		C1000002 /* TTSPlayerBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000002 /* TTSPlayerBarView.swift */; };
+		C1000003 /* TTSListenButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000003 /* TTSListenButton.swift */; };
+		C1000004 /* TTSErrorBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000004 /* TTSErrorBanner.swift */; };
+		C1000005 /* TextCleanerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000005 /* TextCleanerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -60,6 +65,11 @@
 		B2000003 /* MarkdownRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRendererTests.swift; sourceTree = "<group>"; };
 		B2000004 /* DetailViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailViewModelTests.swift; sourceTree = "<group>"; };
 		B3000001 /* EngPulseTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = EngPulseTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C2000001 /* TextCleaner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextCleaner.swift; sourceTree = "<group>"; };
+		C2000002 /* TTSPlayerBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSPlayerBarView.swift; sourceTree = "<group>"; };
+		C2000003 /* TTSListenButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSListenButton.swift; sourceTree = "<group>"; };
+		C2000004 /* TTSErrorBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSErrorBanner.swift; sourceTree = "<group>"; };
+		C2000005 /* TextCleanerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextCleanerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -121,6 +131,9 @@
 				A2000004 /* DetailView.swift */,
 				B2000001 /* MarkdownContentView.swift */,
 				A2000005 /* SettingsView.swift */,
+				C2000002 /* TTSPlayerBarView.swift */,
+				C2000003 /* TTSListenButton.swift */,
+				C2000004 /* TTSErrorBanner.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -142,6 +155,7 @@
 				A2000008 /* CacheService.swift */,
 				A200000F /* CloudTTSService.swift */,
 				A200000B /* NotificationService.swift */,
+				C2000001 /* TextCleaner.swift */,
 				A200000D /* TTSService.swift */,
 			);
 			path = Services;
@@ -152,6 +166,7 @@
 			children = (
 				B2000003 /* MarkdownRendererTests.swift */,
 				B2000004 /* DetailViewModelTests.swift */,
+				C2000005 /* TextCleanerTests.swift */,
 			);
 			path = EngPulseTests;
 			sourceTree = "<group>";
@@ -278,6 +293,10 @@
 				A1000010 /* AudioPlayerService.swift in Sources */,
 				B1000001 /* MarkdownContentView.swift in Sources */,
 				B1000002 /* DetailViewModel.swift in Sources */,
+				C1000001 /* TextCleaner.swift in Sources */,
+				C1000002 /* TTSPlayerBarView.swift in Sources */,
+				C1000003 /* TTSListenButton.swift in Sources */,
+				C1000004 /* TTSErrorBanner.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -287,6 +306,7 @@
 			files = (
 				B1000003 /* MarkdownRendererTests.swift in Sources */,
 				B1000004 /* DetailViewModelTests.swift in Sources */,
+				C1000005 /* TextCleanerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

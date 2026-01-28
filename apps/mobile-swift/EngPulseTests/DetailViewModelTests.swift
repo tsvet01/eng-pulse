@@ -14,7 +14,7 @@ final class DetailViewModelTests: XCTestCase {
             model: "gemini-test",
             selectedBy: "gemini-test"
         )
-        return DetailViewModel(summary: summary)
+        return DetailViewModel(summary: summary, ttsService: TTSService())
     }
 
     // MARK: - Initial State
@@ -57,7 +57,7 @@ final class DetailViewModelTests: XCTestCase {
             model: nil,
             selectedBy: nil
         )
-        let vm = DetailViewModel(summary: summary)
+        let vm = DetailViewModel(summary: summary, ttsService: TTSService())
         await vm.loadFullContent()
         XCTAssertNotNil(vm.loadingError)
         XCTAssertEqual(vm.loadingError, "Invalid URL")

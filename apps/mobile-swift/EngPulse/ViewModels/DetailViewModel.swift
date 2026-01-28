@@ -23,7 +23,7 @@ class DetailViewModel: ObservableObject {
         ttsService.state == .loading && ttsService.currentArticleUrl == summary.url
     }
 
-    init(summary: Summary, ttsService: TTSService = .shared) {
+    init(summary: Summary, ttsService: TTSService) {
         self.summary = summary
         self.ttsService = ttsService
     }

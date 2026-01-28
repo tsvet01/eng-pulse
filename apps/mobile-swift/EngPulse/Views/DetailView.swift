@@ -3,18 +3,14 @@ import SwiftUI
 struct DetailView: View {
     private enum Layout {
         static let playerBarHeight: CGFloat = 60
-        static let buttonVerticalPadding: CGFloat = 14
-        static let playerControlPadding: CGFloat = 10
-        static let progressBarHeight: CGFloat = 2
-        static let buttonCornerRadius: CGFloat = 12
     }
 
     @StateObject private var viewModel: DetailViewModel
     @Environment(\.openURL) private var openURL
-    @ObservedObject private var ttsService = TTSService.shared
+    @EnvironmentObject var ttsService: TTSService
 
-    init(summary: Summary) {
-        _viewModel = StateObject(wrappedValue: DetailViewModel(summary: summary))
+    init(summary: Summary, ttsService: TTSService) {
+        _viewModel = StateObject(wrappedValue: DetailViewModel(summary: summary, ttsService: ttsService))
     }
 
     var body: some View {
@@ -41,11 +37,22 @@ struct DetailView: View {
             }
 
             if ttsService.state != .stopped && ttsService.currentArticleUrl == viewModel.summary.url {
-                ttsPlayerBar
+                TTSPlayerBarView(
+                    progress: ttsService.progress,
+                    isPlaying: viewModel.isPlaying,
+                    isPaused: viewModel.isPaused,
+                    isLoading: viewModel.isLoadingTTS,
+                    title: viewModel.summary.title,
+                    onToggle: { viewModel.toggleTTS() },
+                    onStop: { ttsService.stop() }
+                )
             }
 
             if let error = ttsService.errorMessage {
-                ttsErrorBanner(error)
+                TTSErrorBanner(
+                    message: error,
+                    onDismiss: { ttsService.stop() }
+                )
             }
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -59,7 +66,12 @@ struct DetailView: View {
 
     private func fullContentSection(_ content: String) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            listenButton
+            TTSListenButton(
+                isPlaying: viewModel.isPlaying,
+                isPaused: viewModel.isPaused,
+                isLoading: viewModel.isLoadingTTS,
+                onTap: { viewModel.toggleTTS() }
+            )
             MarkdownContentView(content: content)
                 .font(.body)
         }
@@ -82,39 +94,6 @@ struct DetailView: View {
                 }
             }
         }
-    }
-
-    private var listenButton: some View {
-        Button {
-            viewModel.toggleTTS()
-        } label: {
-            HStack(spacing: 12) {
-                if viewModel.isLoadingTTS {
-                    ProgressView()
-                        .tint(.white)
-                } else {
-                    Image(systemName: viewModel.isPlaying ? "stop.fill" : (viewModel.isPaused ? "play.fill" : "headphones"))
-                        .font(.title3)
-                }
-
-                Text(viewModel.isLoadingTTS ? "Generating Audio..." : (viewModel.isPlaying ? "Stop Listening" : (viewModel.isPaused ? "Resume" : "Listen to Summary")))
-                    .fontWeight(.semibold)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, Layout.buttonVerticalPadding)
-            .background(
-                LinearGradient(
-                    colors: viewModel.isPlaying ? [.red, .red.opacity(0.8)] : [.accentColor, .accentColor.opacity(0.8)],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
-            .foregroundColor(.white)
-            .cornerRadius(Layout.buttonCornerRadius)
-        }
-        .disabled(viewModel.isLoadingTTS)
-        .accessibilityLabel(viewModel.isLoadingTTS ? "Generating audio, please wait" : (viewModel.isPlaying ? "Stop listening" : (viewModel.isPaused ? "Resume listening" : "Listen to summary")))
-        .accessibilityHint(viewModel.isPlaying ? "Stops audio playback" : (viewModel.isPaused ? "Continues from where you left off" : "Plays the summary as audio"))
     }
 
     private var loadingSection: some View {
@@ -159,83 +138,6 @@ struct DetailView: View {
         .accessibilityElement(children: .combine)
     }
 
-    // MARK: - TTS Player Bar
-
-    private var ttsPlayerBar: some View {
-        VStack(spacing: 0) {
-            GeometryReader { geometry in
-                Rectangle()
-                    .fill(Color.accentColor)
-                    .frame(width: geometry.size.width * ttsService.progress)
-            }
-            .frame(height: Layout.progressBarHeight)
-
-            HStack(spacing: 16) {
-                Button {
-                    viewModel.toggleTTS()
-                } label: {
-                    if viewModel.isLoadingTTS {
-                        ProgressView()
-                            .scaleEffect(0.9)
-                    } else {
-                        Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.title2)
-                    }
-                }
-                .disabled(viewModel.isLoadingTTS)
-                .accessibilityLabel(viewModel.isPlaying ? "Pause" : "Play")
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(viewModel.summary.title)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .lineLimit(1)
-                    Text(viewModel.isLoadingTTS ? "Generating audio..." : (viewModel.isPlaying ? "Playing..." : "Paused"))
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(viewModel.summary.title), \(viewModel.isLoadingTTS ? "generating audio" : (viewModel.isPlaying ? "playing" : "paused"))")
-                .accessibilityValue("\(Int(ttsService.progress * 100)) percent complete")
-
-                Spacer()
-
-                Button {
-                    ttsService.stop()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
-                        .foregroundColor(.secondary)
-                }
-                .accessibilityLabel("Stop playback")
-            }
-            .padding(.horizontal)
-            .padding(.vertical, Layout.playerControlPadding)
-        }
-        .background(.ultraThinMaterial)
-    }
-
-    private func ttsErrorBanner(_ error: String) -> some View {
-        VStack {
-            Spacer()
-            HStack {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
-                Text(error)
-                    .font(.caption)
-                Spacer()
-                Button {
-                    ttsService.stop()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.secondary)
-                }
-            }
-            .padding()
-            .background(.ultraThinMaterial)
-        }
-    }
-
     // MARK: - Toolbar
 
     @ToolbarContentBuilder
@@ -270,6 +172,6 @@ struct DetailView: View {
 
 #Preview {
     NavigationStack {
-        DetailView(summary: .preview)
+        DetailView(summary: .preview, ttsService: TTSService())
     }
 }
