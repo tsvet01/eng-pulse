@@ -384,4 +384,37 @@ mod tests {
         assert_eq!(parse_selection_index("3 and 5"), Some(3));
         assert_eq!(parse_selection_index("article 2, not 7"), Some(2));
     }
+
+    #[test]
+    fn test_parse_selection_index_large_number() {
+        assert_eq!(parse_selection_index("99999"), Some(99999));
+        assert_eq!(parse_selection_index("1000000"), Some(1000000));
+    }
+
+    #[test]
+    fn test_parse_selection_index_zero() {
+        assert_eq!(parse_selection_index("0"), Some(0));
+        assert_eq!(parse_selection_index("The index is 0."), Some(0));
+    }
+
+    #[test]
+    fn test_parse_selection_index_decimal_takes_integer_part() {
+        // "3.5" — should parse "3" as the first contiguous digit sequence
+        // since "." breaks the digit run
+        let result = parse_selection_index("3.5");
+        assert_eq!(result, Some(3));
+    }
+
+    #[test]
+    fn test_parse_selection_index_negative_ignored() {
+        // "-5" — the minus sign is not a digit, so it should find "5"
+        let result = parse_selection_index("-5");
+        assert_eq!(result, Some(5));
+    }
+
+    #[test]
+    fn test_parse_selection_index_only_special_chars() {
+        assert_eq!(parse_selection_index("!@#$%^&*()"), None);
+        assert_eq!(parse_selection_index("..."), None);
+    }
 }

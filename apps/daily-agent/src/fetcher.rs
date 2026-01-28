@@ -216,7 +216,7 @@ async fn fetch_hackernews(source: &SourceConfig, client: &reqwest::Client) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Datelike;
+    use chrono::{Datelike, Timelike};
 
     #[test]
     fn test_article_struct() {
@@ -230,19 +230,6 @@ mod tests {
         assert_eq!(article.title, "Test Article");
         assert_eq!(article.url, "https://example.com/article");
         assert_eq!(article.source, "Test Source");
-    }
-
-    #[test]
-    fn test_source_config_unknown_type() {
-        let source = SourceConfig {
-            name: "Unknown".to_string(),
-            source_type: "unknown_type".to_string(),
-            url: "https://example.com".to_string(),
-        };
-
-        // We can't easily test async fetch_from_source without a mock client,
-        // but we can verify the source config is constructed correctly
-        assert_eq!(source.source_type, "unknown_type");
     }
 
     #[test]
@@ -289,5 +276,58 @@ mod tests {
         assert!(parse_rss_date("not a date").is_none());
         assert!(parse_rss_date("").is_none());
         assert!(parse_rss_date("2025-13-45").is_none());
+    }
+
+    #[test]
+    fn test_parse_rss_date_positive_timezone_offset() {
+        let date = parse_rss_date("Wed, 25 Dec 2024 10:00:00 +0530");
+        assert!(date.is_some());
+        let dt = date.unwrap();
+        assert_eq!(dt.year(), 2024);
+        assert_eq!(dt.month(), 12);
+        assert_eq!(dt.day(), 25);
+        // +0530 means 10:00 IST = 04:30 UTC
+        assert_eq!(dt.hour(), 4);
+        assert_eq!(dt.minute(), 30);
+    }
+
+    #[test]
+    fn test_parse_rss_date_negative_timezone_offset() {
+        let date = parse_rss_date("Wed, 25 Dec 2024 10:00:00 -0800");
+        assert!(date.is_some());
+        let dt = date.unwrap();
+        // -0800 means 10:00 PST = 18:00 UTC
+        assert_eq!(dt.hour(), 18);
+    }
+
+    #[test]
+    fn test_parse_rss_date_boundary_year_end() {
+        let date = parse_rss_date("Tue, 31 Dec 2024 23:59:59 +0000");
+        assert!(date.is_some());
+        let dt = date.unwrap();
+        assert_eq!(dt.year(), 2024);
+        assert_eq!(dt.month(), 12);
+        assert_eq!(dt.day(), 31);
+    }
+
+    #[test]
+    fn test_parse_rss_date_boundary_year_start() {
+        let date = parse_rss_date("Wed, 01 Jan 2025 00:00:00 +0000");
+        assert!(date.is_some());
+        let dt = date.unwrap();
+        assert_eq!(dt.year(), 2025);
+        assert_eq!(dt.month(), 1);
+        assert_eq!(dt.day(), 1);
+    }
+
+    #[test]
+    fn test_source_config_clone() {
+        let source = SourceConfig {
+            name: "Blog".to_string(),
+            source_type: "rss".to_string(),
+            url: "https://blog.example.com/rss".to_string(),
+        };
+        let cloned = source.clone();
+        assert_eq!(source, cloned);
     }
 }

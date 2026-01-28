@@ -662,4 +662,168 @@ mod tests {
         assert_eq!(source.source_type, "rss");
         assert_eq!(source.url, "https://myblog.com/feed");
     }
+
+    // --- LlmProvider tests ---
+
+    #[test]
+    fn test_llm_provider_as_str() {
+        assert_eq!(LlmProvider::Gemini.as_str(), "gemini");
+        assert_eq!(LlmProvider::OpenAI.as_str(), "openai");
+        assert_eq!(LlmProvider::Claude.as_str(), "claude");
+    }
+
+    #[test]
+    fn test_llm_provider_display_name() {
+        assert_eq!(LlmProvider::Gemini.display_name(), "Gemini");
+        assert_eq!(LlmProvider::OpenAI.display_name(), "OpenAI");
+        assert_eq!(LlmProvider::Claude.display_name(), "Claude");
+    }
+
+    #[test]
+    fn test_llm_provider_model_name() {
+        assert_eq!(LlmProvider::Gemini.model_name(), DEFAULT_GEMINI_MODEL);
+        assert_eq!(LlmProvider::OpenAI.model_name(), DEFAULT_OPENAI_MODEL);
+        assert_eq!(LlmProvider::Claude.model_name(), DEFAULT_CLAUDE_MODEL);
+    }
+
+    #[test]
+    fn test_llm_provider_serde_roundtrip() {
+        let provider = LlmProvider::Gemini;
+        let json = serde_json::to_string(&provider).unwrap();
+        assert_eq!(json, r#""gemini""#);
+        let deserialized: LlmProvider = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, provider);
+    }
+
+    #[test]
+    fn test_llm_provider_serde_all_variants() {
+        for (json_str, expected) in [
+            (r#""gemini""#, LlmProvider::Gemini),
+            (r#""openai""#, LlmProvider::OpenAI),
+            (r#""claude""#, LlmProvider::Claude),
+        ] {
+            let parsed: LlmProvider = serde_json::from_str(json_str).unwrap();
+            assert_eq!(parsed, expected);
+        }
+    }
+
+    #[test]
+    fn test_get_api_key_env_var() {
+        assert_eq!(get_api_key_env_var(LlmProvider::Gemini), "GEMINI_API_KEY");
+        assert_eq!(get_api_key_env_var(LlmProvider::OpenAI), "OPENAI_API_KEY");
+        assert_eq!(get_api_key_env_var(LlmProvider::Claude), "ANTHROPIC_API_KEY");
+    }
+
+    #[test]
+    fn test_get_model_env_var() {
+        assert_eq!(get_model_env_var(LlmProvider::Gemini), "GEMINI_MODEL");
+        assert_eq!(get_model_env_var(LlmProvider::OpenAI), "OPENAI_MODEL");
+        assert_eq!(get_model_env_var(LlmProvider::Claude), "CLAUDE_MODEL");
+    }
+
+    // --- OpenAI request/response tests ---
+
+    #[test]
+    fn test_openai_request_serialization() {
+        let request = OpenAIRequest {
+            model: "gpt-4".to_string(),
+            messages: vec![OpenAIMessage {
+                role: "user".to_string(),
+                content: "Hello, OpenAI!".to_string(),
+            }],
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("gpt-4"));
+        assert!(json.contains("Hello, OpenAI!"));
+        assert!(json.contains("user"));
+        assert!(json.contains("messages"));
+    }
+
+    #[test]
+    fn test_openai_response_deserialization_success() {
+        let json = r#"{
+            "choices": [{
+                "message": {"content": "Hello from OpenAI!"}
+            }]
+        }"#;
+
+        let response: OpenAIResponse = serde_json::from_str(json).unwrap();
+        assert!(response.choices.is_some());
+        assert!(response.error.is_none());
+
+        let choices = response.choices.unwrap();
+        assert_eq!(choices.len(), 1);
+        assert_eq!(choices[0].message.content, "Hello from OpenAI!");
+    }
+
+    #[test]
+    fn test_openai_response_deserialization_error() {
+        let json = r#"{
+            "error": {"message": "Invalid API key"}
+        }"#;
+
+        let response: OpenAIResponse = serde_json::from_str(json).unwrap();
+        assert!(response.choices.is_none());
+        assert!(response.error.is_some());
+        assert_eq!(response.error.unwrap().message, "Invalid API key");
+    }
+
+    // --- Claude request/response tests ---
+
+    #[test]
+    fn test_claude_request_serialization() {
+        let request = ClaudeRequest {
+            model: "claude-opus-4-5".to_string(),
+            max_tokens: 4096,
+            messages: vec![ClaudeMessage {
+                role: "user".to_string(),
+                content: "Hello, Claude!".to_string(),
+            }],
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("claude-opus-4-5"));
+        assert!(json.contains("Hello, Claude!"));
+        assert!(json.contains("4096"));
+        assert!(json.contains("max_tokens"));
+    }
+
+    #[test]
+    fn test_claude_response_deserialization_success() {
+        let json = r#"{
+            "content": [{"text": "Hello from Claude!"}]
+        }"#;
+
+        let response: ClaudeResponse = serde_json::from_str(json).unwrap();
+        assert!(response.content.is_some());
+        assert!(response.error.is_none());
+
+        let content = response.content.unwrap();
+        assert_eq!(content.len(), 1);
+        assert_eq!(content[0].text.as_deref(), Some("Hello from Claude!"));
+    }
+
+    #[test]
+    fn test_claude_response_deserialization_error() {
+        let json = r#"{
+            "error": {"message": "Rate limit exceeded"}
+        }"#;
+
+        let response: ClaudeResponse = serde_json::from_str(json).unwrap();
+        assert!(response.content.is_none());
+        assert!(response.error.is_some());
+        assert_eq!(response.error.unwrap().message, "Rate limit exceeded");
+    }
+
+    #[test]
+    fn test_claude_response_empty_content_block() {
+        let json = r#"{
+            "content": [{}]
+        }"#;
+
+        let response: ClaudeResponse = serde_json::from_str(json).unwrap();
+        let content = response.content.unwrap();
+        assert_eq!(content[0].text, None);
+    }
 }

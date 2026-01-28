@@ -31,6 +31,7 @@ struct HomeView: View {
 // MARK: - HomeViewContent (for use with external NavigationStack)
 struct HomeViewContent: View {
     @EnvironmentObject var summariesStore: AppState
+    @EnvironmentObject var ttsService: TTSService
     @State private var searchText = ""
     @AppStorage("selectedModelFilter") private var selectedFilter: String = ModelFilter.all.rawValue
     @Binding var navigationPath: NavigationPath
@@ -76,7 +77,7 @@ struct HomeViewContent: View {
         .navigationTitle("Eng Pulse")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Summary.self) { summary in
-            DetailView(summary: summary)
+            DetailView(summary: summary, ttsService: ttsService)
         }
         .searchable(text: $searchText, prompt: "Search summaries")
         .refreshable {
