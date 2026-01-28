@@ -55,16 +55,6 @@ jobs:
     - name: Test Explorer Agent
       run: cd apps/explorer-agent && cargo test --verbose
 
-    - name: Install cargo-tarpaulin
-      run: cargo install cargo-tarpaulin || true
-
-    - name: Generate coverage report
-      run: |
-        cd libs/gemini-engine && cargo tarpaulin --out Xml --output-dir coverage
-        cd ../../apps/daily-agent && cargo tarpaulin --out Xml --output-dir coverage
-        cd ../explorer-agent && cargo tarpaulin --out Xml --output-dir coverage
-      continue-on-error: true
-
   python-check:
     runs-on: ubuntu-latest
     steps:
@@ -77,17 +67,27 @@ jobs:
 
     - name: Install dependencies
       run: |
-        cd functions/notifier
-        pip install -r requirements-dev.txt
+        pip install -r functions/notifier/requirements-dev.txt
+        pip install -r functions/shared/requirements-dev.txt
 
     - name: Check Python syntax
       run: |
         python -m py_compile functions/notifier/main.py
         python -m py_compile functions/fcm-tokens/main.py
         python -m py_compile functions/apns-notifier/main.py
+        python -c "import ast; [ast.parse(open(f).read()) for f in __import__('glob').glob('functions/shared/*.py')]"
+
+    - name: Run shared tests
+      run: cd functions && python -m pytest shared/ -v
 
     - name: Run notifier tests
       run: cd functions/notifier && python -m pytest test_main.py -v
+
+    - name: Run apns-notifier tests
+      run: cd functions/apns-notifier && python -m pytest test_main.py -v
+
+    - name: Run fcm-tokens tests
+      run: cd functions/fcm-tokens && python -m pytest test_main.py -v
 
   flutter-check:
     runs-on: ubuntu-latest
@@ -132,6 +132,16 @@ jobs:
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO \
           build
+
+    - name: Run Swift tests
+      run: |
+        cd apps/mobile-swift
+        xcodebuild test \
+          -scheme EngPulse \
+          -sdk iphonesimulator \
+          -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+          CODE_SIGN_IDENTITY="" \
+          CODE_SIGNING_REQUIRED=NO
 
     - name: Check for Swift warnings
       run: |

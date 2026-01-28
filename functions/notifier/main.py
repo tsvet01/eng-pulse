@@ -10,15 +10,10 @@ Handles:
 import functions_framework
 import os
 import smtplib
-import time
 import requests
-import httpx
-import jwt
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from google.cloud import storage
-from google.cloud import firestore
-from google.cloud import secretmanager
 from google.auth.transport.requests import Request
 import google.auth
 import markdown
@@ -29,6 +24,8 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from shared.logging_config import CloudFunctionLogger
+from shared.firestore_utils import get_db
+from shared.apns_utils import send_apns_notifications
 
 # Initialize logger
 logger = CloudFunctionLogger("notifier")
@@ -36,17 +33,6 @@ logger = CloudFunctionLogger("notifier")
 # FCM HTTP v1 API endpoint
 FCM_API_URL = "https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
 PROJECT_ID = os.environ.get('GOOGLE_CLOUD_PROJECT', 'tsvet01')
-
-# APNs configuration
-APNS_TOKENS_COLLECTION = "apns_tokens"
-APNS_PRODUCTION_URL = os.environ.get('APNS_PRODUCTION_URL', 'https://api.push.apple.com')
-APNS_SANDBOX_URL = os.environ.get('APNS_SANDBOX_URL', 'https://api.sandbox.push.apple.com')
-BUNDLE_ID = os.environ.get('APNS_BUNDLE_ID', 'org.tsvetkov.EngPulseSwift')
-
-# Lazy-loaded APNs credentials
-_apns_key = None
-_apns_key_id = None
-_apns_team_id = None
 
 
 def get_access_token():
@@ -128,7 +114,7 @@ def send_fcm_notifications(title: str, body: str, article_url: str) -> int:
         logger.info("Got FCM access token")
 
         # Get all active FCM tokens from Firestore
-        db = firestore.Client()
+        db = get_db()
         tokens_ref = db.collection("fcm_tokens").where("active", "==", True)
         docs = tokens_ref.stream()
 
@@ -169,150 +155,9 @@ def send_fcm_notifications(title: str, body: str, article_url: str) -> int:
         return success_count
 
     except Exception as e:
-        logger.error("Error sending FCM notifications", error=str(e))
         import traceback
-        traceback.print_exc()
-        return 0
-
-
-# ============ APNs Functions ============
-
-def get_apns_credentials():
-    """Load APNs credentials from Secret Manager."""
-    global _apns_key, _apns_key_id, _apns_team_id
-
-    if _apns_key is not None:
-        return _apns_key, _apns_key_id, _apns_team_id
-
-    try:
-        client = secretmanager.SecretManagerServiceClient()
-
-        # Get the .p8 key content
-        key_path = f"projects/{PROJECT_ID}/secrets/apns-auth-key/versions/latest"
-        key_response = client.access_secret_version(request={"name": key_path})
-        _apns_key = key_response.payload.data.decode("UTF-8")
-
-        # Get Key ID
-        key_id_path = f"projects/{PROJECT_ID}/secrets/apns-key-id/versions/latest"
-        key_id_response = client.access_secret_version(request={"name": key_id_path})
-        _apns_key_id = key_id_response.payload.data.decode("UTF-8").strip()
-
-        # Get Team ID
-        team_id_path = f"projects/{PROJECT_ID}/secrets/apns-team-id/versions/latest"
-        team_id_response = client.access_secret_version(request={"name": team_id_path})
-        _apns_team_id = team_id_response.payload.data.decode("UTF-8").strip()
-
-        return _apns_key, _apns_key_id, _apns_team_id
-    except Exception as e:
-        logger.error("Failed to load APNs credentials", error=str(e))
-        return None, None, None
-
-
-def create_apns_jwt():
-    """Create a JWT for APNs authentication."""
-    auth_key, key_id, team_id = get_apns_credentials()
-    if not all([auth_key, key_id, team_id]):
-        return None
-
-    token = jwt.encode(
-        {
-            "iss": team_id,
-            "iat": int(time.time())
-        },
-        auth_key,
-        algorithm="ES256",
-        headers={
-            "alg": "ES256",
-            "kid": key_id
-        }
-    )
-    return token
-
-
-def send_apns_notification(token: str, title: str, body: str, article_url: str, sandbox: bool = False):
-    """Send a notification to a single APNs device."""
-    try:
-        jwt_token = create_apns_jwt()
-        if not jwt_token:
-            return False, "No APNs credentials"
-
-        endpoint = APNS_SANDBOX_URL if sandbox else APNS_PRODUCTION_URL
-        url = f"{endpoint}/3/device/{token}"
-
-        headers = {
-            "authorization": f"bearer {jwt_token}",
-            "apns-topic": BUNDLE_ID,
-            "apns-push-type": "alert",
-            "apns-priority": "10",
-        }
-
-        payload = {
-            "aps": {
-                "alert": {
-                    "title": title,
-                    "body": body,
-                },
-                "sound": "default",
-                "badge": 1,
-            },
-            "article_url": article_url,
-        }
-
-        with httpx.Client(http2=True, timeout=10.0) as client:
-            response = client.post(url, headers=headers, json=payload)
-            if response.status_code == 200:
-                return True, ""
-            else:
-                error_data = response.json() if response.content else {}
-                reason = error_data.get("reason", f"HTTP {response.status_code}")
-                return False, reason
-
-    except Exception as e:
-        return False, str(e)
-
-
-def send_apns_notifications(title: str, body: str, article_url: str) -> int:
-    """Send APNs push notifications to all registered iOS devices."""
-    try:
-        db = firestore.Client()
-        tokens_ref = db.collection(APNS_TOKENS_COLLECTION).where("active", "==", True)
-        docs = list(tokens_ref.stream())
-
-        if not docs:
-            logger.info("No active APNs tokens found")
-            return 0
-
-        logger.info("Sending APNs notifications", device_count=len(docs))
-        success_count = 0
-
-        for doc in docs:
-            data = doc.to_dict()
-            token = data.get("token")
-            sandbox = data.get("sandbox", False)
-
-            if not token:
-                continue
-
-            success, reason = send_apns_notification(token, title, body, article_url, sandbox)
-
-            if success:
-                success_count += 1
-            else:
-                logger.error("Failed to send APNs", reason=reason)
-                if reason in ("BadDeviceToken", "Unregistered", "ExpiredToken"):
-                    try:
-                        doc.reference.update({"active": False})
-                        logger.info("Marked APNs token as inactive")
-                    except Exception as e:
-                        logger.error("Failed to deactivate APNs token", error=str(e))
-
-        logger.info("APNs notifications complete", success=success_count, total=len(docs))
-        return success_count
-
-    except Exception as e:
-        logger.error("Error sending APNs notifications", error=str(e))
-        import traceback
-        traceback.print_exc()
+        logger.error("Error sending FCM notifications", error=str(e),
+                     traceback=traceback.format_exc())
         return 0
 
 
@@ -397,8 +242,6 @@ def send_email(subject_file, html_body):
     msg["From"] = gmail_user
     msg["To"] = dest_email
 
-    # Escape HTML in body to prevent XSS (content comes from markdown which is already processed)
-    # Note: html_body is already converted from markdown, so we trust it but wrap safely
     full_html = f"""
     <html>
       <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">

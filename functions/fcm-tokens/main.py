@@ -6,7 +6,6 @@ Tokens are stored in Firestore for push notification targeting.
 """
 import functions_framework
 from flask import Request
-from google.cloud import firestore
 from datetime import datetime, timezone
 import os
 import sys
@@ -15,29 +14,15 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from shared.logging_config import CloudFunctionLogger
-from shared.http_utils import (
-    handle_cors_preflight,
-    json_response,
-    error_response,
-)
+from shared.http_utils import handle_cors_preflight, json_response, error_response
 from shared.validation import TokenValidator
+from shared.firestore_utils import get_db
 
 # Initialize logger
 logger = CloudFunctionLogger("fcm-tokens")
 
 # Firestore collection for FCM tokens
 FCM_TOKENS_COLLECTION = "fcm_tokens"
-
-# Initialize Firestore client (lazy loaded)
-_db = None
-
-
-def get_db():
-    """Lazy-load Firestore client."""
-    global _db
-    if _db is None:
-        _db = firestore.Client()
-    return _db
 
 
 @functions_framework.http

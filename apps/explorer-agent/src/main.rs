@@ -449,4 +449,63 @@ mod tests {
         assert!(!sources.insert(s2)); // Should return false (already exists)
         assert_eq!(sources.len(), 1);
     }
+
+    #[test]
+    fn test_clean_gemini_json_empty_string() {
+        assert_eq!(clean_gemini_json(""), "");
+    }
+
+    #[test]
+    fn test_clean_gemini_json_only_fences() {
+        assert_eq!(clean_gemini_json("```json\n```"), "");
+    }
+
+    #[test]
+    fn test_clean_gemini_json_generic_code_fence() {
+        let input = "```\n{\"key\": \"value\"}\n```";
+        assert_eq!(clean_gemini_json(input), "{\"key\": \"value\"}");
+    }
+
+    #[test]
+    fn test_clean_gemini_json_nested_content() {
+        let input = r#"```json
+{"sources": [{"name": "Blog", "url": "https://example.com"}]}
+```"#;
+        let expected = r#"{"sources": [{"name": "Blog", "url": "https://example.com"}]}"#;
+        assert_eq!(clean_gemini_json(input), expected);
+    }
+
+    #[test]
+    fn test_freshness_boundary() {
+        let now = Utc::now();
+        let threshold = now - Duration::days(FRESHNESS_DAYS);
+
+        // One day newer than threshold — fresh
+        let just_inside = now - Duration::days(FRESHNESS_DAYS - 1);
+        assert!(just_inside > threshold);
+
+        // One day older than threshold — stale
+        let just_outside = now - Duration::days(FRESHNESS_DAYS + 1);
+        assert!(just_outside < threshold);
+    }
+
+    #[test]
+    fn test_source_config_equality_and_inequality() {
+        let s1 = SourceConfig {
+            name: "Blog".to_string(),
+            source_type: "rss".to_string(),
+            url: "https://example.com/feed".to_string(),
+        };
+        let s1_clone = s1.clone();
+        assert_eq!(s1, s1_clone);
+
+        let different_name = SourceConfig { name: "Other".to_string(), ..s1.clone() };
+        assert_ne!(s1, different_name);
+
+        let different_type = SourceConfig { source_type: "atom".to_string(), ..s1.clone() };
+        assert_ne!(s1, different_type);
+
+        let different_url = SourceConfig { url: "https://other.com/feed".to_string(), ..s1.clone() };
+        assert_ne!(s1, different_url);
+    }
 }
