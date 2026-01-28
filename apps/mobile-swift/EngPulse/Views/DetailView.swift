@@ -32,7 +32,7 @@ struct DetailView: View {
                         Color.clear.frame(height: Layout.playerBarHeight)
                     }
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 20) // Increased horizontal padding for readability
                 .padding(.top, 8)
             }
 
@@ -73,7 +73,6 @@ struct DetailView: View {
                 onTap: { viewModel.toggleTTS() }
             )
             MarkdownContentView(content: content)
-                .font(.body)
         }
         .padding(.top, 8)
     }

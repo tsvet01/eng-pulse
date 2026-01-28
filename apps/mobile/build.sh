@@ -38,23 +38,23 @@ done
 # Support GCS_BUCKET env var as fallback
 BUCKET="${BUCKET:-$GCS_BUCKET}"
 
-# Build command
-CMD="flutter run"
+# Build command array
+CMD=("flutter" "run")
 
 if [ -n "$DEVICE" ]; then
-  CMD="$CMD -d $DEVICE"
+  CMD+=("-d" "$DEVICE")
 fi
 
 if [ "$MODE" = "release" ]; then
-  CMD="$CMD --release"
+  CMD+=("--release")
 fi
 
-CMD="$CMD --dart-define=GIT_COMMIT=$GIT_COMMIT --dart-define=BUILD_TIME=$BUILD_TIME"
+CMD+=("--dart-define=GIT_COMMIT=$GIT_COMMIT" "--dart-define=BUILD_TIME=$BUILD_TIME")
 
 if [ -n "$BUCKET" ]; then
-  CMD="$CMD --dart-define=GCS_BUCKET=$BUCKET"
+  CMD+=("--dart-define=GCS_BUCKET=$BUCKET")
   echo "Using bucket: $BUCKET"
 fi
 
-echo "Running: $CMD"
-exec $CMD
+echo "Running: ${CMD[*]}"
+exec "${CMD[@]}"
