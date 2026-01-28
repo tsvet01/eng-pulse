@@ -328,8 +328,6 @@ mod tests {
             url: "https://blog.example.com/rss".to_string(),
         };
         let cloned = source.clone();
-        assert_eq!(source.name, cloned.name);
-        assert_eq!(source.source_type, cloned.source_type);
-        assert_eq!(source.url, cloned.url);
+        assert_eq!(source, cloned);
     }
 }
