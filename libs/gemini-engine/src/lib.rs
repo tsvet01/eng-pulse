@@ -202,11 +202,15 @@ fn is_transient_error(err: &str) -> bool {
 async fn call_gemini(client: &reqwest::Client, api_key: &str, text: String) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     // Get model from environment or use default
     let model = std::env::var("GEMINI_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+    
+    // Allow overriding base URL for testing
+    let base_url = std::env::var("GEMINI_BASE_URL")
+        .unwrap_or_else(|_| "https://generativelanguage.googleapis.com".to_string());
 
     // Note: API key in URL is required by Gemini API - we redact it in logs
     let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-        model, api_key
+        "{}/v1beta/models/{}:generateContent?key={}",
+        base_url, model, api_key
     );
 
     let request = GeminiRequest {
@@ -326,6 +330,10 @@ pub async fn call_openai_with_retry(
 
 async fn call_openai(client: &reqwest::Client, api_key: &str, text: String) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| DEFAULT_OPENAI_MODEL.to_string());
+    
+    // Allow overriding base URL for testing
+    let base_url = std::env::var("OPENAI_BASE_URL")
+        .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
 
     let request = OpenAIRequest {
         model,
@@ -337,7 +345,7 @@ async fn call_openai(client: &reqwest::Client, api_key: &str, text: String) -> R
 
     debug!("Sending request to OpenAI API");
 
-    let res = client.post("https://api.openai.com/v1/chat/completions")
+    let res = client.post(format!("{}/chat/completions", base_url))
         .header("Authorization", format!("Bearer {}", api_key))
         .json(&request)
         .send()
@@ -439,6 +447,10 @@ pub async fn call_claude_with_retry(
 
 async fn call_claude(client: &reqwest::Client, api_key: &str, text: String) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let model = std::env::var("CLAUDE_MODEL").unwrap_or_else(|_| DEFAULT_CLAUDE_MODEL.to_string());
+    
+    // Allow overriding base URL for testing
+    let base_url = std::env::var("CLAUDE_BASE_URL")
+        .unwrap_or_else(|_| "https://api.anthropic.com/v1".to_string());
 
     let request = ClaudeRequest {
         model,
@@ -451,7 +463,7 @@ async fn call_claude(client: &reqwest::Client, api_key: &str, text: String) -> R
 
     debug!("Sending request to Claude API");
 
-    let res = client.post("https://api.anthropic.com/v1/messages")
+    let res = client.post(format!("{}/messages", base_url))
         .header("x-api-key", api_key)
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
