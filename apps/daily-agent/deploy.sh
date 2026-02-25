@@ -28,7 +28,6 @@ fi
 echo "🚀 Starting deployment to GCP Project: $PROJECT_ID"
 echo "   Enabled providers:"
 echo "   - Gemini: ✓"
-[ -n "$OPENAI_API_KEY" ] && echo "   - OpenAI: ✓" || echo "   - OpenAI: (not configured)"
 [ -n "$ANTHROPIC_API_KEY" ] && echo "   - Claude: ✓" || echo "   - Claude: (not configured)"
 
 # 1. Enable APIs
@@ -96,7 +95,6 @@ create_or_update_secret() {
 }
 
 create_or_update_secret "gemini-api-key" "$GEMINI_API_KEY"
-create_or_update_secret "openai-api-key" "$OPENAI_API_KEY"
 create_or_update_secret "anthropic-api-key" "$ANTHROPIC_API_KEY"
 
 # 6. Deploy Cloud Run Job with all configured secrets
@@ -104,7 +102,6 @@ echo "Deploying Cloud Run Job..."
 
 # Build secrets flag dynamically based on available keys
 SECRETS_FLAG="GEMINI_API_KEY=gemini-api-key:latest"
-[ -n "$OPENAI_API_KEY" ] && SECRETS_FLAG="$SECRETS_FLAG,OPENAI_API_KEY=openai-api-key:latest"
 [ -n "$ANTHROPIC_API_KEY" ] && SECRETS_FLAG="$SECRETS_FLAG,ANTHROPIC_API_KEY=anthropic-api-key:latest"
 
 gcloud run jobs deploy $SERVICE_NAME \
