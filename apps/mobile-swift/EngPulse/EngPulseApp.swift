@@ -115,20 +115,28 @@ class AppState: ObservableObject {
     let cacheService = CacheService()
 
     func loadSummaries() async {
-        isLoading = true
         errorMessage = nil
 
+        // Phase 1: Show cached data instantly (no spinner)
+        if summaries.isEmpty,
+           let cached = try? await cacheService.getCachedSummaries(), !cached.isEmpty {
+            summaries = cached
+            isOffline = true
+        }
+
+        // Phase 2: Fetch fresh data from network
+        // Only show loading spinner if we have no cached data
+        if summaries.isEmpty { isLoading = true }
+
         do {
-            summaries = try await apiService.fetchSummaries()
-            // Cache the summaries
-            try await cacheService.cacheSummaries(summaries)
-            isOffline = false  // Successfully loaded from network
+            let fresh = try await apiService.fetchSummaries()
+            summaries = fresh
+            try? await cacheService.cacheSummaries(fresh)
+            isOffline = false
+            // Phase 3: Prefetch top articles in background
+            prefetchArticles(Array(fresh.prefix(5)))
         } catch {
-            // Try loading from cache on error
-            if let cached = try? await cacheService.getCachedSummaries(), !cached.isEmpty {
-                summaries = cached
-                isOffline = true
-            } else {
+            if summaries.isEmpty {
                 errorMessage = error.localizedDescription
             }
         }
@@ -142,5 +150,21 @@ class AppState: ObservableObject {
 
     func clearCache() async {
         await cacheService.clearAll()
+    }
+
+    private func prefetchArticles(_ articles: [Summary]) {
+        for article in articles {
+            Task.detached(priority: .utility) { [cacheService] in
+                // Skip if already cached
+                if await cacheService.getCachedContent(for: article.url) != nil { return }
+                guard let url = URL(string: article.url) else { return }
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: url)
+                    if let content = String(data: data, encoding: .utf8) {
+                        try? await cacheService.cacheContent(content, for: article.url)
+                    }
+                } catch {}
+            }
+        }
     }
 }

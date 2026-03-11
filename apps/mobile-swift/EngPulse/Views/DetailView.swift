@@ -8,6 +8,7 @@ struct DetailView: View {
     @StateObject private var viewModel: DetailViewModel
     @Environment(\.openURL) private var openURL
     @EnvironmentObject var ttsService: TTSService
+    @State private var showInfo = false
 
     init(summary: Summary, ttsService: TTSService, cacheService: CacheService? = nil) {
         _viewModel = StateObject(wrappedValue: DetailViewModel(summary: summary, ttsService: ttsService, cacheService: cacheService))
@@ -25,15 +26,12 @@ struct DetailView: View {
                         fullContentSection(content)
                     }
 
-                    Divider()
-                    footerSection
-
                     if ttsService.state != .stopped && ttsService.currentArticleUrl == viewModel.summary.url {
                         Color.clear.frame(height: Layout.playerBarHeight)
                     }
                 }
-                .padding(.horizontal, 20) // Increased horizontal padding for readability
-                .padding(.top, 8)
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
             }
 
             if ttsService.state != .stopped && ttsService.currentArticleUrl == viewModel.summary.url {
@@ -57,6 +55,7 @@ struct DetailView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
+        .sheet(isPresented: $showInfo) { infoSheet }
         .task {
             await viewModel.loadFullContent()
         }
@@ -66,25 +65,37 @@ struct DetailView: View {
 
     private func fullContentSection(_ content: String) -> some View {
         MarkdownContentView(content: content)
-            .padding(.top, 8)
+            .padding(.top, 4)
     }
 
-    private var footerSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("\(viewModel.summary.source) • \(viewModel.summary.date) • \(viewModel.summary.modelDisplayName)")
-                .font(.caption2)
-                .foregroundColor(.secondary)
+    private var infoSheet: some View {
+        NavigationStack {
+            List {
+                Section {
+                    LabeledContent("Source", value: viewModel.summary.source)
+                    LabeledContent("Date", value: viewModel.summary.date)
+                    LabeledContent("Model", value: viewModel.summary.modelDisplayName)
+                }
 
-            if let originalUrl = viewModel.summary.originalUrl, let url = URL(string: originalUrl) {
-                Button {
-                    openURL(url)
-                } label: {
-                    Text("See Original")
-                        .font(.caption)
-                        .foregroundColor(.accentColor)
+                if let originalUrl = viewModel.summary.originalUrl, let url = URL(string: originalUrl) {
+                    Section {
+                        Button {
+                            openURL(url)
+                        } label: {
+                            Label("See Original", systemImage: "arrow.up.right.square")
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Info")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showInfo = false }
                 }
             }
         }
+        .presentationDetents([.medium])
     }
 
     private var loadingSection: some View {
@@ -149,6 +160,11 @@ struct DetailView: View {
                     .disabled(viewModel.isLoadingTTS)
                     .accessibilityLabel(viewModel.isLoadingTTS ? "Generating audio" : (viewModel.isPlaying ? "Pause audio" : (viewModel.isPaused ? "Resume audio" : "Listen to summary")))
                 }
+
+                Button { showInfo = true } label: {
+                    Image(systemName: "info.circle")
+                }
+                .accessibilityLabel("Article info")
 
                 if let originalUrl = viewModel.summary.originalUrl, let url = URL(string: originalUrl) {
                     ShareLink(item: url) {

@@ -31,12 +31,20 @@ class DetailViewModel: ObservableObject {
     }
 
     func loadFullContent() async {
-        isLoadingContent = true
         loadingError = nil
+
+        // Phase 1: Show cached content instantly (no spinner)
+        if let cacheService = cacheService,
+           let cached = await cacheService.getCachedContent(for: summary.url) {
+            fullContent = cached
+        }
+
+        // Phase 2: Fetch fresh from network
+        if fullContent == nil { isLoadingContent = true }
         defer { isLoadingContent = false }
 
         guard let url = URL(string: summary.url) else {
-            loadingError = "Invalid URL"
+            if fullContent == nil { loadingError = "Invalid URL" }
             return
         }
 
@@ -49,20 +57,16 @@ class DetailViewModel: ObservableObject {
                 if let cacheService = cacheService {
                     try? await cacheService.cacheContent(content, for: summary.url)
                 }
-            } else {
+            } else if fullContent == nil {
                 loadingError = "Could not decode content"
             }
         } catch {
-            // Try cache fallback
-            if let cacheService = cacheService,
-               let cached = await cacheService.getCachedContent(for: summary.url) {
-                fullContent = cached
-                return
-            }
-            if let error = error as? URLError, error.code == .timedOut {
-                loadingError = "Request timed out. Please try again."
-            } else {
-                loadingError = "Unable to load content. Check your connection."
+            if fullContent == nil {
+                if let error = error as? URLError, error.code == .timedOut {
+                    loadingError = "Request timed out. Please try again."
+                } else {
+                    loadingError = "Unable to load content. Check your connection."
+                }
             }
         }
     }

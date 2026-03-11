@@ -9,11 +9,24 @@ struct SettingsView: View {
     @AppStorage("ttsPitch") private var pitch: Double = 1.0
     @AppStorage("ttsVoice") private var selectedVoice: String = Neural2Voice.maleJ.rawValue
 
+    @AppStorage("selectedModelFilter") private var selectedFilter: String = ModelFilter.all.rawValue
     @State private var showClearCacheAlert = false
 
     var body: some View {
-        NavigationStack {
-            List {
+        List {
+                // Feed Filter Section
+                Section {
+                    Picker("Source", selection: $selectedFilter) {
+                        ForEach(ModelFilter.allCases, id: \.rawValue) { filter in
+                            Text(filter.rawValue).tag(filter.rawValue)
+                        }
+                    }
+                } header: {
+                    Text("Feed")
+                } footer: {
+                    Text("Filter articles by AI model source.")
+                }
+
                 // Listening Section
                 Section {
                     VStack(alignment: .leading) {
@@ -115,9 +128,8 @@ struct SettingsView: View {
                     Text("About")
                 }
             }
-            .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.inline)
-        }
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var speechRateLabel: String {

@@ -33,7 +33,7 @@ struct HomeViewContent: View {
     @EnvironmentObject var summariesStore: AppState
     @EnvironmentObject var ttsService: TTSService
     @State private var searchText = ""
-    @State private var isSearchVisible = false
+    @State private var isSearchActive = false
     @AppStorage("selectedModelFilter") private var selectedFilter: String = ModelFilter.all.rawValue
     @Binding var navigationPath: NavigationPath
 
@@ -80,44 +80,42 @@ struct HomeViewContent: View {
         .navigationDestination(for: Summary.self) { summary in
             DetailView(summary: summary, ttsService: ttsService, cacheService: summariesStore.cacheService)
         }
-        .searchable(text: $searchText, isPresented: $isSearchVisible, prompt: "Search summaries")
+        .navigationDestination(for: String.self) { value in
+            if value == "settings" {
+                SettingsView()
+            }
+        }
         .refreshable {
             await summariesStore.refreshSummaries()
         }
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Menu {
-                    ForEach(ModelFilter.allCases, id: \.rawValue) { filter in
-                        Button {
-                            selectedFilter = filter.rawValue
-                        } label: {
-                            if selectedFilter == filter.rawValue {
-                                Label(filter.rawValue, systemImage: "checkmark")
-                            } else {
-                                Text(filter.rawValue)
-                            }
-                        }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                HStack(spacing: 14) {
+                    if summariesStore.isOffline {
+                        Image(systemName: "icloud.slash")
+                            .foregroundColor(.orange)
                     }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "line.3.horizontal.decrease")
-                        if modelFilter != .all {
-                            Text(modelFilter.rawValue)
-                                .font(.caption)
-                        }
+
+                    Button {
+                        withAnimation { isSearchActive.toggle() }
+                        if !isSearchActive { searchText = "" }
+                    } label: {
+                        Image(systemName: isSearchActive ? "xmark" : "magnifyingglass")
+                    }
+
+                    NavigationLink(value: "settings") {
+                        Image(systemName: "gearshape")
                     }
                 }
             }
-
-            if summariesStore.isOffline {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "icloud.slash")
-                        Text("Cached")
-                            .font(.caption)
-                    }
-                    .foregroundColor(.orange)
-                }
+        }
+        .safeAreaInset(edge: .top) {
+            if isSearchActive {
+                TextField("Search summaries", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
     }
@@ -137,28 +135,24 @@ struct SummaryCardView: View {
     let summary: Summary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Source and date
-            HStack {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
                 Text(summary.source)
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundColor(.secondary)
-
                 Text("·")
+                    .font(.caption2)
                     .foregroundColor(.secondary)
-
                 Text(summary.displayDate, style: .relative)
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundColor(.secondary)
             }
 
-            // Title
             Text(summary.title)
                 .font(.subheadline)
                 .fontWeight(.medium)
                 .lineLimit(2)
 
-            // Summary preview
             if let snippet = summary.summarySnippet {
                 Text(snippet)
                     .font(.caption)
@@ -166,7 +160,7 @@ struct SummaryCardView: View {
                     .lineLimit(2)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
     }
 }
 

@@ -1,5 +1,64 @@
 import SwiftUI
 
+// MARK: - Pre-parsed block model
+enum MarkdownBlock: Identifiable {
+    case heading(level: Int, text: String)
+    case paragraph(text: String)
+    case unorderedList(text: String)
+    case numberedList(text: String)
+    case blockquote(text: String)
+    case table(text: String)
+    case codeBlock(text: String)
+    case divider
+
+    var id: Int {
+        switch self {
+        case .heading(_, let t), .paragraph(let t), .unorderedList(let t),
+             .numberedList(let t), .blockquote(let t), .table(let t), .codeBlock(let t):
+            return t.hashValue
+        case .divider:
+            return Int.random(in: Int.min...Int.max)
+        }
+    }
+
+    static func parse(_ content: String) -> [MarkdownBlock] {
+        let cleaned = content
+            .replacingOccurrences(of: "(?m)([^\n])\n(#+ )", with: "$1\n\n$2", options: .regularExpression)
+            .replacingOccurrences(of: "(?m)^(#+ [^\n]+)\n([^\n])", with: "$1\n\n$2", options: .regularExpression)
+
+        return cleaned.components(separatedBy: "\n\n").compactMap { paragraph in
+            let trimmed = paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+
+            if trimmed.hasPrefix("##### ") {
+                return .heading(level: 5, text: String(trimmed.dropFirst(6)))
+            } else if trimmed.hasPrefix("#### ") {
+                return .heading(level: 4, text: String(trimmed.dropFirst(5)))
+            } else if trimmed.hasPrefix("### ") {
+                return .heading(level: 3, text: String(trimmed.dropFirst(4)))
+            } else if trimmed.hasPrefix("## ") {
+                return .heading(level: 2, text: String(trimmed.dropFirst(3)))
+            } else if trimmed.hasPrefix("# ") {
+                return .heading(level: 1, text: String(trimmed.dropFirst(2)))
+            } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
+                return .unorderedList(text: trimmed)
+            } else if trimmed.first?.isNumber == true && trimmed.contains(". ") {
+                return .numberedList(text: trimmed)
+            } else if trimmed.hasPrefix(">") {
+                return .blockquote(text: trimmed)
+            } else if trimmed.contains("|") && trimmed.contains("\n") {
+                return .table(text: trimmed)
+            } else if trimmed.hasPrefix("```") {
+                return .codeBlock(text: trimmed)
+            } else if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+                return .divider
+            } else {
+                return .paragraph(text: trimmed)
+            }
+        }
+    }
+}
+
 struct MarkdownContentView: View {
     private enum Layout {
         static let blockquoteBarWidth: CGFloat = 4
@@ -7,102 +66,109 @@ struct MarkdownContentView: View {
         static let codeBlockCornerRadius: CGFloat = 12
     }
 
-    let content: String
+    let blocks: [MarkdownBlock]
     @Environment(\.colorScheme) var colorScheme
 
-    var body: some View {
-        // Pre-process content to enforce blank lines around headers for correct parsing
-        // 1. (?m) enables multi-line mode so ^ matches start of line
-        // 2. Ensure newline before headers: `\n# Title` -> `\n\n# Title`
-        // 3. Ensure newline after headers: `# Title\nText` -> `# Title\n\nText`
-        let cleaned = content
-            .replacingOccurrences(of: "(?m)([^\n])\n(#+ )", with: "$1\n\n$2", options: .regularExpression)
-            .replacingOccurrences(of: "(?m)^(#+ [^\n]+)\n([^\n])", with: "$1\n\n$2", options: .regularExpression)
+    init(content: String) {
+        self.blocks = MarkdownBlock.parse(content)
+    }
 
-        return VStack(alignment: .leading, spacing: 16) {
-            ForEach(Array(cleaned.components(separatedBy: "\n\n").enumerated()), id: \.offset) { _, paragraph in
-                let trimmed = paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmed.hasPrefix("# ") {
-                    inlineMarkdown(String(trimmed.dropFirst(2)))
-                        .font(.system(.title, design: .serif))
-                        .fontWeight(.bold)
-                        .foregroundColor(.primary)
-                        .padding(.top, 12)
-                } else if trimmed.hasPrefix("## ") {
-                    inlineMarkdown(String(trimmed.dropFirst(3)))
-                        .font(.system(.title2, design: .serif))
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
-                        .padding(.top, 8)
-                } else if trimmed.hasPrefix("### ") {
-                    inlineMarkdown(String(trimmed.dropFirst(4)))
-                        .font(.system(.title3, design: .serif))
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
-                        .padding(.top, 6)
-                } else if trimmed.hasPrefix("#### ") {
-                    inlineMarkdown(String(trimmed.dropFirst(5)))
-                        .font(.system(.headline, design: .serif))
-                        .fontWeight(.bold)
-                        .foregroundColor(.primary.opacity(0.9))
-                        .padding(.top, 4)
-                } else if trimmed.hasPrefix("##### ") {
-                    inlineMarkdown(String(trimmed.dropFirst(6)))
-                        .font(.system(.subheadline, design: .serif))
-                        .fontWeight(.bold)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 4)
-                } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
-                    unorderedListView(trimmed)
-                } else if trimmed.first?.isNumber == true && trimmed.contains(". ") {
-                    numberedListView(trimmed)
-                } else if trimmed.hasPrefix(">") {
-                    blockquoteView(trimmed)
-                } else if trimmed.contains("|") && trimmed.contains("\n") {
-                    tableView(trimmed)
-                } else if trimmed.hasPrefix("```") {
-                    codeBlockView(trimmed)
-                } else if trimmed == "---" || trimmed == "***" || trimmed == "___" {
-                    Divider()
-                        .padding(.vertical, 12)
-                } else if !trimmed.isEmpty {
-                    inlineMarkdown(trimmed)
-                        .font(.body)
-                        .lineSpacing(7) // Even airier
-                        .foregroundColor(.primary.opacity(0.85)) // Slightly softer black/white
-                        .fixedSize(horizontal: false, vertical: true) // Ensure text wraps properly
-                }
+    var body: some View {
+        LazyVStack(alignment: .leading, spacing: 12) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                blockView(block)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func blockView(_ block: MarkdownBlock) -> some View {
+        switch block {
+        case .heading(let level, let text):
+            headingView(level: level, text: text)
+        case .paragraph(let text):
+            inlineMarkdown(text)
+                .font(.body)
+                .lineSpacing(5)
+                .foregroundColor(.primary.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+        case .unorderedList(let text):
+            unorderedListView(text)
+        case .numberedList(let text):
+            numberedListView(text)
+        case .blockquote(let text):
+            blockquoteView(text)
+        case .table(let text):
+            tableView(text)
+        case .codeBlock(let text):
+            codeBlockView(text)
+        case .divider:
+            Divider().padding(.vertical, 8)
+        }
+    }
+
+    @ViewBuilder
+    private func headingView(level: Int, text: String) -> some View {
+        switch level {
+        case 1:
+            inlineMarkdown(text)
+                .font(.system(.title, design: .serif))
+                .fontWeight(.bold)
+                .foregroundColor(.primary)
+                .padding(.top, 8)
+        case 2:
+            inlineMarkdown(text)
+                .font(.system(.title2, design: .serif))
+                .fontWeight(.semibold)
+                .foregroundColor(.primary)
+                .padding(.top, 6)
+        case 3:
+            inlineMarkdown(text)
+                .font(.system(.title3, design: .serif))
+                .fontWeight(.semibold)
+                .foregroundColor(.primary)
+                .padding(.top, 4)
+        case 4:
+            inlineMarkdown(text)
+                .font(.system(.headline, design: .serif))
+                .fontWeight(.bold)
+                .foregroundColor(.primary.opacity(0.9))
+                .padding(.top, 2)
+        default:
+            inlineMarkdown(text)
+                .font(.system(.subheadline, design: .serif))
+                .fontWeight(.bold)
+                .foregroundColor(.secondary)
+                .padding(.top, 2)
         }
     }
 
     // MARK: - Block Elements
 
     private func unorderedListView(_ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(text.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
                 let cleanLine = line.trimmingCharacters(in: .whitespaces)
                 if cleanLine.hasPrefix("- ") || cleanLine.hasPrefix("* ") {
-                    HStack(alignment: .top, spacing: 10) {
+                    HStack(alignment: .top, spacing: 8) {
                         Circle()
                             .fill(Color.accentColor)
-                            .frame(width: 5, height: 5)
-                            .padding(.top, 8) // Visually align bullet with text
-                        // Remove the bullet character and leading space
+                            .frame(width: 4, height: 4)
+                            .padding(.top, 7)
                         inlineMarkdown(String(cleanLine.dropFirst(2)))
-                            .lineSpacing(4)
+                            .lineSpacing(3)
                     }
                     .padding(.leading, 4)
                 } else if !cleanLine.isEmpty {
                     inlineMarkdown(cleanLine)
-                        .padding(.leading, 19) // Indent continuation lines
+                        .padding(.leading, 16)
                 }
             }
         }
     }
 
     private func numberedListView(_ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(text.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
                 let cleanLine = line.trimmingCharacters(in: .whitespaces)
                 if let dotIndex = cleanLine.firstIndex(of: "."),
@@ -110,35 +176,35 @@ struct MarkdownContentView: View {
                     let textStart = cleanLine.index(after: dotIndex)
                     let itemText = String(cleanLine[textStart...]).trimmingCharacters(in: .whitespaces)
                     let number = String(cleanLine[..<dotIndex])
-                    HStack(alignment: .top, spacing: 8) {
+                    HStack(alignment: .top, spacing: 6) {
                         Text("\(number).")
                             .font(.subheadline)
                             .monospacedDigit()
                             .foregroundColor(.secondary)
-                            .frame(width: 24, alignment: .trailing)
+                            .frame(width: 22, alignment: .trailing)
                         inlineMarkdown(itemText)
-                            .lineSpacing(4)
+                            .lineSpacing(3)
                     }
                 } else if !cleanLine.isEmpty {
                     inlineMarkdown(cleanLine)
-                        .padding(.leading, 32)
+                        .padding(.leading, 28)
                 }
             }
         }
     }
 
     private func blockquoteView(_ text: String) -> some View {
-        HStack(alignment: .top, spacing: 16) {
+        HStack(alignment: .top, spacing: 12) {
             Capsule()
                 .fill(Color.accentColor.opacity(0.7))
                 .frame(width: Layout.blockquoteBarWidth)
             inlineMarkdown(text.replacingOccurrences(of: "^>\\s*", with: "", options: .regularExpression))
-                .font(.system(.body, design: .serif)) // Serif for quotes looks elegant
+                .font(.system(.body, design: .serif))
                 .foregroundColor(.secondary)
                 .italic()
-                .lineSpacing(4)
+                .lineSpacing(3)
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
         .padding(.horizontal, 4)
     }
 
@@ -147,8 +213,7 @@ struct MarkdownContentView: View {
         let dataRows = rows.filter { row in
             !row.contains("---") && !row.contains(":-")
         }
-        
-        // Semantic colors for table
+
         let headerBg = Color.secondary.opacity(0.1)
         let cellBg = Color.clear
         let borderColor = Color.secondary.opacity(0.2)
@@ -188,12 +253,11 @@ struct MarkdownContentView: View {
                 inlineMarkdown(cell)
                     .font(font)
                     .fontWeight(weight)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(bgColor)
-                
-                // Vertical divider
+
                 if index < cells.count - 1 {
                     Rectangle()
                         .fill(Color.secondary.opacity(0.2))
@@ -207,14 +271,14 @@ struct MarkdownContentView: View {
         let code = text
             .replacingOccurrences(of: "^```\\w*\\n?", with: "", options: .regularExpression)
             .replacingOccurrences(of: "\\n?```$", with: "", options: .regularExpression)
-        
+
         let bg = colorScheme == .dark ? Color(white: 0.15) : Color(white: 0.96)
-        
+
         return ScrollView(.horizontal, showsIndicators: false) {
             Text(code)
                 .font(.system(.caption, design: .monospaced))
                 .foregroundColor(colorScheme == .dark ? .white : .black)
-                .padding(16)
+                .padding(12)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(bg)
@@ -231,7 +295,6 @@ struct MarkdownContentView: View {
         if let attributed = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
             return Text(attributed)
         }
-        // Fallback: manually handle **bold**, *italic*, and `code`
         return manualInlineMarkdown(text)
     }
 
@@ -240,21 +303,18 @@ struct MarkdownContentView: View {
         var remaining = text[...]
 
         while !remaining.isEmpty {
-            // Bold: **text**
             if let boldRange = remaining.range(of: "\\*\\*(.+?)\\*\\*", options: .regularExpression) {
                 let before = remaining[remaining.startIndex..<boldRange.lowerBound]
                 if !before.isEmpty { result = result + Text(before) }
                 let inner = remaining[boldRange].dropFirst(2).dropLast(2)
                 result = result + Text(inner).bold()
                 remaining = remaining[boldRange.upperBound...]
-            // Italic: *text*
             } else if let italicRange = remaining.range(of: "\\*(.+?)\\*", options: .regularExpression) {
                 let before = remaining[remaining.startIndex..<italicRange.lowerBound]
                 if !before.isEmpty { result = result + Text(before) }
                 let inner = remaining[italicRange].dropFirst(1).dropLast(1)
                 result = result + Text(inner).italic()
                 remaining = remaining[italicRange.upperBound...]
-            // Code: `text`
             } else if let codeRange = remaining.range(of: "`(.+?)`", options: .regularExpression) {
                 let before = remaining[remaining.startIndex..<codeRange.lowerBound]
                 if !before.isEmpty { result = result + Text(before) }

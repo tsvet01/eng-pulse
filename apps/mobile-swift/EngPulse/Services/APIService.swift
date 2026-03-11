@@ -9,10 +9,12 @@ actor APIService {
         if let session = session {
             self.session = session
         } else {
-            // Configure session with reasonable timeouts
             let config = URLSessionConfiguration.default
             config.timeoutIntervalForRequest = 30
             config.timeoutIntervalForResource = 60
+            // Enable HTTP caching: 50MB memory, 200MB disk
+            config.urlCache = URLCache(memoryCapacity: 50_000_000, diskCapacity: 200_000_000)
+            config.requestCachePolicy = .returnCacheDataElseLoad
             self.session = URLSession(configuration: config)
         }
     }
