@@ -122,6 +122,9 @@ jobs:
     - name: Show Xcode version
       run: xcodebuild -version
 
+    - name: Create Secrets.xcconfig for CI
+      run: touch apps/mobile-swift/Secrets.xcconfig
+
     - name: Build Swift app
       run: |
         cd apps/mobile-swift
