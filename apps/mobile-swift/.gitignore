@@ -1,3 +1,4 @@
 build/
 # Contains API key - don't commit
 EngPulse/Info.plist
+Secrets.xcconfig

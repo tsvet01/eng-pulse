@@ -18,6 +18,8 @@ class TTSService: ObservableObject {
     static let shared = TTSService()
 
     private var cloudTTS: CloudTTSService?
+    private var localTTS: LocalTTSService?
+    private(set) var isUsingLocalTTS: Bool = false
     private let cacheService = CacheService()
     private let audioPlayer: AudioPlayerService
 
@@ -45,10 +47,15 @@ class TTSService: ObservableObject {
                   apiKey != "YOUR_API_KEY" {
             self.cloudTTS = CloudTTSService(apiKey: apiKey)
         } else {
-            print("Warning: Google Cloud TTS API key not configured in Info.plist")
+            print("Warning: Google Cloud TTS API key not configured — falling back to local TTS")
+            self.localTTS = LocalTTSService()
+            self.isUsingLocalTTS = true
         }
 
         setupAudioPlayerObservers()
+        if isUsingLocalTTS {
+            setupLocalTTSObservers()
+        }
     }
 
     private func setupAudioPlayerObservers() {
@@ -76,24 +83,52 @@ class TTSService: ObservableObject {
             .store(in: &cancellables)
     }
 
+    private func setupLocalTTSObservers() {
+        guard let localTTS = localTTS else { return }
+
+        localTTS.$isPlaying
+            .receive(on: RunLoop.main)
+            .sink { [weak self] isPlaying in
+                guard let self = self else { return }
+                if self.state == .playing && !isPlaying {
+                    self.state = .stopped
+                    self.currentArticleUrl = nil
+                } else if self.state == .paused && isPlaying {
+                    self.state = .playing
+                }
+            }
+            .store(in: &cancellables)
+
+        localTTS.$progress
+            .receive(on: RunLoop.main)
+            .sink { [weak self] progress in
+                self?.progress = progress
+            }
+            .store(in: &cancellables)
+    }
+
     // MARK: - Public Methods
 
     /// Start speaking text, stopping any current playback first
     func startSpeaking(_ text: String, articleUrl: String? = nil) {
         stop()
 
-        guard cloudTTS != nil else {
-            errorMessage = "Audio playback is not available. Please check app settings."
-            return
-        }
-
         let cleanedText = TextCleaner.cleanForSpeech(text)
         currentText = cleanedText
         currentArticleUrl = articleUrl
         errorMessage = nil
 
-        Task {
-            await performSpeak(cleanedText)
+        if isUsingLocalTTS, let localTTS = localTTS {
+            localTTS.speak(text: cleanedText, rate: speechRate, pitch: pitch)
+            state = .playing
+        } else {
+            guard cloudTTS != nil else {
+                errorMessage = "Audio playback is not available. Please check app settings."
+                return
+            }
+            Task {
+                await performSpeak(cleanedText)
+            }
         }
     }
 
@@ -149,18 +184,30 @@ class TTSService: ObservableObject {
 
     func pause() {
         guard state == .playing else { return }
-        audioPlayer.pause()
+        if isUsingLocalTTS {
+            localTTS?.pause()
+        } else {
+            audioPlayer.pause()
+        }
         state = .paused
     }
 
     func resume() {
         guard state == .paused else { return }
-        audioPlayer.resume()
+        if isUsingLocalTTS {
+            localTTS?.resume()
+        } else {
+            audioPlayer.resume()
+        }
         state = .playing
     }
 
     func stop() {
-        audioPlayer.stop()
+        if isUsingLocalTTS {
+            localTTS?.stop()
+        } else {
+            audioPlayer.stop()
+        }
         state = .stopped
         progress = 0.0
         currentArticleUrl = nil

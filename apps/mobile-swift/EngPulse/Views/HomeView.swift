@@ -77,7 +77,7 @@ struct HomeViewContent: View {
         .navigationTitle("Eng Pulse")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Summary.self) { summary in
-            DetailView(summary: summary, ttsService: ttsService)
+            DetailView(summary: summary, ttsService: ttsService, cacheService: summariesStore.cacheService)
         }
         .searchable(text: $searchText, prompt: "Search summaries")
         .refreshable {
