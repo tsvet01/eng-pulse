@@ -89,39 +89,11 @@ struct HomeViewContent: View {
             await summariesStore.refreshSummaries()
         }
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Menu {
-                    ForEach(ModelFilter.allCases, id: \.rawValue) { filter in
-                        Button {
-                            selectedFilter = filter.rawValue
-                        } label: {
-                            if selectedFilter == filter.rawValue {
-                                Label(filter.rawValue, systemImage: "checkmark")
-                            } else {
-                                Text(filter.rawValue)
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "line.3.horizontal.decrease")
-                        if modelFilter != .all {
-                            Text(modelFilter.rawValue)
-                                .font(.caption)
-                        }
-                    }
-                }
-            }
-
             ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 12) {
+                HStack(spacing: 14) {
                     if summariesStore.isOffline {
-                        HStack(spacing: 4) {
-                            Image(systemName: "icloud.slash")
-                            Text("Cached")
-                                .font(.caption)
-                        }
-                        .foregroundColor(.orange)
+                        Image(systemName: "icloud.slash")
+                            .foregroundColor(.orange)
                     }
 
                     Button {
