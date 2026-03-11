@@ -112,7 +112,7 @@ class AppState: ObservableObject {
     @Published var pendingArticleUrl: String?
 
     private let apiService = APIService()
-    private let cacheService = CacheService()
+    let cacheService = CacheService()
 
     func loadSummaries() async {
         isLoading = true

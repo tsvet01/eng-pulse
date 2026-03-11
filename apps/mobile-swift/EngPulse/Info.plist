@@ -46,5 +46,11 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>GoogleCloudTTSAPIKey</key>
+	<string>$(GOOGLE_CLOUD_TTS_API_KEY)</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 </dict>
 </plist>

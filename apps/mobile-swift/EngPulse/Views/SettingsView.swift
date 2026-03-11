@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
+    @EnvironmentObject var ttsService: TTSService
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
     @AppStorage("dailyBriefingTime") private var dailyBriefingTime = "08:00"
     @AppStorage("ttsSpeechRate") private var speechRate: Double = 0.55
@@ -35,15 +36,21 @@ struct SettingsView: View {
                         Slider(value: $pitch, in: 0.5...1.5, step: 0.1)
                     }
 
-                    Picker("Voice", selection: $selectedVoice) {
-                        ForEach(Neural2Voice.allCases) { voice in
-                            Text(voice.displayName).tag(voice.rawValue)
+                    if !ttsService.isUsingLocalTTS {
+                        Picker("Voice", selection: $selectedVoice) {
+                            ForEach(Neural2Voice.allCases) { voice in
+                                Text(voice.displayName).tag(voice.rawValue)
+                            }
                         }
                     }
                 } header: {
                     Text("Listening")
                 } footer: {
-                    Text("Uses Google Cloud Neural2 voices for natural-sounding speech.")
+                    if ttsService.isUsingLocalTTS {
+                        Text("Using device speech synthesis. Add a Google Cloud TTS API key in Secrets.xcconfig for Neural2 voices.")
+                    } else {
+                        Text("Uses Google Cloud Neural2 voices for natural-sounding speech.")
+                    }
                 }
 
                 // Notifications Section
@@ -135,4 +142,5 @@ struct SettingsView: View {
 #Preview {
     SettingsView()
         .environmentObject(AppState())
+        .environmentObject(TTSService())
 }

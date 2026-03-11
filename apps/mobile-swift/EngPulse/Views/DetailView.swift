@@ -9,8 +9,8 @@ struct DetailView: View {
     @Environment(\.openURL) private var openURL
     @EnvironmentObject var ttsService: TTSService
 
-    init(summary: Summary, ttsService: TTSService) {
-        _viewModel = StateObject(wrappedValue: DetailViewModel(summary: summary, ttsService: ttsService))
+    init(summary: Summary, ttsService: TTSService, cacheService: CacheService? = nil) {
+        _viewModel = StateObject(wrappedValue: DetailViewModel(summary: summary, ttsService: ttsService, cacheService: cacheService))
     }
 
     var body: some View {
@@ -65,16 +65,8 @@ struct DetailView: View {
     // MARK: - Sections
 
     private func fullContentSection(_ content: String) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            TTSListenButton(
-                isPlaying: viewModel.isPlaying,
-                isPaused: viewModel.isPaused,
-                isLoading: viewModel.isLoadingTTS,
-                onTap: { viewModel.toggleTTS() }
-            )
-            MarkdownContentView(content: content)
-        }
-        .padding(.top, 8)
+        MarkdownContentView(content: content)
+            .padding(.top, 8)
     }
 
     private var footerSection: some View {
@@ -171,6 +163,6 @@ struct DetailView: View {
 
 #Preview {
     NavigationStack {
-        DetailView(summary: .preview, ttsService: TTSService())
+        DetailView(summary: .preview, ttsService: TTSService(), cacheService: nil)
     }
 }

@@ -10,6 +10,7 @@ class DetailViewModel: ObservableObject {
     @Published var loadingError: String?
 
     private let ttsService: TTSService
+    private let cacheService: CacheService?
 
     var isPlaying: Bool {
         ttsService.state == .playing && ttsService.currentArticleUrl == summary.url
@@ -23,9 +24,10 @@ class DetailViewModel: ObservableObject {
         ttsService.state == .loading && ttsService.currentArticleUrl == summary.url
     }
 
-    init(summary: Summary, ttsService: TTSService) {
+    init(summary: Summary, ttsService: TTSService, cacheService: CacheService? = nil) {
         self.summary = summary
         self.ttsService = ttsService
+        self.cacheService = cacheService
     }
 
     func loadFullContent() async {
@@ -44,22 +46,29 @@ class DetailViewModel: ObservableObject {
             let (data, _) = try await URLSession.shared.data(for: request)
             if let content = String(data: data, encoding: .utf8) {
                 fullContent = content
+                if let cacheService = cacheService {
+                    try? await cacheService.cacheContent(content, for: summary.url)
+                }
             } else {
                 loadingError = "Could not decode content"
             }
-        } catch let error as URLError where error.code == .timedOut {
-            loadingError = "Request timed out. Please try again."
         } catch {
-            loadingError = "Unable to load content. Check your connection."
+            // Try cache fallback
+            if let cacheService = cacheService,
+               let cached = await cacheService.getCachedContent(for: summary.url) {
+                fullContent = cached
+                return
+            }
+            if let error = error as? URLError, error.code == .timedOut {
+                loadingError = "Request timed out. Please try again."
+            } else {
+                loadingError = "Unable to load content. Check your connection."
+            }
         }
     }
 
     func toggleTTS() {
         guard let content = fullContent else { return }
-        if isPlaying {
-            ttsService.stop()
-        } else {
-            ttsService.togglePlayPause(content, articleUrl: summary.url)
-        }
+        ttsService.togglePlayPause(content, articleUrl: summary.url)
     }
 }
