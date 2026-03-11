@@ -12,8 +12,7 @@ struct SettingsView: View {
     @State private var showClearCacheAlert = false
 
     var body: some View {
-        NavigationStack {
-            List {
+        List {
                 // Listening Section
                 Section {
                     VStack(alignment: .leading) {
@@ -115,9 +114,8 @@ struct SettingsView: View {
                     Text("About")
                 }
             }
-            .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.inline)
-        }
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var speechRateLabel: String {

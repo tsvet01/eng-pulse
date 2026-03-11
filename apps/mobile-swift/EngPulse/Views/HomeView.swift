@@ -33,7 +33,7 @@ struct HomeViewContent: View {
     @EnvironmentObject var summariesStore: AppState
     @EnvironmentObject var ttsService: TTSService
     @State private var searchText = ""
-    @State private var isSearchVisible = false
+    @State private var isSearchActive = false
     @AppStorage("selectedModelFilter") private var selectedFilter: String = ModelFilter.all.rawValue
     @Binding var navigationPath: NavigationPath
 
@@ -80,7 +80,11 @@ struct HomeViewContent: View {
         .navigationDestination(for: Summary.self) { summary in
             DetailView(summary: summary, ttsService: ttsService, cacheService: summariesStore.cacheService)
         }
-        .searchable(text: $searchText, isPresented: $isSearchVisible, prompt: "Search summaries")
+        .navigationDestination(for: String.self) { value in
+            if value == "settings" {
+                SettingsView()
+            }
+        }
         .refreshable {
             await summariesStore.refreshSummaries()
         }
@@ -109,15 +113,37 @@ struct HomeViewContent: View {
                 }
             }
 
-            if summariesStore.isOffline {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "icloud.slash")
-                        Text("Cached")
-                            .font(.caption)
+            ToolbarItem(placement: .navigationBarTrailing) {
+                HStack(spacing: 12) {
+                    if summariesStore.isOffline {
+                        HStack(spacing: 4) {
+                            Image(systemName: "icloud.slash")
+                            Text("Cached")
+                                .font(.caption)
+                        }
+                        .foregroundColor(.orange)
                     }
-                    .foregroundColor(.orange)
+
+                    Button {
+                        withAnimation { isSearchActive.toggle() }
+                        if !isSearchActive { searchText = "" }
+                    } label: {
+                        Image(systemName: isSearchActive ? "xmark" : "magnifyingglass")
+                    }
+
+                    NavigationLink(value: "settings") {
+                        Image(systemName: "gearshape")
+                    }
                 }
+            }
+        }
+        .safeAreaInset(edge: .top) {
+            if isSearchActive {
+                TextField("Search summaries", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
     }
