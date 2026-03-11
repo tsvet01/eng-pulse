@@ -185,7 +185,7 @@ struct MarkdownContentView: View {
 
         return HStack(spacing: 0) {
             ForEach(Array(cells.enumerated()), id: \.offset) { index, cell in
-                Text(cell)
+                inlineMarkdown(cell)
                     .font(font)
                     .fontWeight(weight)
                     .padding(.horizontal, 10)
@@ -228,11 +228,44 @@ struct MarkdownContentView: View {
     // MARK: - Inline Markdown
 
     func inlineMarkdown(_ text: String) -> Text {
-        // Use InterpretedSyntax.full to allow for more markdown features if possible,
-        // but inlineOnlyPreservingWhitespace is safer for sticking to the manual block structure.
         if let attributed = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
             return Text(attributed)
         }
-        return Text(text)
+        // Fallback: manually handle **bold**, *italic*, and `code`
+        return manualInlineMarkdown(text)
+    }
+
+    private func manualInlineMarkdown(_ text: String) -> Text {
+        var result = Text("")
+        var remaining = text[...]
+
+        while !remaining.isEmpty {
+            // Bold: **text**
+            if let boldRange = remaining.range(of: "\\*\\*(.+?)\\*\\*", options: .regularExpression) {
+                let before = remaining[remaining.startIndex..<boldRange.lowerBound]
+                if !before.isEmpty { result = result + Text(before) }
+                let inner = remaining[boldRange].dropFirst(2).dropLast(2)
+                result = result + Text(inner).bold()
+                remaining = remaining[boldRange.upperBound...]
+            // Italic: *text*
+            } else if let italicRange = remaining.range(of: "\\*(.+?)\\*", options: .regularExpression) {
+                let before = remaining[remaining.startIndex..<italicRange.lowerBound]
+                if !before.isEmpty { result = result + Text(before) }
+                let inner = remaining[italicRange].dropFirst(1).dropLast(1)
+                result = result + Text(inner).italic()
+                remaining = remaining[italicRange.upperBound...]
+            // Code: `text`
+            } else if let codeRange = remaining.range(of: "`(.+?)`", options: .regularExpression) {
+                let before = remaining[remaining.startIndex..<codeRange.lowerBound]
+                if !before.isEmpty { result = result + Text(before) }
+                let inner = remaining[codeRange].dropFirst(1).dropLast(1)
+                result = result + Text(inner).font(.system(.body, design: .monospaced)).foregroundColor(.secondary)
+                remaining = remaining[codeRange.upperBound...]
+            } else {
+                result = result + Text(remaining)
+                break
+            }
+        }
+        return result
     }
 }
