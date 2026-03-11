@@ -135,28 +135,24 @@ struct SummaryCardView: View {
     let summary: Summary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Source and date
-            HStack {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
                 Text(summary.source)
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundColor(.secondary)
-
                 Text("·")
+                    .font(.caption2)
                     .foregroundColor(.secondary)
-
                 Text(summary.displayDate, style: .relative)
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundColor(.secondary)
             }
 
-            // Title
             Text(summary.title)
                 .font(.subheadline)
                 .fontWeight(.medium)
                 .lineLimit(2)
 
-            // Summary preview
             if let snippet = summary.summarySnippet {
                 Text(snippet)
                     .font(.caption)
@@ -164,7 +160,7 @@ struct SummaryCardView: View {
                     .lineLimit(2)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
     }
 }
 

@@ -30,8 +30,8 @@ struct DetailView: View {
                         Color.clear.frame(height: Layout.playerBarHeight)
                     }
                 }
-                .padding(.horizontal, 20) // Increased horizontal padding for readability
-                .padding(.top, 8)
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
             }
 
             if ttsService.state != .stopped && ttsService.currentArticleUrl == viewModel.summary.url {
@@ -65,7 +65,7 @@ struct DetailView: View {
 
     private func fullContentSection(_ content: String) -> some View {
         MarkdownContentView(content: content)
-            .padding(.top, 8)
+            .padding(.top, 4)
     }
 
     private var infoSheet: some View {
