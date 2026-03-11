@@ -33,6 +33,7 @@ struct HomeViewContent: View {
     @EnvironmentObject var summariesStore: AppState
     @EnvironmentObject var ttsService: TTSService
     @State private var searchText = ""
+    @State private var isSearchVisible = false
     @AppStorage("selectedModelFilter") private var selectedFilter: String = ModelFilter.all.rawValue
     @Binding var navigationPath: NavigationPath
 
@@ -79,7 +80,7 @@ struct HomeViewContent: View {
         .navigationDestination(for: Summary.self) { summary in
             DetailView(summary: summary, ttsService: ttsService, cacheService: summariesStore.cacheService)
         }
-        .searchable(text: $searchText, prompt: "Search summaries")
+        .searchable(text: $searchText, isPresented: $isSearchVisible, prompt: "Search summaries")
         .refreshable {
             await summariesStore.refreshSummaries()
         }
