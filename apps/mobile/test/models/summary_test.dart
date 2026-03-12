@@ -48,7 +48,7 @@ void main() {
       test('returns correct model for exact ID match', () {
         expect(LlmModel.fromId('gemini-3-pro-preview'), LlmModel.gemini);
         expect(LlmModel.fromId('gpt-5.2-2025-12-11'), LlmModel.openai);
-        expect(LlmModel.fromId('claude-opus-4-5'), LlmModel.claude);
+        expect(LlmModel.fromId('claude-opus-4-6'), LlmModel.claude);
       });
 
       test('returns correct model for vendor name', () {
@@ -71,7 +71,7 @@ void main() {
       test('returns true for exact ID match', () {
         expect(LlmModel.gemini.matchesId('gemini-3-pro-preview'), isTrue);
         expect(LlmModel.openai.matchesId('gpt-5.2-2025-12-11'), isTrue);
-        expect(LlmModel.claude.matchesId('claude-opus-4-5'), isTrue);
+        expect(LlmModel.claude.matchesId('claude-opus-4-6'), isTrue);
       });
 
       test('returns true for vendor name match', () {

@@ -45,9 +45,7 @@ struct Summary: Identifiable, Codable, Equatable, Hashable {
 
     var modelDisplayName: String {
         guard let model = model else { return "Unknown" }
-        if model.contains("gemini") { return "Gemini" }
-        if model.contains("claude") { return "Claude" }
-        if model.contains("gpt") { return "GPT" }
+        // Show full model ID (e.g. "claude-opus-4-6", "gemini-3-pro-preview")
         return model
     }
 

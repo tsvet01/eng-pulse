@@ -36,7 +36,7 @@ class Summary {
 enum LlmModel {
   gemini('gemini-3-pro-preview', 'Gemini'),
   openai('gpt-5.2-2025-12-11', 'OpenAI'),
-  claude('claude-opus-4-5', 'Claude');
+  claude('claude-opus-4-6', 'Claude');
 
   final String id;
   final String displayName;
