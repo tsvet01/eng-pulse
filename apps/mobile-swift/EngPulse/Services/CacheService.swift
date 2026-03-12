@@ -53,11 +53,6 @@ actor CacheService {
         return try decoder.decode([Summary].self, from: data)
     }
 
-    /// Check if we have cached summaries
-    func hasCachedSummaries() -> Bool {
-        fileManager.fileExists(atPath: summariesFile.path)
-    }
-
     // MARK: - Content Cache
 
     /// Cache markdown content for a summary
@@ -104,12 +99,6 @@ actor CacheService {
     func getCachedAudioURL(for cacheKey: String) async -> URL? {
         let audioFile = cacheDirectory.appendingPathComponent("audio_\(cacheKey).mp3")
         return fileManager.fileExists(atPath: audioFile.path) ? audioFile : nil
-    }
-
-    /// Check if audio is cached
-    func hasAudio(for cacheKey: String) -> Bool {
-        let audioFile = cacheDirectory.appendingPathComponent("audio_\(cacheKey).mp3")
-        return fileManager.fileExists(atPath: audioFile.path)
     }
 
     /// Generate cache key from text and TTS configuration string

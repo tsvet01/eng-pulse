@@ -2,7 +2,6 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
-    @EnvironmentObject var notificationService: NotificationService
     @Environment(\.scenePhase) private var scenePhase
     @State private var navigationPath = NavigationPath()
 
@@ -51,5 +50,4 @@ struct ContentView: View {
 #Preview {
     ContentView()
         .environmentObject(AppState())
-        .environmentObject(NotificationService.shared)
 }

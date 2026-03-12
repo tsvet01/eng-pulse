@@ -8,6 +8,7 @@ import Combine
 class LocalTTSService: NSObject, ObservableObject {
     private let synthesizer = AVSpeechSynthesizer()
     private var currentTextLength: Int = 0
+    private var sessionConfigured = false
 
     @Published var isPlaying: Bool = false
     @Published var progress: Double = 0.0
@@ -15,10 +16,10 @@ class LocalTTSService: NSObject, ObservableObject {
     override init() {
         super.init()
         synthesizer.delegate = self
-        configureAudioSession()
     }
 
-    private func configureAudioSession() {
+    private func ensureAudioSession() {
+        guard !sessionConfigured else { return }
         do {
             try AVAudioSession.sharedInstance().setCategory(
                 .playback,
@@ -26,6 +27,7 @@ class LocalTTSService: NSObject, ObservableObject {
                 options: [.allowBluetoothA2DP]
             )
             try AVAudioSession.sharedInstance().setActive(true)
+            sessionConfigured = true
         } catch {
             print("Audio session configuration error: \(error)")
         }
@@ -35,6 +37,7 @@ class LocalTTSService: NSObject, ObservableObject {
 
     func speak(text: String, rate: Double, pitch: Double) {
         stop()
+        ensureAudioSession()
 
         let utterance = AVSpeechUtterance(string: text)
         utterance.rate = Float(rate)
