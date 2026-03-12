@@ -241,7 +241,7 @@ Required for local development:
 # Rust agents
 GEMINI_API_KEY=your_key
 GCS_BUCKET=your_bucket    # Optional, default: tsvet01-agent-brain
-GEMINI_MODEL=gemini-3-pro-preview  # Optional, default: gemini-3-pro-preview
+GEMINI_MODEL=gemini-3.1-pro-preview  # Optional, default: gemini-3.1-pro-preview
 
 # Python notifier
 GMAIL_USER=email

@@ -46,7 +46,7 @@ void main() {
   group('LlmModel', () {
     group('fromId', () {
       test('returns correct model for exact ID match', () {
-        expect(LlmModel.fromId('gemini-3-pro-preview'), LlmModel.gemini);
+        expect(LlmModel.fromId('gemini-3.1-pro-preview'), LlmModel.gemini);
         expect(LlmModel.fromId('gpt-5.2-2025-12-11'), LlmModel.openai);
         expect(LlmModel.fromId('claude-opus-4-6'), LlmModel.claude);
       });
@@ -69,7 +69,7 @@ void main() {
 
     group('matchesId', () {
       test('returns true for exact ID match', () {
-        expect(LlmModel.gemini.matchesId('gemini-3-pro-preview'), isTrue);
+        expect(LlmModel.gemini.matchesId('gemini-3.1-pro-preview'), isTrue);
         expect(LlmModel.openai.matchesId('gpt-5.2-2025-12-11'), isTrue);
         expect(LlmModel.claude.matchesId('claude-opus-4-6'), isTrue);
       });

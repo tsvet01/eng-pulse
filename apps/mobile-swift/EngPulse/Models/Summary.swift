@@ -45,7 +45,7 @@ struct Summary: Identifiable, Codable, Equatable, Hashable {
 
     var modelDisplayName: String {
         guard let model = model else { return "Unknown" }
-        // Show full model ID (e.g. "claude-opus-4-6", "gemini-3-pro-preview")
+        // Show full model ID (e.g. "claude-opus-4-6", "gemini-3.1-pro-preview")
         return model
     }
 
@@ -103,8 +103,8 @@ extension Summary {
         title: "The 3 a.m. Call That Changed The Way I Design APIs",
         summarySnippet: "The guiding principle of reliable API design is simple...",
         originalUrl: "https://thenewstack.io/the-3-a-m-call-that-changed-the-way-i-design-apis/",
-        model: "gemini-3-pro-preview",
-        selectedBy: "gemini-3-pro-preview"
+        model: "gemini-3.1-pro-preview",
+        selectedBy: "gemini-3.1-pro-preview"
     )
 
     static let previewList: [Summary] = [
@@ -115,8 +115,8 @@ extension Summary {
             title: "Package managers keep using Git as a database",
             summarySnippet: "Using Git as a database never works out...",
             originalUrl: "https://nesbitt.io/2025/12/24/package-managers-keep-using-git-as-a-database.html",
-            model: "gemini-3-pro-preview",
-            selectedBy: "gemini-3-pro-preview"
+            model: "gemini-3.1-pro-preview",
+            selectedBy: "gemini-3.1-pro-preview"
         )
     ]
 }
