@@ -286,7 +286,7 @@ class _DetailScreenState extends State<DetailScreen> {
                           ),
                         ),
                       ),
-                      // Model badge
+                      // Summarized by badge
                       if (_currentSummary.model != null) ...[
                         const SizedBox(width: 8),
                         Container(
@@ -300,6 +300,26 @@ class _DetailScreenState extends State<DetailScreen> {
                             LlmModel.fromId(_currentSummary.model).displayName,
                             style: TextStyle(
                               color: isDark ? Colors.teal.shade300 : Colors.teal.shade600,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                      // Selected by badge
+                      if (_currentSummary.selectedBy != null) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: (isDark ? Colors.purple.shade300 : Colors.purple.shade600)
+                                .withAlpha(25),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            'Selected: ${LlmModel.fromId(_currentSummary.selectedBy).displayName}',
+                            style: TextStyle(
+                              color: isDark ? Colors.purple.shade300 : Colors.purple.shade600,
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
                             ),

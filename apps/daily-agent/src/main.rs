@@ -220,19 +220,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 // Create snippet BEFORE modifying summary
                 let summary_snippet: String = summary.chars().take(SUMMARY_SNIPPET_CHARS).collect();
 
-                // Append metadata footer with original link
-                let summary_with_footer = format!(
-                    "{}\n\n---\n\n**Original article:** [{}]({})\n\n*Summarized by {} · Selected by {}*",
-                    summary,
-                    best_article.title,
-                    best_article.url,
-                    provider.model_name(),
-                    selection_provider.model_name()
-                );
-
                 // Upload Summary to GCS (provider-specific path)
+                // Metadata (original_url, model, selected_by) lives in manifest.json
                 let object_name = format!("summaries/{}/{}.md", provider.as_str(), today);
-                let summary_bytes = summary_with_footer.into_bytes();
+                let summary_bytes = summary.into_bytes();
 
                 info!(provider = %provider.as_str(), object = %object_name, "Uploading summary to GCS");
 
