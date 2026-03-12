@@ -134,7 +134,10 @@ struct DetailView: View {
                 Section {
                     LabeledContent("Source", value: summary.source)
                     LabeledContent("Date", value: summary.date)
-                    LabeledContent("Model", value: summary.modelDisplayName)
+                    LabeledContent("Summarized by", value: summary.modelDisplayName)
+                    if let selectedBy = summary.selectedBy {
+                        LabeledContent("Selected by", value: selectedBy)
+                    }
                 }
 
                 if let originalUrl = summary.originalUrl, let url = URL(string: originalUrl) {
