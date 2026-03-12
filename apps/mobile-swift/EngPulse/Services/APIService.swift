@@ -19,12 +19,14 @@ actor APIService {
         }
     }
 
-    /// Fetch summaries from the manifest
+    /// Fetch summaries from the manifest (always revalidate to get latest articles)
     func fetchSummaries() async throws -> [Summary] {
         guard let url = URL(string: "\(baseURL)/manifest.json") else {
             throw APIError.invalidURL
         }
-        let (data, response) = try await session.data(from: url)
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadRevalidatingCacheData
+        let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
