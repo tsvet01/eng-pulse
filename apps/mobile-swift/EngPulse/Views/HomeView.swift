@@ -19,19 +19,9 @@ enum ModelFilter: String, CaseIterable {
     }
 }
 
-// MARK: - HomeView (standalone with own NavigationStack)
-struct HomeView: View {
-    var body: some View {
-        NavigationStack {
-            HomeViewContent(navigationPath: .constant(NavigationPath()))
-        }
-    }
-}
-
-// MARK: - HomeViewContent (for use with external NavigationStack)
+// MARK: - HomeViewContent
 struct HomeViewContent: View {
     @EnvironmentObject var summariesStore: AppState
-    @EnvironmentObject var ttsService: TTSService
     @State private var searchText = ""
     @State private var isSearchActive = false
     @FocusState private var searchFocused: Bool
@@ -45,12 +35,10 @@ struct HomeViewContent: View {
     var filteredSummaries: [Summary] {
         var result = summariesStore.summaries
 
-        // Apply model filter
         if modelFilter != .all {
             result = result.filter { modelFilter.matches($0.model) }
         }
 
-        // Apply search filter
         if !searchText.isEmpty {
             result = result.filter { summary in
                 summary.title.localizedCaseInsensitiveContains(searchText) ||
@@ -79,7 +67,7 @@ struct HomeViewContent: View {
         .navigationTitle("Eng Pulse")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Summary.self) { summary in
-            DetailView(summary: summary, ttsService: ttsService, cacheService: summariesStore.cacheService)
+            DetailView(summary: summary, cacheService: summariesStore.cacheService)
         }
         .navigationDestination(for: String.self) { value in
             if value == "settings" {
@@ -148,7 +136,7 @@ struct SummaryCardView: View {
                 Text(summary.source)
                     .font(.caption2)
                     .foregroundColor(.secondary)
-                Text("·")
+                Text("\u{00B7}")
                     .font(.caption2)
                     .foregroundColor(.secondary)
                 Text(summary.displayDate, style: .relative)
@@ -240,9 +228,9 @@ struct EmptyStateView: View {
 }
 
 #Preview {
-    HomeView()
-        .environmentObject({
-            let state = AppState()
-            return state
-        }())
+    NavigationStack {
+        HomeViewContent(navigationPath: .constant(NavigationPath()))
+    }
+    .environmentObject(AppState())
+    .environmentObject(TTSService())
 }

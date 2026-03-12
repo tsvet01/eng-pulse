@@ -3,13 +3,14 @@ import SwiftUI
 @main
 struct EngPulseApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var appState = AppState()
-    @StateObject private var notificationService = NotificationService.shared
-    @StateObject private var ttsService = TTSService()
+    @StateObject private var appState: AppState
+    @StateObject private var ttsService: TTSService
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
-        // Configure app appearance
+        let cache = CacheService()
+        _appState = StateObject(wrappedValue: AppState(cacheService: cache))
+        _ttsService = StateObject(wrappedValue: TTSService(cacheService: cache))
         configureAppearance()
     }
 
@@ -17,7 +18,6 @@ struct EngPulseApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(appState)
-                .environmentObject(notificationService)
                 .environmentObject(ttsService)
                 .task {
                     await setupNotifications()
@@ -25,14 +25,12 @@ struct EngPulseApp: App {
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
-                // Clear badge when app becomes active
                 UNUserNotificationCenter.current().setBadgeCount(0)
             }
         }
     }
 
     private func configureAppearance() {
-        // Configure navigation bar appearance
         let appearance = UINavigationBarAppearance()
         appearance.configureWithOpaqueBackground()
         UINavigationBar.appearance().standardAppearance = appearance
@@ -40,15 +38,10 @@ struct EngPulseApp: App {
     }
 
     private func setupNotifications() async {
-        // Note: Delegate is set in AppDelegate.didFinishLaunchingWithOptions (must be early for notification taps)
-
-        // Request authorization
-        let granted = await notificationService.requestAuthorization()
+        let granted = await NotificationService.shared.requestAuthorization()
         print("Notification permission: \(granted ? "granted" : "denied")")
-
-        // Subscribe to daily briefings topic
         if granted {
-            notificationService.subscribeToTopic("daily_briefings")
+            NotificationService.shared.subscribeToTopic("daily_briefings")
         }
     }
 }
@@ -60,7 +53,6 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        // Set notification delegate early - critical for handling notification taps
         UNUserNotificationCenter.current().delegate = NotificationService.shared
         return true
     }
@@ -81,13 +73,10 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         print("Failed to register for remote notifications: \(error)")
     }
 
-    // Note: Swift 6 warning about non-Sendable [AnyHashable: Any] is unavoidable
-    // until Apple updates UIApplicationDelegate protocol to be Sendable-compatible
     nonisolated func application(
         _ application: UIApplication,
         didReceiveRemoteNotification userInfo: [AnyHashable: Any]
     ) async -> UIBackgroundFetchResult {
-        // Extract only the Sendable data we need before crossing actor boundary
         let articleUrl = userInfo["article_url"] as? String
         await MainActor.run {
             if let url = articleUrl {
@@ -109,10 +98,13 @@ class AppState: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var isOffline = false
-    @Published var pendingArticleUrl: String?
 
     private let apiService = APIService()
-    let cacheService = CacheService()
+    let cacheService: CacheService
+
+    init(cacheService: CacheService = CacheService()) {
+        self.cacheService = cacheService
+    }
 
     func loadSummaries() async {
         errorMessage = nil
@@ -125,7 +117,6 @@ class AppState: ObservableObject {
         }
 
         // Phase 2: Fetch fresh data from network
-        // Only show loading spinner if we have no cached data
         if summaries.isEmpty { isLoading = true }
 
         do {
@@ -133,7 +124,6 @@ class AppState: ObservableObject {
             summaries = fresh
             try? await cacheService.cacheSummaries(fresh)
             isOffline = false
-            // Phase 3: Prefetch top articles in background
             prefetchArticles(Array(fresh.prefix(5)))
         } catch {
             if summaries.isEmpty {
@@ -155,7 +145,6 @@ class AppState: ObservableObject {
     private func prefetchArticles(_ articles: [Summary]) {
         for article in articles {
             Task.detached(priority: .utility) { [cacheService] in
-                // Skip if already cached
                 if await cacheService.getCachedContent(for: article.url) != nil { return }
                 guard let url = URL(string: article.url) else { return }
                 do {

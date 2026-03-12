@@ -1,23 +1,43 @@
 import SwiftUI
 
 struct DetailView: View {
-    @StateObject private var viewModel: DetailViewModel
+    let summary: Summary
+    let cacheService: CacheService?
+
+    @EnvironmentObject private var ttsService: TTSService
     @Environment(\.openURL) private var openURL
-    @EnvironmentObject var ttsService: TTSService
+    @State private var fullContent: String?
+    @State private var isLoadingContent = false
+    @State private var loadingError: String?
     @State private var showInfo = false
 
-    init(summary: Summary, ttsService: TTSService, cacheService: CacheService? = nil) {
-        _viewModel = StateObject(wrappedValue: DetailViewModel(summary: summary, ttsService: ttsService, cacheService: cacheService))
+    init(summary: Summary, cacheService: CacheService? = nil) {
+        self.summary = summary
+        self.cacheService = cacheService
+    }
+
+    // MARK: - TTS State
+
+    private var isPlaying: Bool {
+        ttsService.state == .playing && ttsService.currentArticleUrl == summary.url
+    }
+
+    private var isPaused: Bool {
+        ttsService.state == .paused && ttsService.currentArticleUrl == summary.url
+    }
+
+    private var isLoadingTTS: Bool {
+        ttsService.state == .loading && ttsService.currentArticleUrl == summary.url
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                if viewModel.isLoadingContent {
+                if isLoadingContent {
                     loadingSection
-                } else if let error = viewModel.loadingError {
+                } else if let error = loadingError {
                     errorSection(error)
-                } else if let content = viewModel.fullContent {
+                } else if let content = fullContent {
                     fullContentSection(content)
                 }
             }
@@ -32,14 +52,14 @@ struct DetailView: View {
                         onDismiss: { ttsService.stop() }
                     )
                 }
-                if ttsService.state != .stopped && ttsService.currentArticleUrl == viewModel.summary.url {
+                if ttsService.state != .stopped && ttsService.currentArticleUrl == summary.url {
                     TTSPlayerBarView(
                         progress: ttsService.progress,
-                        isPlaying: viewModel.isPlaying,
-                        isPaused: viewModel.isPaused,
-                        isLoading: viewModel.isLoadingTTS,
-                        title: viewModel.summary.title,
-                        onToggle: { viewModel.toggleTTS() },
+                        isPlaying: isPlaying,
+                        isPaused: isPaused,
+                        isLoading: isLoadingTTS,
+                        title: summary.title,
+                        onToggle: { toggleTTS() },
                         onStop: { ttsService.stop() }
                     )
                 }
@@ -49,8 +69,56 @@ struct DetailView: View {
         .toolbar { toolbarContent }
         .sheet(isPresented: $showInfo) { infoSheet }
         .task {
-            await viewModel.loadFullContent()
+            await loadFullContent()
         }
+    }
+
+    // MARK: - Content Loading
+
+    private func loadFullContent() async {
+        loadingError = nil
+
+        // Phase 1: Show cached content instantly
+        if let cacheService = cacheService,
+           let cached = await cacheService.getCachedContent(for: summary.url) {
+            fullContent = cached
+        }
+
+        // Phase 2: Fetch fresh from network
+        if fullContent == nil { isLoadingContent = true }
+        defer { isLoadingContent = false }
+
+        guard let url = URL(string: summary.url) else {
+            if fullContent == nil { loadingError = "Invalid URL" }
+            return
+        }
+
+        do {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 30
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let content = String(data: data, encoding: .utf8) {
+                fullContent = content
+                if let cacheService = cacheService {
+                    try? await cacheService.cacheContent(content, for: summary.url)
+                }
+            } else if fullContent == nil {
+                loadingError = "Could not decode content"
+            }
+        } catch {
+            if fullContent == nil {
+                if let error = error as? URLError, error.code == .timedOut {
+                    loadingError = "Request timed out. Please try again."
+                } else {
+                    loadingError = "Unable to load content. Check your connection."
+                }
+            }
+        }
+    }
+
+    private func toggleTTS() {
+        guard let content = fullContent else { return }
+        ttsService.togglePlayPause(content, articleUrl: summary.url)
     }
 
     // MARK: - Sections
@@ -64,12 +132,12 @@ struct DetailView: View {
         NavigationStack {
             List {
                 Section {
-                    LabeledContent("Source", value: viewModel.summary.source)
-                    LabeledContent("Date", value: viewModel.summary.date)
-                    LabeledContent("Model", value: viewModel.summary.modelDisplayName)
+                    LabeledContent("Source", value: summary.source)
+                    LabeledContent("Date", value: summary.date)
+                    LabeledContent("Model", value: summary.modelDisplayName)
                 }
 
-                if let originalUrl = viewModel.summary.originalUrl, let url = URL(string: originalUrl) {
+                if let originalUrl = summary.originalUrl, let url = URL(string: originalUrl) {
                     Section {
                         Button {
                             openURL(url)
@@ -119,7 +187,7 @@ struct DetailView: View {
                 .multilineTextAlignment(.center)
             Button {
                 Task {
-                    await viewModel.loadFullContent()
+                    await loadFullContent()
                 }
             } label: {
                 Label("Try Again", systemImage: "arrow.clockwise")
@@ -138,19 +206,19 @@ struct DetailView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigationBarTrailing) {
             HStack(spacing: 12) {
-                if viewModel.fullContent != nil {
+                if fullContent != nil {
                     Button {
-                        viewModel.toggleTTS()
+                        toggleTTS()
                     } label: {
-                        if viewModel.isLoadingTTS {
+                        if isLoadingTTS {
                             ProgressView()
                                 .scaleEffect(0.8)
                         } else {
-                            Image(systemName: viewModel.isPlaying ? "pause.fill" : (viewModel.isPaused ? "play.fill" : "speaker.wave.2.fill"))
+                            Image(systemName: isPlaying ? "pause.fill" : (isPaused ? "play.fill" : "speaker.wave.2.fill"))
                         }
                     }
-                    .disabled(viewModel.isLoadingTTS)
-                    .accessibilityLabel(viewModel.isLoadingTTS ? "Generating audio" : (viewModel.isPlaying ? "Pause audio" : (viewModel.isPaused ? "Resume audio" : "Listen to summary")))
+                    .disabled(isLoadingTTS)
+                    .accessibilityLabel(isLoadingTTS ? "Generating audio" : (isPlaying ? "Pause audio" : (isPaused ? "Resume audio" : "Listen to summary")))
                 }
 
                 Button { showInfo = true } label: {
@@ -158,7 +226,7 @@ struct DetailView: View {
                 }
                 .accessibilityLabel("Article info")
 
-                if let originalUrl = viewModel.summary.originalUrl, let url = URL(string: originalUrl) {
+                if let originalUrl = summary.originalUrl, let url = URL(string: originalUrl) {
                     ShareLink(item: url) {
                         Image(systemName: "square.and.arrow.up")
                     }
@@ -171,6 +239,7 @@ struct DetailView: View {
 
 #Preview {
     NavigationStack {
-        DetailView(summary: .preview, ttsService: TTSService(), cacheService: nil)
+        DetailView(summary: .preview)
     }
+    .environmentObject(TTSService())
 }

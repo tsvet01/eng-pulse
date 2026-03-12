@@ -40,29 +40,6 @@ actor APIService {
         return try decoder.decode([Summary].self, from: data)
     }
 
-    /// Fetch full markdown content for an article
-    func fetchMarkdown(for summary: Summary) async throws -> String {
-        // summary.url is already the full GCS URL to the markdown file
-        guard let url = URL(string: summary.url) else {
-            throw APIError.invalidURL
-        }
-
-        let (data, response) = try await session.data(from: url)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw APIError.invalidResponse
-        }
-
-        guard httpResponse.statusCode == 200 else {
-            throw APIError.httpError(statusCode: httpResponse.statusCode)
-        }
-
-        guard let content = String(data: data, encoding: .utf8) else {
-            throw APIError.decodingError
-        }
-
-        return content
-    }
 }
 
 // MARK: - API Errors

@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - Pre-parsed block model
-enum MarkdownBlock: Identifiable {
+enum MarkdownBlock {
     case heading(level: Int, text: String)
     case paragraph(text: String)
     case unorderedList(text: String)
@@ -10,16 +10,6 @@ enum MarkdownBlock: Identifiable {
     case table(text: String)
     case codeBlock(text: String)
     case divider
-
-    var id: Int {
-        switch self {
-        case .heading(_, let t), .paragraph(let t), .unorderedList(let t),
-             .numberedList(let t), .blockquote(let t), .table(let t), .codeBlock(let t):
-            return t.hashValue
-        case .divider:
-            return Int.random(in: Int.min...Int.max)
-        }
-    }
 
     static func parse(_ content: String) -> [MarkdownBlock] {
         let cleaned = content
@@ -301,37 +291,6 @@ struct MarkdownContentView: View {
         if let attributed = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
             return Text(attributed)
         }
-        return manualInlineMarkdown(text)
-    }
-
-    private func manualInlineMarkdown(_ text: String) -> Text {
-        var result = Text("")
-        var remaining = text[...]
-
-        while !remaining.isEmpty {
-            if let boldRange = remaining.range(of: "\\*\\*(.+?)\\*\\*", options: .regularExpression) {
-                let before = remaining[remaining.startIndex..<boldRange.lowerBound]
-                if !before.isEmpty { result = result + Text(before) }
-                let inner = remaining[boldRange].dropFirst(2).dropLast(2)
-                result = result + Text(inner).bold()
-                remaining = remaining[boldRange.upperBound...]
-            } else if let italicRange = remaining.range(of: "\\*(.+?)\\*", options: .regularExpression) {
-                let before = remaining[remaining.startIndex..<italicRange.lowerBound]
-                if !before.isEmpty { result = result + Text(before) }
-                let inner = remaining[italicRange].dropFirst(1).dropLast(1)
-                result = result + Text(inner).italic()
-                remaining = remaining[italicRange.upperBound...]
-            } else if let codeRange = remaining.range(of: "`(.+?)`", options: .regularExpression) {
-                let before = remaining[remaining.startIndex..<codeRange.lowerBound]
-                if !before.isEmpty { result = result + Text(before) }
-                let inner = remaining[codeRange].dropFirst(1).dropLast(1)
-                result = result + Text(inner).font(.system(.body, design: .monospaced)).foregroundColor(.secondary)
-                remaining = remaining[codeRange.upperBound...]
-            } else {
-                result = result + Text(remaining)
-                break
-            }
-        }
-        return result
+        return Text(text)
     }
 }

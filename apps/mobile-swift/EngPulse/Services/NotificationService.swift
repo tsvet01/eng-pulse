@@ -38,13 +38,6 @@ class NotificationService: NSObject, ObservableObject {
         }
     }
 
-    /// Check current authorization status
-    func checkAuthorizationStatus() async {
-        let center = UNUserNotificationCenter.current()
-        let settings = await center.notificationSettings()
-        isAuthorized = settings.authorizationStatus == .authorized
-    }
-
     // MARK: - Token Management
 
     /// Called when APNs token is received
@@ -110,23 +103,6 @@ class NotificationService: NSObject, ObservableObject {
         print("Would subscribe to topic: \(topic)")
     }
 
-    // MARK: - Notification Handling
-
-    /// Handle received notification
-    func handleNotification(_ userInfo: [AnyHashable: Any]) {
-        print("Received notification: \(userInfo)")
-
-        // Extract article URL if present
-        if let articleUrl = userInfo["article_url"] as? String {
-            print("Article URL: \(articleUrl)")
-            // Could post a notification to navigate to the article
-            NotificationCenter.default.post(
-                name: .didReceiveArticleNotification,
-                object: nil,
-                userInfo: ["url": articleUrl]
-            )
-        }
-    }
 }
 
 // MARK: - UNUserNotificationCenterDelegate

@@ -14,13 +14,10 @@ enum TTSState {
 // MARK: - TTS Service
 @MainActor
 class TTSService: ObservableObject {
-    @available(*, deprecated, message: "Use dependency injection instead")
-    static let shared = TTSService()
-
     private var cloudTTS: CloudTTSService?
     private var localTTS: LocalTTSService?
     private(set) var isUsingLocalTTS: Bool = false
-    private let cacheService = CacheService()
+    private let cacheService: CacheService
     private let audioPlayer: AudioPlayerService
 
     @Published var state: TTSState = .stopped
@@ -37,7 +34,8 @@ class TTSService: ObservableObject {
     private var currentCacheKey: String?
     private var cancellables = Set<AnyCancellable>()
 
-    init(cloudTTS: CloudTTSService? = nil, audioPlayer: AudioPlayerService? = nil) {
+    init(cacheService: CacheService = CacheService(), cloudTTS: CloudTTSService? = nil, audioPlayer: AudioPlayerService? = nil) {
+        self.cacheService = cacheService
         self.audioPlayer = audioPlayer ?? AudioPlayerService()
 
         if let cloudTTS = cloudTTS {
@@ -65,7 +63,6 @@ class TTSService: ObservableObject {
             .sink { [weak self] isPlaying in
                 guard let self = self else { return }
                 if self.state == .playing && !isPlaying {
-                    // Playback finished
                     self.state = .stopped
                     self.currentArticleUrl = nil
                 } else if self.state == .paused && isPlaying {
@@ -74,7 +71,6 @@ class TTSService: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Forward progress
         audioPlayer.$progress
             .receive(on: RunLoop.main)
             .sink { [weak self] progress in
@@ -113,21 +109,27 @@ class TTSService: ObservableObject {
     func startSpeaking(_ text: String, articleUrl: String? = nil) {
         stop()
 
-        let cleanedText = TextCleaner.cleanForSpeech(text)
-        currentText = cleanedText
         currentArticleUrl = articleUrl
         errorMessage = nil
 
         if isUsingLocalTTS, let localTTS = localTTS {
-            localTTS.speak(text: cleanedText, rate: speechRate, pitch: pitch)
-            state = .playing
+            // Clean text off main thread for local TTS
+            let textToClean = text
+            Task {
+                let cleanedText = await Task.detached(priority: .userInitiated) {
+                    TextCleaner.cleanForSpeech(textToClean)
+                }.value
+                self.currentText = cleanedText
+                localTTS.speak(text: cleanedText, rate: self.speechRate, pitch: self.pitch)
+                self.state = .playing
+            }
         } else {
             guard cloudTTS != nil else {
                 errorMessage = "Audio playback is not available. Please check app settings."
                 return
             }
             Task {
-                await performSpeak(cleanedText)
+                await performSpeak(text)
             }
         }
     }
@@ -137,37 +139,36 @@ class TTSService: ObservableObject {
 
         state = .loading
 
+        // Clean text off main actor
+        let cleanedText = await Task.detached(priority: .userInitiated) {
+            TextCleaner.cleanForSpeech(text)
+        }.value
+        currentText = cleanedText
+
         do {
-            // Generate configuration from current settings
             let config = TTSConfiguration.fromAppStorage(
                 rate: speechRate,
                 pitch: pitch,
                 voice: selectedVoice
             )
 
-            // Generate cache key
-            let cacheKey = await cacheService.generateAudioCacheKey(text: text, configKey: config.cacheKey)
+            let cacheKey = await cacheService.generateAudioCacheKey(text: cleanedText, configKey: config.cacheKey)
             currentCacheKey = cacheKey
 
-            // Check cache first
             if let cachedURL = await cacheService.getCachedAudioURL(for: cacheKey) {
                 try audioPlayer.play(from: cachedURL)
                 state = .playing
                 return
             }
 
-            // Not cached - call Cloud TTS API
-            let audioData = try await cloudTTS.synthesize(text: text, config: config)
+            let audioData = try await cloudTTS.synthesize(text: cleanedText, config: config)
 
-            // Cache the audio
             try await cacheService.cacheAudio(audioData, for: cacheKey)
 
-            // Play from cache
             if let audioURL = await cacheService.getCachedAudioURL(for: cacheKey) {
                 try audioPlayer.play(from: audioURL)
                 state = .playing
 
-                // Cleanup old cache in background
                 Task.detached(priority: .background) { [cacheService] in
                     await cacheService.cleanupOldAudio()
                 }

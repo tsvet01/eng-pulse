@@ -22,9 +22,7 @@
 		A100000F /* CloudTTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000F /* CloudTTSService.swift */; };
 		A1000010 /* AudioPlayerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000010A /* AudioPlayerService.swift */; };
 		B1000001 /* MarkdownContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001 /* MarkdownContentView.swift */; };
-		B1000002 /* DetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002 /* DetailViewModel.swift */; };
 		B1000003 /* MarkdownRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000003 /* MarkdownRendererTests.swift */; };
-		B1000004 /* DetailViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000004 /* DetailViewModelTests.swift */; };
 		C1000001 /* TextCleaner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000001 /* TextCleaner.swift */; };
 		C1000002 /* TTSPlayerBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000002 /* TTSPlayerBarView.swift */; };
 		C1000004 /* TTSErrorBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000004 /* TTSErrorBanner.swift */; };
@@ -62,9 +60,7 @@
 		A2000010A /* AudioPlayerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayerService.swift; sourceTree = "<group>"; };
 		A3000001 /* EngPulse.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EngPulse.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B2000001 /* MarkdownContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownContentView.swift; sourceTree = "<group>"; };
-		B2000002 /* DetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailViewModel.swift; sourceTree = "<group>"; };
 		B2000003 /* MarkdownRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRendererTests.swift; sourceTree = "<group>"; };
-		B2000004 /* DetailViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailViewModelTests.swift; sourceTree = "<group>"; };
 		B3000001 /* EngPulseTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = EngPulseTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C2000001 /* TextCleaner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextCleaner.swift; sourceTree = "<group>"; };
 		C2000002 /* TTSPlayerBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSPlayerBarView.swift; sourceTree = "<group>"; };
@@ -108,7 +104,6 @@
 			children = (
 				A2000001 /* EngPulseApp.swift */,
 				A5000004 /* Views */,
-				B5000002 /* ViewModels */,
 				A5000005 /* Models */,
 				A5000006 /* Services */,
 				A2000009 /* Assets.xcassets */,
@@ -169,19 +164,10 @@
 			isa = PBXGroup;
 			children = (
 				B2000003 /* MarkdownRendererTests.swift */,
-				B2000004 /* DetailViewModelTests.swift */,
 				C2000005 /* TextCleanerTests.swift */,
 				D2000003 /* LocalTTSServiceTests.swift */,
 			);
 			path = EngPulseTests;
-			sourceTree = "<group>";
-		};
-		B5000002 /* ViewModels */ = {
-			isa = PBXGroup;
-			children = (
-				B2000002 /* DetailViewModel.swift */,
-			);
-			path = ViewModels;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -297,7 +283,6 @@
 				A100000F /* CloudTTSService.swift in Sources */,
 				A1000010 /* AudioPlayerService.swift in Sources */,
 				B1000001 /* MarkdownContentView.swift in Sources */,
-				B1000002 /* DetailViewModel.swift in Sources */,
 				C1000001 /* TextCleaner.swift in Sources */,
 				C1000002 /* TTSPlayerBarView.swift in Sources */,
 				C1000004 /* TTSErrorBanner.swift in Sources */,
@@ -310,7 +295,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				B1000003 /* MarkdownRendererTests.swift in Sources */,
-				B1000004 /* DetailViewModelTests.swift in Sources */,
 				C1000005 /* TextCleanerTests.swift in Sources */,
 				D1000002 /* LocalTTSServiceTests.swift in Sources */,
 			);

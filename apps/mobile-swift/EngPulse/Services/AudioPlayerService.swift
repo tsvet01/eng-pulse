@@ -7,17 +7,14 @@ import Combine
 class AudioPlayerService: NSObject, ObservableObject {
     private var audioPlayer: AVAudioPlayer?
     private var progressTimer: Timer?
+    private var sessionConfigured = false
 
     @Published var isPlaying: Bool = false
     @Published var progress: Double = 0.0
     @Published var duration: TimeInterval = 0.0
 
-    override init() {
-        super.init()
-        configureAudioSession()
-    }
-
-    private func configureAudioSession() {
+    private func ensureAudioSession() {
+        guard !sessionConfigured else { return }
         do {
             try AVAudioSession.sharedInstance().setCategory(
                 .playback,
@@ -25,6 +22,7 @@ class AudioPlayerService: NSObject, ObservableObject {
                 options: [.allowBluetoothA2DP]
             )
             try AVAudioSession.sharedInstance().setActive(true)
+            sessionConfigured = true
         } catch {
             print("Audio session configuration error: \(error)")
         }
@@ -34,6 +32,7 @@ class AudioPlayerService: NSObject, ObservableObject {
 
     func play(from url: URL) throws {
         stop()
+        ensureAudioSession()
 
         audioPlayer = try AVAudioPlayer(contentsOf: url)
         audioPlayer?.delegate = self
