@@ -64,7 +64,6 @@ struct HomeViewContent: View {
                 summaryList
             }
         }
-        .navigationTitle("Eng Pulse")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Summary.self) { summary in
             DetailView(summary: summary, cacheService: summariesStore.cacheService)
@@ -78,6 +77,10 @@ struct HomeViewContent: View {
             await summariesStore.refreshSummaries()
         }
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Eng Pulse")
+                    .font(.headline)
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 14) {
                     if summariesStore.isOffline {
