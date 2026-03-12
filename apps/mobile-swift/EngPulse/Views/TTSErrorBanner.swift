@@ -5,21 +5,21 @@ struct TTSErrorBanner: View {
     let onDismiss: () -> Void
 
     var body: some View {
-        VStack {
+        HStack {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(.orange)
+                .accessibilityHidden(true)
+            Text(message)
+                .font(.caption)
             Spacer()
-            HStack {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
-                Text(message)
-                    .font(.caption)
-                Spacer()
-                Button(action: onDismiss) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.secondary)
-                }
+            Button(action: onDismiss) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundColor(.secondary)
             }
-            .padding()
-            .background(.ultraThinMaterial)
+            .accessibilityLabel("Dismiss error")
         }
+        .padding()
+        .background(.ultraThinMaterial)
+        .accessibilityElement(children: .combine)
     }
 }

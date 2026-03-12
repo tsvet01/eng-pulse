@@ -1,10 +1,6 @@
 import SwiftUI
 
 struct DetailView: View {
-    private enum Layout {
-        static let playerBarHeight: CGFloat = 60
-    }
-
     @StateObject private var viewModel: DetailViewModel
     @Environment(\.openURL) private var openURL
     @EnvironmentObject var ttsService: TTSService
@@ -15,42 +11,38 @@ struct DetailView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    if viewModel.isLoadingContent {
-                        loadingSection
-                    } else if let error = viewModel.loadingError {
-                        errorSection(error)
-                    } else if let content = viewModel.fullContent {
-                        fullContentSection(content)
-                    }
-
-                    if ttsService.state != .stopped && ttsService.currentArticleUrl == viewModel.summary.url {
-                        Color.clear.frame(height: Layout.playerBarHeight)
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if viewModel.isLoadingContent {
+                    loadingSection
+                } else if let error = viewModel.loadingError {
+                    errorSection(error)
+                } else if let content = viewModel.fullContent {
+                    fullContentSection(content)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 4)
             }
-
-            if ttsService.state != .stopped && ttsService.currentArticleUrl == viewModel.summary.url {
-                TTSPlayerBarView(
-                    progress: ttsService.progress,
-                    isPlaying: viewModel.isPlaying,
-                    isPaused: viewModel.isPaused,
-                    isLoading: viewModel.isLoadingTTS,
-                    title: viewModel.summary.title,
-                    onToggle: { viewModel.toggleTTS() },
-                    onStop: { ttsService.stop() }
-                )
-            }
-
-            if let error = ttsService.errorMessage {
-                TTSErrorBanner(
-                    message: error,
-                    onDismiss: { ttsService.stop() }
-                )
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+        }
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 0) {
+                if let error = ttsService.errorMessage {
+                    TTSErrorBanner(
+                        message: error,
+                        onDismiss: { ttsService.stop() }
+                    )
+                }
+                if ttsService.state != .stopped && ttsService.currentArticleUrl == viewModel.summary.url {
+                    TTSPlayerBarView(
+                        progress: ttsService.progress,
+                        isPlaying: viewModel.isPlaying,
+                        isPaused: viewModel.isPaused,
+                        isLoading: viewModel.isLoadingTTS,
+                        title: viewModel.summary.title,
+                        onToggle: { viewModel.toggleTTS() },
+                        onStop: { ttsService.stop() }
+                    )
+                }
             }
         }
         .navigationBarTitleDisplayMode(.inline)

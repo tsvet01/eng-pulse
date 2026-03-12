@@ -90,7 +90,7 @@ struct MarkdownContentView: View {
             inlineMarkdown(text)
                 .font(.body)
                 .lineSpacing(5)
-                .foregroundColor(.primary.opacity(0.85))
+                .foregroundColor(.primary)
                 .fixedSize(horizontal: false, vertical: true)
         case .unorderedList(let text):
             unorderedListView(text)
@@ -115,31 +115,36 @@ struct MarkdownContentView: View {
                 .font(.system(.title, design: .serif))
                 .fontWeight(.bold)
                 .foregroundColor(.primary)
-                .padding(.top, 8)
+                .padding(.top, 16)
+                .padding(.bottom, 2)
         case 2:
             inlineMarkdown(text)
                 .font(.system(.title2, design: .serif))
                 .fontWeight(.semibold)
                 .foregroundColor(.primary)
-                .padding(.top, 6)
+                .padding(.top, 14)
+                .padding(.bottom, 2)
         case 3:
             inlineMarkdown(text)
                 .font(.system(.title3, design: .serif))
                 .fontWeight(.semibold)
                 .foregroundColor(.primary)
-                .padding(.top, 4)
+                .padding(.top, 10)
+                .padding(.bottom, 2)
         case 4:
             inlineMarkdown(text)
                 .font(.system(.headline, design: .serif))
                 .fontWeight(.bold)
-                .foregroundColor(.primary.opacity(0.9))
-                .padding(.top, 2)
+                .foregroundColor(.primary)
+                .padding(.top, 8)
+                .padding(.bottom, 2)
         default:
             inlineMarkdown(text)
                 .font(.system(.subheadline, design: .serif))
                 .fontWeight(.bold)
                 .foregroundColor(.secondary)
-                .padding(.top, 2)
+                .padding(.top, 6)
+                .padding(.bottom, 2)
         }
     }
 
@@ -155,6 +160,7 @@ struct MarkdownContentView: View {
                             .fill(Color.accentColor)
                             .frame(width: 4, height: 4)
                             .padding(.top, 7)
+                            .accessibilityHidden(true)
                         inlineMarkdown(String(cleanLine.dropFirst(2)))
                             .lineSpacing(3)
                     }

@@ -10,16 +10,20 @@ struct TTSPlayerBarView: View {
     let onStop: () -> Void
 
     private enum Layout {
-        static let progressBarHeight: CGFloat = 2
+        static let progressBarHeight: CGFloat = 3
         static let controlPadding: CGFloat = 10
     }
 
     var body: some View {
         VStack(spacing: 0) {
             GeometryReader { geometry in
-                Rectangle()
-                    .fill(Color.accentColor)
-                    .frame(width: geometry.size.width * progress)
+                ZStack(alignment: .leading) {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.15))
+                    Rectangle()
+                        .fill(Color.accentColor)
+                        .frame(width: geometry.size.width * progress)
+                }
             }
             .frame(height: Layout.progressBarHeight)
 
