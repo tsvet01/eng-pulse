@@ -34,6 +34,7 @@ struct HomeViewContent: View {
     @EnvironmentObject var ttsService: TTSService
     @State private var searchText = ""
     @State private var isSearchActive = false
+    @FocusState private var searchFocused: Bool
     @AppStorage("selectedModelFilter") private var selectedFilter: String = ModelFilter.all.rawValue
     @Binding var navigationPath: NavigationPath
 
@@ -97,15 +98,20 @@ struct HomeViewContent: View {
                     }
 
                     Button {
-                        withAnimation { isSearchActive.toggle() }
+                        withAnimation {
+                            isSearchActive.toggle()
+                            searchFocused = isSearchActive
+                        }
                         if !isSearchActive { searchText = "" }
                     } label: {
                         Image(systemName: isSearchActive ? "xmark" : "magnifyingglass")
                     }
+                    .accessibilityLabel(isSearchActive ? "Close search" : "Search")
 
                     NavigationLink(value: "settings") {
                         Image(systemName: "gearshape")
                     }
+                    .accessibilityLabel("Settings")
                 }
             }
         }
@@ -113,8 +119,10 @@ struct HomeViewContent: View {
             if isSearchActive {
                 TextField("Search summaries", text: $searchText)
                     .textFieldStyle(.roundedBorder)
+                    .focused($searchFocused)
                     .padding(.horizontal)
                     .padding(.bottom, 8)
+                    .background(.bar)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
@@ -149,8 +157,8 @@ struct SummaryCardView: View {
             }
 
             Text(summary.title)
-                .font(.subheadline)
-                .fontWeight(.medium)
+                .font(.body)
+                .fontWeight(.semibold)
                 .lineLimit(2)
 
             if let snippet = summary.summarySnippet {
