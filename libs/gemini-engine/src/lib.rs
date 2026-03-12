@@ -11,7 +11,7 @@ const MAX_RETRY_ELAPSED_SECS: u64 = 120;
 pub const DEFAULT_BUCKET: &str = "tsvet01-agent-brain";
 
 /// Default Gemini model to use
-pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3-pro-preview";
+pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.1-pro-preview";
 
 /// Default OpenAI model to use
 pub const DEFAULT_OPENAI_MODEL: &str = "gpt-5.2-2025-12-11";

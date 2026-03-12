@@ -135,17 +135,9 @@ struct SummaryCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Text(summary.source)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                Text("\u{00B7}")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                Text(summary.displayDate, style: .relative)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
+            Text(summary.displayDate, format: .dateTime.month(.abbreviated).day())
+                .font(.caption2)
+                .foregroundColor(.secondary)
 
             Text(summary.title)
                 .font(.body)

@@ -34,7 +34,7 @@ class Summary {
 
 /// Available LLM models for summaries
 enum LlmModel {
-  gemini('gemini-3-pro-preview', 'Gemini'),
+  gemini('gemini-3.1-pro-preview', 'Gemini'),
   openai('gpt-5.2-2025-12-11', 'OpenAI'),
   claude('claude-opus-4-6', 'Claude');
 
