@@ -11,6 +11,8 @@ struct Summary: Identifiable, Codable, Equatable, Hashable {
     let originalUrl: String?
     let model: String?
     let selectedBy: String?
+    let promptVersion: String?
+    let evalScore: Double?
 
     enum CodingKeys: String, CodingKey {
         case date, url, title
@@ -18,6 +20,22 @@ struct Summary: Identifiable, Codable, Equatable, Hashable {
         case originalUrl = "original_url"
         case model
         case selectedBy = "selected_by"
+        case promptVersion = "prompt_version"
+        case evalScore = "eval_score"
+    }
+
+    init(date: String, url: String, title: String, summarySnippet: String? = nil,
+         originalUrl: String? = nil, model: String? = nil, selectedBy: String? = nil,
+         promptVersion: String? = nil, evalScore: Double? = nil) {
+        self.date = date
+        self.url = url
+        self.title = title
+        self.summarySnippet = summarySnippet
+        self.originalUrl = originalUrl
+        self.model = model
+        self.selectedBy = selectedBy
+        self.promptVersion = promptVersion
+        self.evalScore = evalScore
     }
 
     // Cached date formatter for performance
