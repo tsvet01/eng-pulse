@@ -68,6 +68,8 @@ class ApiService {
             originalUrl: summary.originalUrl,
             model: summary.model,
             selectedBy: summary.selectedBy,
+            promptVersion: summary.promptVersion,
+            evalScore: summary.evalScore,
           );
         }).toList();
 

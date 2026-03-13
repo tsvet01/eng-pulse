@@ -31,6 +31,12 @@ class CachedSummary extends HiveObject {
   @HiveField(8)
   final String? selectedBy;
 
+  @HiveField(9)
+  final String? promptVersion;
+
+  @HiveField(10)
+  final double? evalScore;
+
   CachedSummary({
     required this.date,
     required this.url,
@@ -41,6 +47,8 @@ class CachedSummary extends HiveObject {
     this.originalUrl,
     this.model,
     this.selectedBy,
+    this.promptVersion,
+    this.evalScore,
   });
 
   bool get hasCachedContent => cachedContent != null && cachedContent!.isNotEmpty;
@@ -55,6 +63,8 @@ class CachedSummary extends HiveObject {
     String? originalUrl,
     String? model,
     String? selectedBy,
+    String? promptVersion,
+    double? evalScore,
   }) {
     return CachedSummary(
       date: date ?? this.date,
@@ -66,6 +76,8 @@ class CachedSummary extends HiveObject {
       originalUrl: originalUrl ?? this.originalUrl,
       model: model ?? this.model,
       selectedBy: selectedBy ?? this.selectedBy,
+      promptVersion: promptVersion ?? this.promptVersion,
+      evalScore: evalScore ?? this.evalScore,
     );
   }
 }
