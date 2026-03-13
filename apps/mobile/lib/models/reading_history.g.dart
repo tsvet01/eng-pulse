@@ -70,13 +70,14 @@ class UserPreferencesAdapter extends TypeAdapter<UserPreferences> {
       selectedModel: fields[4] as String,
       ttsSpeechRate: fields[5] as double,
       ttsPitch: fields[6] as double,
+      promptVersionFilter: fields[7] == null ? 'all' : fields[7] as String,
     );
   }
 
   @override
   void write(BinaryWriter writer, UserPreferences obj) {
     writer
-      ..writeByte(7)
+      ..writeByte(8)
       ..writeByte(0)
       ..write(obj.notificationsEnabled)
       ..writeByte(1)
@@ -90,7 +91,9 @@ class UserPreferencesAdapter extends TypeAdapter<UserPreferences> {
       ..writeByte(5)
       ..write(obj.ttsSpeechRate)
       ..writeByte(6)
-      ..write(obj.ttsPitch);
+      ..write(obj.ttsPitch)
+      ..writeByte(7)
+      ..write(obj.promptVersionFilter);
   }
 
   @override

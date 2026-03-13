@@ -158,4 +158,15 @@ class UserService {
     prefs.ttsPitch = pitch;
     await savePreferences(prefs);
   }
+
+  // Prompt Version Filter
+  static String getPromptVersionFilter() {
+    return getPreferences().promptVersionFilter;
+  }
+
+  static Future<void> setPromptVersionFilter(String filter) async {
+    final prefs = getPreferences();
+    prefs.promptVersionFilter = filter;
+    await savePreferences(prefs);
+  }
 }

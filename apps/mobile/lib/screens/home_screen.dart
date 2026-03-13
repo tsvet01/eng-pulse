@@ -30,12 +30,14 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription<bool>? _connectivitySubscription;
   late LlmModel _selectedModel;
   List<LlmModel> _availableModels = [];
+  late String _promptVersionFilter;
 
   @override
   void initState() {
     super.initState();
     _isOnline = ConnectivityService.isOnline;
     _selectedModel = LlmModel.fromId(UserService.getSelectedModel());
+    _promptVersionFilter = UserService.getPromptVersionFilter();
     _summariesFuture = _loadSummaries();
 
     // Listen to connectivity changes
@@ -58,11 +60,18 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  /// Filter summaries by selected model (extracted to avoid duplication)
+  /// Filter summaries by selected model and prompt version (extracted to avoid duplication)
   List<CachedSummary> _filterByModel(List<CachedSummary> summaries) {
     return summaries.where((s) {
-      if (s.model == null) return true; // Backwards compat
-      return _selectedModel.matchesId(s.model);
+      // Filter by model
+      if (s.model != null && !_selectedModel.matchesId(s.model)) {
+        return false;
+      }
+      // Filter by prompt version
+      if (_promptVersionFilter != 'all' && s.promptVersion != null) {
+        if (s.promptVersion != _promptVersionFilter) return false;
+      }
+      return true;
     }).toList();
   }
 
@@ -190,13 +199,23 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         IconButton(
                           icon: const Icon(Icons.settings_rounded),
-                          onPressed: () {
-                            Navigator.push(
+                          onPressed: () async {
+                            await Navigator.push(
                               context,
                               MaterialPageRoute(
                                 builder: (context) => const SettingsScreen(),
                               ),
                             );
+                            // Reload filter in case it was changed in settings
+                            if (mounted) {
+                              final newFilter = UserService.getPromptVersionFilter();
+                              if (newFilter != _promptVersionFilter) {
+                                setState(() {
+                                  _promptVersionFilter = newFilter;
+                                  _summariesFuture = _loadSummaries();
+                                });
+                              }
+                            }
                           },
                           tooltip: 'Settings',
                         ),

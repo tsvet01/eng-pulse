@@ -126,6 +126,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // Reading Section
           _buildSectionHeader(context, 'Reading'),
+          _buildDropdownTile<String>(
+            context,
+            title: 'Prompt Version',
+            subtitle: 'Filter summaries by prompt version',
+            icon: Icons.science_rounded,
+            value: _prefs.promptVersionFilter,
+            items: const [
+              DropdownMenuItem(value: 'all', child: Text('Both')),
+              DropdownMenuItem(value: 'v1', child: Text('Production')),
+              DropdownMenuItem(value: 'v2', child: Text('Beta')),
+            ],
+            onChanged: (value) async {
+              if (value != null) {
+                setState(() {
+                  _prefs.promptVersionFilter = value;
+                });
+                await UserService.setPromptVersionFilter(value);
+              }
+            },
+          ),
           _buildActionTile(
             context,
             title: 'Reading History',
@@ -348,6 +368,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
         color: isDark ? AppTheme.darkTextTertiary : AppTheme.lightTextTertiary,
       ),
       onTap: onTap,
+    );
+  }
+
+  Widget _buildDropdownTile<T>(
+    BuildContext context, {
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required T value,
+    required List<DropdownMenuItem<T>> items,
+    required ValueChanged<T?> onChanged,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return ListTile(
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: (isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple)
+              .withAlpha(25),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(
+          icon,
+          color: isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple,
+          size: 20,
+        ),
+      ),
+      title: Text(title, style: Theme.of(context).textTheme.titleMedium),
+      subtitle: Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
+      trailing: DropdownButtonHideUnderline(
+        child: DropdownButton<T>(
+          value: value,
+          items: items,
+          onChanged: onChanged,
+          style: TextStyle(
+            color: isDark ? AppTheme.primaryPurpleDark : AppTheme.primaryPurple,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+          dropdownColor: isDark ? AppTheme.darkSurface : AppTheme.lightSurface,
+          icon: Icon(
+            Icons.expand_more_rounded,
+            size: 20,
+            color: isDark ? AppTheme.darkTextTertiary : AppTheme.lightTextTertiary,
+          ),
+        ),
+      ),
     );
   }
 
