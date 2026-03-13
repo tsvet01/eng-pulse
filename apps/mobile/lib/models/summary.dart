@@ -8,6 +8,10 @@ class Summary {
   final String? model;
   /// Which model selected this article from the candidates
   final String? selectedBy;
+  /// Which prompt version generated this summary (e.g., "v1", "v2")
+  final String? promptVersion;
+  /// Eval score from automated quality evaluation (0.0–5.0)
+  final double? evalScore;
 
   Summary({
     required this.date,
@@ -17,6 +21,8 @@ class Summary {
     this.originalUrl,
     this.model,
     this.selectedBy,
+    this.promptVersion,
+    this.evalScore,
   });
 
   factory Summary.fromJson(Map<String, dynamic> json) {
@@ -28,6 +34,8 @@ class Summary {
       originalUrl: json['original_url'] as String?,
       model: json['model'] as String?,
       selectedBy: json['selected_by'] as String?,
+      promptVersion: json['prompt_version'] as String?,
+      evalScore: (json['eval_score'] as num?)?.toDouble(),
     );
   }
 }

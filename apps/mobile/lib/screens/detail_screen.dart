@@ -326,6 +326,37 @@ class _DetailScreenState extends State<DetailScreen> {
                           ),
                         ),
                       ],
+                      // Eval score badge
+                      if (_currentSummary.evalScore != null) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: (isDark ? Colors.amber.shade300 : Colors.amber.shade700)
+                                .withAlpha(25),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.star_rounded,
+                                size: 14,
+                                color: isDark ? Colors.amber.shade300 : Colors.amber.shade700,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${_currentSummary.evalScore!.toStringAsFixed(1)}/5',
+                                style: TextStyle(
+                                  color: isDark ? Colors.amber.shade300 : Colors.amber.shade700,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                       if (_currentSummary.originalUrl != null) ...[
                         const SizedBox(width: 8),
                         GestureDetector(

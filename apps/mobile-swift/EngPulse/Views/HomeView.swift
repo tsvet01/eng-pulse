@@ -26,6 +26,7 @@ struct HomeViewContent: View {
     @State private var isSearchActive = false
     @FocusState private var searchFocused: Bool
     @AppStorage("selectedModelFilter") private var selectedFilter: String = ModelFilter.all.rawValue
+    @AppStorage("promptVersionFilter") private var promptVersionFilter: String = "production"
     @Binding var navigationPath: NavigationPath
 
     private var modelFilter: ModelFilter {
@@ -34,6 +35,14 @@ struct HomeViewContent: View {
 
     var filteredSummaries: [Summary] {
         var result = summariesStore.summaries
+
+        // Filter by prompt version
+        if promptVersionFilter == "production" {
+            result = result.filter { $0.promptVersion == nil }
+        } else if promptVersionFilter == "beta" {
+            result = result.filter { $0.promptVersion == "v2" }
+        }
+        // "both" shows all
 
         if modelFilter != .all {
             result = result.filter { modelFilter.matches($0.model) }

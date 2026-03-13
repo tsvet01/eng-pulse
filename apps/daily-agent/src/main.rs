@@ -1,4 +1,5 @@
 mod fetcher;
+mod prompts;
 
 use serde::{Deserialize, Serialize};
 
@@ -53,6 +54,44 @@ struct ManifestEntry {
     /// Which model selected this article from the candidates
     #[serde(skip_serializing_if = "Option::is_none")]
     selected_by: Option<String>,
+    /// Which prompt version generated this summary ("v2" for beta, null for prod)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prompt_version: Option<String>,
+    /// Quality score from LLM judge (0.0-1.0)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    eval_score: Option<f64>,
+}
+
+/// Eval report stored in GCS at eval/{date}.json
+/// Currently parsed dynamically via serde_json::Value; typed structs retained for schema documentation.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[allow(dead_code)]
+struct EvalReport {
+    date: String,
+    scores: Vec<EvalEntry>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[allow(dead_code)]
+struct EvalEntry {
+    /// Composite key: "{prompt_version}-{provider}", e.g. "v1-gemini"
+    summary_id: String,
+    prompt_version: String,
+    model: String,
+    title: String,
+    scores: EvalCriteria,
+    /// Normalized 0.0-1.0 (sum of 4 scores / 20)
+    total: f64,
+    judge_reasoning: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[allow(dead_code)]
+struct EvalCriteria {
+    clarity: u8,
+    actionability: u8,
+    information_density: u8,
+    structure: u8,
 }
 
 /// Get list of enabled LLM providers based on available API keys.
@@ -152,10 +191,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         articles_text.push_str(&format!("{}. [{}] {}\n", i, article.source, article.title));
     }
 
-    let selection_prompt = format!(
-        "You are an expert Software Engineering Editor. Review the following list of article headlines collected today. Select the SINGLE most valuable, educational, and impactful article for a senior software engineer to read. Consider technical depth, novelty, and broad relevance.\n\n{}\n\nReply ONLY with the integer index number of the chosen article (e.g., '3'). Do not add any explanation.",
-        articles_text
-    );
+    let prod_config = prompts::PromptConfig::V1;
+    let selection_prompt = prod_config.selection_prompt(&articles_text);
 
     let selected_index = call_llm_with_retry(&http_client, selection_provider, &selection_key, selection_prompt).await?;
 
@@ -200,14 +237,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let truncated_text: String = article_text.chars().take(MAX_ARTICLE_CHARS).collect();
     debug!(char_count = truncated_text.len(), "Article text truncated");
 
-    let summary_prompt = format!(
-        "Please summarize the following software engineering article in a compact and educational format. Focus on key takeaways, core concepts, and why it matters to a software engineer. Ignore any promotional or fluff content.\n\nArticle Source: {}\nTitle: {}\nContent: {}",
-        best_article.source, best_article.title, truncated_text
-    );
+    let summary_prompt = prod_config.summary_prompt(&best_article.source, &best_article.title, &truncated_text);
 
-    // 5. Generate summaries with each enabled provider
+    // --- Manifest: download once, all stages append, single upload at the end ---
     let today = Utc::now().format("%Y-%m-%d").to_string();
+
+    let mut manifest: Vec<ManifestEntry> = match gcs_client.download_object(
+        &GetObjectRequest {
+            bucket: bucket_name.to_string(),
+            object: "manifest.json".to_string(),
+            ..Default::default()
+        },
+        &Range::default()
+    ).await {
+        Ok(data) => {
+            serde_json::from_slice(&data).map_err(|e| {
+                error!(error = %e, "Failed to parse existing manifest.json - file may be corrupted");
+                e
+            })?
+        },
+        Err(e) if e.to_string().contains("No such object") || e.to_string().contains("404") => {
+            info!("No existing manifest.json found, creating new one");
+            Vec::new()
+        },
+        Err(e) => {
+            return Err(format!("Failed to download manifest.json: {}", e).into());
+        }
+    };
+
+    // Remove existing entries for today (all models)
+    manifest.retain(|e| e.date != today);
     let mut new_manifest_entries: Vec<ManifestEntry> = Vec::new();
+
+    // --- Stage 2: Prod (v1) ---
 
     for (provider, api_key) in &enabled_providers {
         info!(provider = %provider.as_str(), "Generating summary");
@@ -248,6 +310,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             original_url: Some(best_article.url.clone()),
                             model: Some(provider.model_name().to_string()),
                             selected_by: Some(selection_provider.model_name().to_string()),
+                            prompt_version: None,
+                            eval_score: None,
                         });
                     }
                     Err(e) => {
@@ -266,45 +330,224 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         return Err("No summaries generated".into());
     }
 
-    // 6. Update Manifest
-    info!("Updating manifest.json");
-    let manifest_obj_name = "manifest.json";
+    // --- Stage 3: Beta (v2) ---
+    // Only runs if Claude API key is available
+    let claude_entry = enabled_providers.iter().find(|(p, _)| *p == LlmProvider::Claude);
+    if let Some((_, claude_key)) = claude_entry {
+        info!("Starting beta pipeline (v2)");
+        let beta_config = prompts::PromptConfig::V2;
 
-    // Download existing manifest
-    let mut manifest: Vec<ManifestEntry> = match gcs_client.download_object(
-        &GetObjectRequest {
-            bucket: bucket_name.to_string(),
-            object: manifest_obj_name.to_string(),
-            ..Default::default()
-        },
-        &Range::default()
-    ).await {
-        Ok(data) => {
-            serde_json::from_slice(&data).map_err(|e| {
-                error!(error = %e, "Failed to parse existing manifest.json - file may be corrupted");
-                e
-            })?
-        },
-        // Note: GCS SDK doesn't expose structured error types, so we match on message.
-        // Both "No such object" and "404" patterns are checked for robustness.
-        Err(e) if e.to_string().contains("No such object") || e.to_string().contains("404") => {
-            info!("No existing manifest.json found, creating new one");
-            Vec::new()
-        },
-        Err(e) => {
-            return Err(format!("Failed to download manifest.json: {}", e).into());
+        // Beta selection: pick a different article using persona-driven prompt
+        let beta_selection_prompt = beta_config.selection_prompt(&articles_text);
+        match call_llm_with_retry(&http_client, LlmProvider::Claude, claude_key, beta_selection_prompt).await {
+            Ok(beta_selected) => {
+                let beta_index = parse_selection_index(&beta_selected).unwrap_or(0);
+                let beta_safe_index = if beta_index >= all_articles.len() { 0 } else { beta_index };
+                let beta_article = &all_articles[beta_safe_index];
+                info!(title = %beta_article.title, "Beta selected article");
+
+                // V2 summary of prod article A (guaranteed comparison)
+                let beta_summary_prompt_a = beta_config.summary_prompt(
+                    &best_article.source, &best_article.title, &truncated_text
+                );
+                match call_llm_with_retry(&http_client, LlmProvider::Claude, claude_key, beta_summary_prompt_a).await {
+                    Ok(summary) => {
+                        let summary_snippet: String = summary.chars().take(SUMMARY_SNIPPET_CHARS).collect();
+                        let object_name = format!("summaries/beta/claude/{}.md", today);
+                        let summary_bytes = summary.into_bytes();
+
+                        match gcs_client.upload_object(
+                            &UploadObjectRequest { bucket: bucket_name.to_string(), ..Default::default() },
+                            summary_bytes,
+                            &UploadType::Simple(Media::new(object_name.clone()))
+                        ).await {
+                            Ok(_) => {
+                                let public_url = format!("https://storage.googleapis.com/{}/{}", bucket_name, object_name);
+                                new_manifest_entries.push(ManifestEntry {
+                                    date: today.clone(),
+                                    url: public_url,
+                                    title: best_article.title.clone(),
+                                    summary_snippet,
+                                    original_url: Some(best_article.url.clone()),
+                                    model: Some(LlmProvider::Claude.model_name().to_string()),
+                                    selected_by: Some(selection_provider.model_name().to_string()),
+                                    prompt_version: Some("v2".to_string()),
+                                    eval_score: None,
+                                });
+                                info!("Beta summary of prod article uploaded");
+                            }
+                            Err(e) => warn!(error = %e, "Failed to upload beta summary of prod article"),
+                        }
+                    }
+                    Err(e) => warn!(error = %e, "Failed to generate beta summary of prod article"),
+                }
+
+                // V2 summary of beta article B (only if different from A)
+                if beta_article.url != best_article.url {
+                    info!(title = %beta_article.title, "Beta article differs from prod, generating summary");
+                    let beta_article_content = match fetch_article_content(&http_client, &beta_article.url).await {
+                        Ok(content) => content,
+                        Err(e) => {
+                            warn!(error = %e, "Failed to fetch beta article content, using title");
+                            format!("Title: {}, URL: {}", beta_article.title, beta_article.url)
+                        }
+                    };
+                    let beta_truncated: String = beta_article_content.chars().take(MAX_ARTICLE_CHARS).collect();
+                    let beta_summary_prompt_b = beta_config.summary_prompt(
+                        &beta_article.source, &beta_article.title, &beta_truncated
+                    );
+                    match call_llm_with_retry(&http_client, LlmProvider::Claude, claude_key, beta_summary_prompt_b).await {
+                        Ok(summary) => {
+                            let summary_snippet: String = summary.chars().take(SUMMARY_SNIPPET_CHARS).collect();
+                            let object_name = format!("summaries/beta/claude/{}-selection.md", today);
+                            let summary_bytes = summary.into_bytes();
+
+                            match gcs_client.upload_object(
+                                &UploadObjectRequest { bucket: bucket_name.to_string(), ..Default::default() },
+                                summary_bytes,
+                                &UploadType::Simple(Media::new(object_name.clone()))
+                            ).await {
+                                Ok(_) => {
+                                    let public_url = format!("https://storage.googleapis.com/{}/{}", bucket_name, object_name);
+                                    new_manifest_entries.push(ManifestEntry {
+                                        date: today.clone(),
+                                        url: public_url,
+                                        title: beta_article.title.clone(),
+                                        summary_snippet,
+                                        original_url: Some(beta_article.url.clone()),
+                                        model: Some(LlmProvider::Claude.model_name().to_string()),
+                                        selected_by: Some(format!("{} (v2)", LlmProvider::Claude.model_name())),
+                                        prompt_version: Some("v2".to_string()),
+                                        eval_score: None,
+                                    });
+                                    info!("Beta summary of beta article uploaded");
+                                }
+                                Err(e) => warn!(error = %e, "Failed to upload beta selection summary"),
+                            }
+                        }
+                        Err(e) => warn!(error = %e, "Failed to generate beta selection summary"),
+                    }
+                } else {
+                    info!("Beta selected same article as prod, skipping duplicate summary");
+                }
+            }
+            Err(e) => warn!(error = %e, "Beta selection failed, skipping beta pipeline"),
         }
-    };
+    } else {
+        info!("ANTHROPIC_API_KEY not set, skipping beta pipeline");
+    }
 
-    // Remove existing entries for today (all models)
-    manifest.retain(|e| e.date != today);
+    // --- Stage 4: Eval ---
+    if let Some((_, claude_key)) = claude_entry {
+        info!("Starting eval stage");
 
-    // Add new entries at the beginning
+        // Collect all summaries generated today for evaluation
+        let mut eval_summaries: Vec<(String, String)> = Vec::new(); // (summary_id, content)
+
+        for entry in &new_manifest_entries {
+            let provider = entry.model.as_deref().unwrap_or("unknown");
+            let version = entry.prompt_version.as_deref().unwrap_or("v1");
+            let suffix = if entry.url.contains("-selection.md") { "-selection" } else { "" };
+            let summary_id = format!("{}-{}{}", version, provider.split('-').next().unwrap_or(provider), suffix);
+
+            // Download the summary we just uploaded
+            match gcs_client.download_object(
+                &GetObjectRequest {
+                    bucket: bucket_name.to_string(),
+                    object: entry.url.replace(&format!("https://storage.googleapis.com/{}/", bucket_name), ""),
+                    ..Default::default()
+                },
+                &Range::default()
+            ).await {
+                Ok(data) => {
+                    if let Ok(content) = String::from_utf8(data) {
+                        eval_summaries.push((summary_id, content));
+                    }
+                }
+                Err(e) => warn!(summary_id = %summary_id, error = %e, "Failed to download summary for eval"),
+            }
+        }
+
+        if !eval_summaries.is_empty() {
+            let mut eval_prompt = String::from(
+                "You are evaluating article summaries for quality. Score each summary on these criteria (1-5):\n\n\
+                1. Clarity: How easy is it to scan and understand on a mobile phone?\n\
+                2. Actionability: Does it provide concrete takeaways the reader can act on this week?\n\
+                3. Information density: What is the signal-to-noise ratio? Is every sentence valuable?\n\
+                4. Structure: Is it well-formatted with clear sections, bold key phrases, scannable bullets?\n\n\
+                The reader is a senior engineering leader. They have 2-3 minutes on their phone.\n\n\
+                For each summary below, return ONLY a JSON object (no markdown fences):\n\
+                {\"scores\": [{\"summary_id\": \"id\", \"clarity\": N, \"actionability\": N, \"information_density\": N, \"structure\": N, \"reasoning\": \"...\"}]}\n\n"
+            );
+
+            for (id, content) in &eval_summaries {
+                eval_prompt.push_str(&format!("--- Summary: {} ---\n{}\n\n", id, content));
+            }
+
+            match call_llm_with_retry(&http_client, LlmProvider::Claude, claude_key, eval_prompt).await {
+                Ok(eval_response) => {
+                    // Parse JSON from response (handle possible markdown fences)
+                    let cleaned = eval_response
+                        .trim()
+                        .trim_start_matches("```json")
+                        .trim_start_matches("```")
+                        .trim_end_matches("```")
+                        .trim();
+
+                    match serde_json::from_str::<serde_json::Value>(cleaned) {
+                        Ok(json) => {
+                            if let Some(scores) = json.get("scores").and_then(|s| s.as_array()) {
+                                for score in scores {
+                                    let summary_id = score.get("summary_id").and_then(|s| s.as_str()).unwrap_or("");
+                                    let clarity = score.get("clarity").and_then(|v| v.as_u64()).unwrap_or(3) as u8;
+                                    let actionability = score.get("actionability").and_then(|v| v.as_u64()).unwrap_or(3) as u8;
+                                    let info_density = score.get("information_density").and_then(|v| v.as_u64()).unwrap_or(3) as u8;
+                                    let structure_score = score.get("structure").and_then(|v| v.as_u64()).unwrap_or(3) as u8;
+                                    let total = (clarity as f64 + actionability as f64 + info_density as f64 + structure_score as f64) / 20.0;
+                                    let reasoning = score.get("reasoning").and_then(|s| s.as_str()).unwrap_or("").to_string();
+
+                                    info!(summary_id = %summary_id, total = %total, reasoning = %reasoning, "Eval score");
+
+                                    // Update matching manifest entry
+                                    for entry in &mut new_manifest_entries {
+                                        let provider = entry.model.as_deref().unwrap_or("unknown");
+                                        let version = entry.prompt_version.as_deref().unwrap_or("v1");
+                                        let suffix = if entry.url.contains("-selection.md") { "-selection" } else { "" };
+                                        let entry_id = format!("{}-{}{}", version, provider.split('-').next().unwrap_or(provider), suffix);
+                                        if entry_id == summary_id {
+                                            entry.eval_score = Some(total);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Upload eval report
+                            let eval_object = format!("eval/{}.json", today);
+                            if let Ok(eval_json) = serde_json::to_vec_pretty(&json) {
+                                match gcs_client.upload_object(
+                                    &UploadObjectRequest { bucket: bucket_name.to_string(), ..Default::default() },
+                                    eval_json,
+                                    &UploadType::Simple(Media::new(eval_object))
+                                ).await {
+                                    Ok(_) => info!("Eval report uploaded"),
+                                    Err(e) => warn!(error = %e, "Failed to upload eval report"),
+                                }
+                            }
+                        }
+                        Err(e) => warn!(error = %e, "Failed to parse eval response as JSON"),
+                    }
+                }
+                Err(e) => warn!(error = %e, "Eval stage failed"),
+            }
+        }
+    } else {
+        info!("ANTHROPIC_API_KEY not set, skipping eval stage");
+    }
+
+    // --- Final: Upload manifest (all stages have appended to new_manifest_entries) ---
     for entry in new_manifest_entries.into_iter().rev() {
         manifest.insert(0, entry);
     }
-
-    // Upload manifest
     let manifest_json = serde_json::to_vec_pretty(&manifest)?;
     gcs_client.upload_object(
         &UploadObjectRequest {
@@ -312,7 +555,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             ..Default::default()
         },
         manifest_json,
-        &UploadType::Simple(Media::new(manifest_obj_name.to_string()))
+        &UploadType::Simple(Media::new("manifest.json".to_string()))
     ).await?;
 
     info!(date = %today, "Manifest updated successfully");

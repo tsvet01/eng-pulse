@@ -51,6 +51,9 @@ class UserPreferences extends HiveObject {
   @HiveField(6)
   double ttsPitch; // 0.5 to 2.0
 
+  @HiveField(7, defaultValue: 'all')
+  String promptVersionFilter; // 'all', 'v1' (production), 'v2' (beta)
+
   UserPreferences({
     this.notificationsEnabled = true,
     this.dailyBriefingEnabled = true,
@@ -59,5 +62,6 @@ class UserPreferences extends HiveObject {
     this.selectedModel = 'gemini',
     this.ttsSpeechRate = 0.5,
     this.ttsPitch = 1.0,
+    this.promptVersionFilter = 'all',
   }) : preferredTopics = preferredTopics ?? [];
 }

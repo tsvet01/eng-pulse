@@ -10,6 +10,7 @@ struct SettingsView: View {
     @AppStorage("ttsVoice") private var selectedVoice: String = Neural2Voice.maleJ.rawValue
 
     @AppStorage("selectedModelFilter") private var selectedFilter: String = ModelFilter.all.rawValue
+    @AppStorage("promptVersionFilter") private var promptVersionFilter: String = "production"
     @State private var showClearCacheAlert = false
 
     var body: some View {
@@ -25,6 +26,57 @@ struct SettingsView: View {
                     Text("Feed")
                 } footer: {
                     Text("Filter articles by AI model source.")
+                }
+
+                // Prompt Version Section
+                Section {
+                    Picker("Summary Format", selection: $promptVersionFilter) {
+                        Text("Production").tag("production")
+                        Text("Beta").tag("beta")
+                        Text("Both").tag("both")
+                    }
+                } header: {
+                    Text("Prompt Version")
+                } footer: {
+                    Text("Compare production and beta summary formats.")
+                }
+
+                // Feedback Tally Section
+                Section {
+                    let tally = feedbackTally
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("v1 (Production)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            HStack(spacing: 8) {
+                                Label("\(tally.v1Up)", systemImage: "hand.thumbsup.fill")
+                                    .font(.caption2)
+                                    .foregroundColor(.green)
+                                Label("\(tally.v1Down)", systemImage: "hand.thumbsdown.fill")
+                                    .font(.caption2)
+                                    .foregroundColor(.red)
+                            }
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("v2 (Beta)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            HStack(spacing: 8) {
+                                Label("\(tally.v2Up)", systemImage: "hand.thumbsup.fill")
+                                    .font(.caption2)
+                                    .foregroundColor(.green)
+                                Label("\(tally.v2Down)", systemImage: "hand.thumbsdown.fill")
+                                    .font(.caption2)
+                                    .foregroundColor(.red)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Feedback")
+                } footer: {
+                    Text("Your ratings across summary versions.")
                 }
 
                 // Listening Section
@@ -130,6 +182,23 @@ struct SettingsView: View {
             }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var feedbackTally: (v1Up: Int, v1Down: Int, v2Up: Int, v2Down: Int) {
+        let allDefaults = UserDefaults.standard.dictionaryRepresentation()
+        var tally = (v1Up: 0, v1Down: 0, v2Up: 0, v2Down: 0)
+        for (key, value) in allDefaults {
+            guard key.hasPrefix("feedback_"), let rating = value as? String else { continue }
+            let isBeta = key.contains("/beta/")
+            switch (isBeta, rating) {
+            case (false, "up"):   tally.v1Up += 1
+            case (false, "down"): tally.v1Down += 1
+            case (true, "up"):    tally.v2Up += 1
+            case (true, "down"):  tally.v2Down += 1
+            default: break
+            }
+        }
+        return tally
     }
 
     private var speechRateLabel: String {
