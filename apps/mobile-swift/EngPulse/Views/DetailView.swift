@@ -10,10 +10,12 @@ struct DetailView: View {
     @State private var isLoadingContent = false
     @State private var loadingError: String?
     @State private var showInfo = false
+    @State private var feedbackState: String = ""
 
     init(summary: Summary, cacheService: CacheService? = nil) {
         self.summary = summary
         self.cacheService = cacheService
+        _feedbackState = State(initialValue: UserDefaults.standard.string(forKey: "feedback_\(summary.url)") ?? "")
     }
 
     // MARK: - TTS State
@@ -138,6 +140,15 @@ struct DetailView: View {
                     if let selectedBy = summary.selectedBy {
                         LabeledContent("Selected by", value: selectedBy)
                     }
+                    if let score = summary.evalScore {
+                        let displayScore = max(score * 5, 1.0)
+                        Label(
+                            String(format: "%.1f/5", displayScore),
+                            systemImage: "star.fill"
+                        )
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    }
                 }
 
                 if let originalUrl = summary.originalUrl, let url = URL(string: originalUrl) {
@@ -223,6 +234,28 @@ struct DetailView: View {
                     .disabled(isLoadingTTS)
                     .accessibilityLabel(isLoadingTTS ? "Generating audio" : (isPlaying ? "Pause audio" : (isPaused ? "Resume audio" : "Listen to summary")))
                 }
+
+                Button {
+                    let newValue = feedbackState == "up" ? "" : "up"
+                    feedbackState = newValue
+                    UserDefaults.standard.set(newValue, forKey: "feedback_\(summary.url)")
+                } label: {
+                    Image(systemName: feedbackState == "up" ? "hand.thumbsup.fill" : "hand.thumbsup")
+                        .font(.caption2)
+                }
+                .tint(feedbackState == "up" ? .green : .secondary)
+                .accessibilityLabel(feedbackState == "up" ? "Remove thumbs up" : "Thumbs up")
+
+                Button {
+                    let newValue = feedbackState == "down" ? "" : "down"
+                    feedbackState = newValue
+                    UserDefaults.standard.set(newValue, forKey: "feedback_\(summary.url)")
+                } label: {
+                    Image(systemName: feedbackState == "down" ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                        .font(.caption2)
+                }
+                .tint(feedbackState == "down" ? .red : .secondary)
+                .accessibilityLabel(feedbackState == "down" ? "Remove thumbs down" : "Thumbs down")
 
                 Button { showInfo = true } label: {
                     Image(systemName: "info.circle")
