@@ -68,8 +68,14 @@ class _HomeScreenState extends State<HomeScreen> {
         return false;
       }
       // Filter by prompt version
-      if (_promptVersionFilter != 'all' && s.promptVersion != null) {
-        if (s.promptVersion != _promptVersionFilter) return false;
+      if (_promptVersionFilter != 'all') {
+        if (_promptVersionFilter == 'v1') {
+          // Production summaries have null promptVersion
+          if (s.promptVersion != null && s.promptVersion != 'v1') return false;
+        } else {
+          // Beta or other explicit version must match exactly
+          if (s.promptVersion != _promptVersionFilter) return false;
+        }
       }
       return true;
     }).toList();

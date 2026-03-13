@@ -1,26 +1,32 @@
 /// Prompt configuration for article selection and summarization.
 /// V1 = production (current prompts). V2 = beta (persona-driven, structured).
-pub struct PromptConfig {
-    pub version: &'static str,
+pub enum PromptConfig {
+    V1,
+    V2,
 }
 
 impl PromptConfig {
-    pub const V1: Self = Self { version: "v1" };
-    pub const V2: Self = Self { version: "v2" };
+    /// Version string for manifest tagging.
+    pub fn version(&self) -> &'static str {
+        match self {
+            Self::V1 => "v1",
+            Self::V2 => "v2",
+        }
+    }
 
     /// Build the article selection prompt.
     pub fn selection_prompt(&self, articles_text: &str) -> String {
-        match self.version {
-            "v2" => self.v2_selection_prompt(articles_text),
-            _ => self.v1_selection_prompt(articles_text),
+        match self {
+            Self::V1 => self.v1_selection_prompt(articles_text),
+            Self::V2 => self.v2_selection_prompt(articles_text),
         }
     }
 
     /// Build the article summarization prompt.
     pub fn summary_prompt(&self, source: &str, title: &str, content: &str) -> String {
-        match self.version {
-            "v2" => self.v2_summary_prompt(source, title, content),
-            _ => self.v1_summary_prompt(source, title, content),
+        match self {
+            Self::V1 => self.v1_summary_prompt(source, title, content),
+            Self::V2 => self.v2_summary_prompt(source, title, content),
         }
     }
 

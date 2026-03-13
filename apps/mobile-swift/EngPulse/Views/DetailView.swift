@@ -214,6 +214,22 @@ struct DetailView: View {
         .accessibilityElement(children: .combine)
     }
 
+    // MARK: - Feedback
+
+    private func feedbackButton(type: String, icon: String, activeColor: Color) -> some View {
+        let isActive = feedbackState == type
+        return Button {
+            let newValue = isActive ? "" : type
+            feedbackState = newValue
+            UserDefaults.standard.set(newValue, forKey: "feedback_\(summary.url)")
+        } label: {
+            Image(systemName: isActive ? "\(icon).fill" : icon)
+                .font(.caption2)
+        }
+        .tint(isActive ? activeColor : .secondary)
+        .accessibilityLabel(isActive ? "Remove thumbs \(type)" : "Thumbs \(type)")
+    }
+
     // MARK: - Toolbar
 
     @ToolbarContentBuilder
@@ -235,27 +251,8 @@ struct DetailView: View {
                     .accessibilityLabel(isLoadingTTS ? "Generating audio" : (isPlaying ? "Pause audio" : (isPaused ? "Resume audio" : "Listen to summary")))
                 }
 
-                Button {
-                    let newValue = feedbackState == "up" ? "" : "up"
-                    feedbackState = newValue
-                    UserDefaults.standard.set(newValue, forKey: "feedback_\(summary.url)")
-                } label: {
-                    Image(systemName: feedbackState == "up" ? "hand.thumbsup.fill" : "hand.thumbsup")
-                        .font(.caption2)
-                }
-                .tint(feedbackState == "up" ? .green : .secondary)
-                .accessibilityLabel(feedbackState == "up" ? "Remove thumbs up" : "Thumbs up")
-
-                Button {
-                    let newValue = feedbackState == "down" ? "" : "down"
-                    feedbackState = newValue
-                    UserDefaults.standard.set(newValue, forKey: "feedback_\(summary.url)")
-                } label: {
-                    Image(systemName: feedbackState == "down" ? "hand.thumbsdown.fill" : "hand.thumbsdown")
-                        .font(.caption2)
-                }
-                .tint(feedbackState == "down" ? .red : .secondary)
-                .accessibilityLabel(feedbackState == "down" ? "Remove thumbs down" : "Thumbs down")
+                feedbackButton(type: "up", icon: "hand.thumbsup", activeColor: .green)
+                feedbackButton(type: "down", icon: "hand.thumbsdown", activeColor: .red)
 
                 Button { showInfo = true } label: {
                     Image(systemName: "info.circle")

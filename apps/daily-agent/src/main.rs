@@ -38,6 +38,8 @@ use gemini_engine::{
 const HTTP_TIMEOUT_SECS: u64 = 60;
 const MAX_ARTICLE_CHARS: usize = 50_000;
 const SUMMARY_SNIPPET_CHARS: usize = 100;
+const EVAL_DEFAULT_SCORE: u64 = 3;
+const EVAL_MAX_TOTAL: f64 = 20.0;
 
 // --- Manifest Struct ---
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -371,7 +373,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                     original_url: Some(best_article.url.clone()),
                                     model: Some(LlmProvider::Claude.model_name().to_string()),
                                     selected_by: Some(selection_provider.model_name().to_string()),
-                                    prompt_version: Some("v2".to_string()),
+                                    prompt_version: Some(beta_config.version().to_string()),
                                     eval_score: None,
                                 });
                                 info!("Beta summary of prod article uploaded");
@@ -416,8 +418,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                         summary_snippet,
                                         original_url: Some(beta_article.url.clone()),
                                         model: Some(LlmProvider::Claude.model_name().to_string()),
-                                        selected_by: Some(format!("{} (v2)", LlmProvider::Claude.model_name())),
-                                        prompt_version: Some("v2".to_string()),
+                                        selected_by: Some(format!("{} ({})", LlmProvider::Claude.model_name(), beta_config.version())),
+                                        prompt_version: Some(beta_config.version().to_string()),
                                         eval_score: None,
                                     });
                                     info!("Beta summary of beta article uploaded");
@@ -499,11 +501,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             if let Some(scores) = json.get("scores").and_then(|s| s.as_array()) {
                                 for score in scores {
                                     let summary_id = score.get("summary_id").and_then(|s| s.as_str()).unwrap_or("");
-                                    let clarity = score.get("clarity").and_then(|v| v.as_u64()).unwrap_or(3) as u8;
-                                    let actionability = score.get("actionability").and_then(|v| v.as_u64()).unwrap_or(3) as u8;
-                                    let info_density = score.get("information_density").and_then(|v| v.as_u64()).unwrap_or(3) as u8;
-                                    let structure_score = score.get("structure").and_then(|v| v.as_u64()).unwrap_or(3) as u8;
-                                    let total = (clarity as f64 + actionability as f64 + info_density as f64 + structure_score as f64) / 20.0;
+                                    let clarity = score.get("clarity").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
+                                    let actionability = score.get("actionability").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
+                                    let info_density = score.get("information_density").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
+                                    let structure_score = score.get("structure").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
+                                    let total = (clarity as f64 + actionability as f64 + info_density as f64 + structure_score as f64) / EVAL_MAX_TOTAL;
                                     let reasoning = score.get("reasoning").and_then(|s| s.as_str()).unwrap_or("").to_string();
 
                                     info!(summary_id = %summary_id, total = %total, reasoning = %reasoning, "Eval score");

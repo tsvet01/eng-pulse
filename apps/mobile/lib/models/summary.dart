@@ -10,7 +10,7 @@ class Summary {
   final String? selectedBy;
   /// Which prompt version generated this summary (e.g., "v1", "v2")
   final String? promptVersion;
-  /// Eval score from automated quality evaluation (0.0–5.0)
+  /// Eval score from automated quality evaluation (0.0–1.0, normalized)
   final double? evalScore;
 
   Summary({

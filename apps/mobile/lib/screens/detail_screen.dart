@@ -346,7 +346,7 @@ class _DetailScreenState extends State<DetailScreen> {
                               ),
                               const SizedBox(width: 4),
                               Text(
-                                '${_currentSummary.evalScore!.toStringAsFixed(1)}/5',
+                                '${(_currentSummary.evalScore! * 5).toStringAsFixed(1)}/5',
                                 style: TextStyle(
                                   color: isDark ? Colors.amber.shade300 : Colors.amber.shade700,
                                   fontSize: 12,
