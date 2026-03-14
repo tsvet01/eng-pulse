@@ -36,3 +36,4 @@ gcp_key.json
 apps/mobile/ios/Runner/GoogleService-Info.plist
 apps/mobile/android/app/google-services.json
 apps/mobile/lib/firebase_options.dart
+apps/mobile-swift/EngPulse/GoogleService-Info.plist
