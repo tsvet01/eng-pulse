@@ -130,6 +130,17 @@ class TestFileFiltering:
         """Test that nested paths in summaries/ are handled."""
         assert should_process_file("summaries/archive/2024-12-18.md")
 
+    def test_beta_summaries_excluded(self):
+        """Test that beta/v2 summaries do not trigger notifications."""
+        assert not should_process_file("summaries/beta/claude/2026-03-13.md")
+        assert not should_process_file("summaries/beta/claude/2026-03-13-selection.md")
+
+    def test_prod_provider_paths(self):
+        """Test that prod provider paths are processed."""
+        assert should_process_file("summaries/claude/2026-03-13.md")
+        assert should_process_file("summaries/gemini/2026-03-13.md")
+        assert should_process_file("summaries/openai/2026-03-13.md")
+
     def test_empty_filename(self):
         """Test empty filename is rejected."""
         assert not should_process_file("")

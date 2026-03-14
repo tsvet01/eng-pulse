@@ -67,8 +67,10 @@ def sanitize_filename(filename: str) -> str:
 
 
 def should_process_file(file_name: str) -> bool:
-    """Check if file should be processed (summaries/*.md only)."""
-    return file_name.startswith("summaries/") and file_name.endswith(".md")
+    """Check if file should be processed (prod summaries only, not beta)."""
+    return (file_name.startswith("summaries/")
+            and file_name.endswith(".md")
+            and not file_name.startswith("summaries/beta/"))
 
 
 def send_fcm_notification_http(token: str, title: str, body: str, article_url: str, access_token: str) -> tuple[bool, str]:
