@@ -6,8 +6,23 @@ actor FeedbackService {
 
     private let endpointURL: URL
 
+    private struct RequestBody: Encodable {
+        let summaryUrl: String
+        let feedback: String
+        let promptVersion: String?
+
+        enum CodingKeys: String, CodingKey {
+            case summaryUrl = "summary_url"
+            case feedback
+            case promptVersion = "prompt_version"
+        }
+    }
+
     private init() {
-        self.endpointURL = URL(string: "https://us-central1-tsvet01.cloudfunctions.net/feedback-receiver")!
+        guard let url = URL(string: "https://us-central1-tsvet01.cloudfunctions.net/feedback-receiver") else {
+            fatalError("Invalid feedback endpoint URL")
+        }
+        self.endpointURL = url
     }
 
     /// Upload feedback to Cloud Function. Fire-and-forget — errors are logged, not surfaced.
@@ -27,15 +42,9 @@ actor FeedbackService {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-            var body: [String: Any] = [
-                "summary_url": summaryURL,
-                "feedback": feedback,
-            ]
-            if let promptVersion {
-                body["prompt_version"] = promptVersion
-            }
-
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            request.httpBody = try JSONEncoder().encode(
+                RequestBody(summaryUrl: summaryURL, feedback: feedback, promptVersion: promptVersion)
+            )
 
             let (_, response) = try await URLSession.shared.data(for: request)
 

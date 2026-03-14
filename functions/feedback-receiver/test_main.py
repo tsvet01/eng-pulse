@@ -107,6 +107,17 @@ def test_rejects_malformed_body(app, mock_firebase):
     assert response[1] == 400
 
 
+def test_rejects_expired_token(app):
+    with patch("main.auth") as mock_auth:
+        mock_auth.ExpiredIdTokenError = type("ExpiredIdTokenError", (Exception,), {})
+        mock_auth.InvalidIdTokenError = type("InvalidIdTokenError", (Exception,), {})
+        mock_auth.RevokedIdTokenError = type("RevokedIdTokenError", (Exception,), {})
+        mock_auth.verify_id_token.side_effect = mock_auth.ExpiredIdTokenError("Token expired")
+        request = make_request(json_body={"summary_url": "gs://test", "feedback": "up"})
+        response = app(request)
+        assert response[1] == 401
+
+
 def test_upserts_existing_feedback(app, mock_firebase, mock_gcs):
     _, mock_bucket, mock_blob = mock_gcs
     existing = json.dumps([{

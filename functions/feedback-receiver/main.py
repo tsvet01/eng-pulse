@@ -17,7 +17,7 @@ logger = CloudFunctionLogger("feedback-receiver")
 if not firebase_admin._apps:
     firebase_admin.initialize_app()
 
-BUCKET_NAME = "tsvet01-agent-brain"
+BUCKET_NAME = os.environ.get("FEEDBACK_BUCKET_NAME", "tsvet01-agent-brain")
 
 
 def _verify_token(request):
@@ -30,9 +30,12 @@ def _verify_token(request):
     try:
         decoded = auth.verify_id_token(token)
         return decoded["uid"], None
-    except Exception as e:
+    except (auth.InvalidIdTokenError, auth.ExpiredIdTokenError, auth.RevokedIdTokenError) as e:
         logger.error("Token verification failed", error=str(e))
         return None, error_response("Invalid token", 401)
+    except Exception as e:
+        logger.error("Unexpected auth error", error=str(e))
+        return None, error_response("Authentication error", 500)
 
 
 def _load_feedback(bucket, date_str):
