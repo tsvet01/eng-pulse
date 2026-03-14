@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		3AA66F102F65A200009104BA /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 3AA66F0F2F65A200009104BA /* FirebaseAuth */; };
+		3AA66F122F65A28B009104BA /* FeedbackService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AA66F112F65A28B009104BA /* FeedbackService.swift */; };
+		3AA66F132F65A300009104BA /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 3AA66F142F65A300009104BA /* GoogleService-Info.plist */; };
 		A1000001 /* EngPulseApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001 /* EngPulseApp.swift */; };
 		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* ContentView.swift */; };
 		A1000003 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003 /* HomeView.swift */; };
@@ -42,6 +45,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		3AA66F112F65A28B009104BA /* FeedbackService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackService.swift; sourceTree = "<group>"; };
+		3AA66F142F65A300009104BA /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		A2000001 /* EngPulseApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngPulseApp.swift; sourceTree = "<group>"; };
 		A2000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A2000003 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
@@ -51,12 +56,12 @@
 		A2000007 /* APIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIService.swift; sourceTree = "<group>"; };
 		A2000008 /* CacheService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheService.swift; sourceTree = "<group>"; };
 		A2000009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		A2000010 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A200000B /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		A200000C /* EngPulse.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = EngPulse.entitlements; sourceTree = "<group>"; };
 		A200000D /* TTSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSService.swift; sourceTree = "<group>"; };
 		A200000E /* TTSConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSConfiguration.swift; sourceTree = "<group>"; };
 		A200000F /* CloudTTSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudTTSService.swift; sourceTree = "<group>"; };
+		A2000010 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A2000010A /* AudioPlayerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayerService.swift; sourceTree = "<group>"; };
 		A3000001 /* EngPulse.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EngPulse.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B2000001 /* MarkdownContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownContentView.swift; sourceTree = "<group>"; };
@@ -76,6 +81,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3AA66F102F65A200009104BA /* FirebaseAuth in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -107,6 +113,7 @@
 				A5000005 /* Models */,
 				A5000006 /* Services */,
 				A2000009 /* Assets.xcassets */,
+				3AA66F142F65A300009104BA /* GoogleService-Info.plist */,
 				A2000010 /* Info.plist */,
 				A200000C /* EngPulse.entitlements */,
 			);
@@ -151,6 +158,7 @@
 				A2000007 /* APIService.swift */,
 				A2000010A /* AudioPlayerService.swift */,
 				A2000008 /* CacheService.swift */,
+				3AA66F112F65A28B009104BA /* FeedbackService.swift */,
 				A200000F /* CloudTTSService.swift */,
 				D2000001 /* LocalTTSService.swift */,
 				A200000B /* NotificationService.swift */,
@@ -236,6 +244,9 @@
 				Base,
 			);
 			mainGroup = A5000001;
+			packageReferences = (
+				3AA66F0E2F65A200009104BA /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
 			productRefGroup = A5000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -252,6 +263,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1000009 /* Assets.xcassets in Resources */,
+				3AA66F132F65A300009104BA /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -283,6 +295,7 @@
 				A100000F /* CloudTTSService.swift in Sources */,
 				A1000010 /* AudioPlayerService.swift in Sources */,
 				B1000001 /* MarkdownContentView.swift in Sources */,
+				3AA66F122F65A28B009104BA /* FeedbackService.swift in Sources */,
 				C1000001 /* TextCleaner.swift in Sources */,
 				C1000002 /* TTSPlayerBarView.swift in Sources */,
 				C1000004 /* TTSErrorBanner.swift in Sources */,
@@ -563,6 +576,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		3AA66F0E2F65A200009104BA /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.10.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		3AA66F0F2F65A200009104BA /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3AA66F0E2F65A200009104BA /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A8000001 /* Project object */;
 }

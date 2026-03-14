@@ -159,6 +159,7 @@ struct SummaryCardView: View {
                     .foregroundColor(.secondary)
                     .lineLimit(2)
             }
+
         }
         .padding(.vertical, 2)
     }

@@ -94,7 +94,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _availableModels = modelIds.isEmpty
             ? [LlmModel.gemini] // Default if no model field (backwards compat)
-            : modelIds.map((id) => LlmModel.fromId(id)).toList();
+            : modelIds.map((id) => LlmModel.fromId(id)).toSet().toList();
 
         // Ensure selected model is available
         if (!_availableModels.contains(_selectedModel) && _availableModels.isNotEmpty) {
