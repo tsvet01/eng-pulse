@@ -22,7 +22,7 @@ actor FeedbackService {
         do {
             let token = try await user.getIDToken()
 
-            var request = URLRequest(url: endpointURL)
+            var request = URLRequest(url: endpointURL, timeoutInterval: 10)
             request.httpMethod = "POST"
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
