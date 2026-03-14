@@ -121,3 +121,33 @@ jobs:
           --clear-env-vars \
           --set-secrets "GMAIL_USER=gmail-user:latest,GMAIL_APP_PASSWORD=gmail-app-password:latest,DEST_EMAIL=dest-email:latest" \
           --project ${{ env.PROJECT_ID }}
+
+  deploy-feedback-receiver:
+    runs-on: ubuntu-latest
+    needs: deploy-agents
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Google Auth
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+
+    - name: Bundle shared module
+      run: cp -r functions/shared functions/feedback-receiver/shared
+
+    - name: Deploy Feedback Receiver Function
+      run: |
+        cd functions/feedback-receiver
+        gcloud functions deploy feedback-receiver \
+          --gen2 \
+          --runtime=python311 \
+          --region=${{ env.REGION }} \
+          --project=${{ env.PROJECT_ID }} \
+          --source=. \
+          --entry-point=receive_feedback \
+          --trigger-http \
+          --allow-unauthenticated

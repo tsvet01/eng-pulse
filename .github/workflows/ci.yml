@@ -75,6 +75,7 @@ jobs:
         python -m py_compile functions/notifier/main.py
         python -m py_compile functions/fcm-tokens/main.py
         python -m py_compile functions/apns-notifier/main.py
+        python -m py_compile functions/feedback-receiver/main.py
         python -c "import ast; [ast.parse(open(f).read()) for f in __import__('glob').glob('functions/shared/*.py')]"
 
     - name: Run shared tests
@@ -88,6 +89,13 @@ jobs:
 
     - name: Run fcm-tokens tests
       run: cd functions/fcm-tokens && python -m pytest test_main.py -v
+
+    - name: Run feedback-receiver tests
+      run: |
+        cp -r functions/shared functions/feedback-receiver/shared
+        cd functions/feedback-receiver
+        pip install -r requirements.txt
+        python -m pytest test_main.py -v
 
   flutter-check:
     runs-on: ubuntu-latest

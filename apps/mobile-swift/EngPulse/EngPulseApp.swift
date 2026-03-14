@@ -1,4 +1,6 @@
 import SwiftUI
+import FirebaseCore
+import FirebaseAuth
 
 @main
 struct EngPulseApp: App {
@@ -53,7 +55,18 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        FirebaseApp.configure()
         UNUserNotificationCenter.current().delegate = NotificationService.shared
+
+        // Sign in anonymously (fire-and-forget, retries on next launch if fails)
+        if Auth.auth().currentUser == nil {
+            Auth.auth().signInAnonymously { _, error in
+                if let error {
+                    print("Anonymous auth failed: \(error.localizedDescription)")
+                }
+            }
+        }
+
         return true
     }
 

@@ -127,6 +127,7 @@ struct DetailView: View {
 
     private func fullContentSection(_ content: String) -> some View {
         MarkdownContentView(content: content)
+            .textSelection(.enabled)
             .padding(.top, 4)
     }
 
@@ -222,6 +223,16 @@ struct DetailView: View {
             let newValue = isActive ? "" : type
             feedbackState = newValue
             UserDefaults.standard.set(newValue, forKey: "feedback_\(summary.url)")
+            // Upload feedback to cloud (fire-and-forget, skip if cleared)
+            if !newValue.isEmpty {
+                Task {
+                    await FeedbackService.shared.submitFeedback(
+                        summaryURL: summary.url,
+                        feedback: newValue,
+                        promptVersion: summary.promptVersion
+                    )
+                }
+            }
         } label: {
             Image(systemName: isActive ? "\(icon).fill" : icon)
                 .font(.caption2)
