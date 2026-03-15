@@ -96,10 +96,319 @@ struct EvalCriteria {
     structure: u8,
 }
 
+// --- User Feedback Calibration ---
+
+#[derive(Deserialize, Debug, Clone)]
+#[allow(dead_code)]
+struct FeedbackEntry {
+    summary_url: String,
+    feedback: String,
+    #[serde(default)]
+    prompt_version: Option<String>,
+    uid: String,
+    timestamp: String,
+}
+
+const CALIBRATION_MIN_RATINGS: usize = 5;
+const CALIBRATION_LOOKBACK_DAYS: i64 = 30;
+const CALIBRATION_EXCERPT_WORDS: usize = 200;
+
+/// Load recent user feedback from GCS, scanning backwards up to CALIBRATION_LOOKBACK_DAYS.
+async fn load_recent_feedback(gcs_client: &Client, bucket_name: &str) -> Vec<FeedbackEntry> {
+    let mut all_feedback = Vec::new();
+    let now = Utc::now();
+
+    for days_ago in 0..CALIBRATION_LOOKBACK_DAYS {
+        let date = (now - chrono::Duration::days(days_ago)).format("%Y-%m-%d").to_string();
+        let object = format!("feedback/{}.json", date);
+
+        match gcs_client.download_object(
+            &GetObjectRequest {
+                bucket: bucket_name.to_string(),
+                object,
+                ..Default::default()
+            },
+            &Range::default(),
+        ).await {
+            Ok(data) => {
+                match serde_json::from_slice::<Vec<FeedbackEntry>>(&data) {
+                    Ok(mut entries) => all_feedback.append(&mut entries),
+                    Err(e) => warn!(date = %date, error = %e, "Failed to parse feedback JSON"),
+                }
+            }
+            Err(_) => {
+                // No feedback file for this date — expected for most days
+            }
+        }
+    }
+
+    info!(count = all_feedback.len(), "Loaded recent feedback entries");
+    all_feedback
+}
+
+/// Check that feedback contains at least one "up" and one "down" vote.
+fn has_both_polarities(feedback: &[FeedbackEntry]) -> bool {
+    let has_up = feedback.iter().any(|f| f.feedback == "up");
+    let has_down = feedback.iter().any(|f| f.feedback == "down");
+    has_up && has_down
+}
+
+/// Truncate content to approximately max_words words.
+fn excerpt(content: &str, max_words: usize) -> String {
+    let words: Vec<&str> = content.split_whitespace().collect();
+    if words.len() <= max_words {
+        words.join(" ")
+    } else {
+        format!("{}...", words[..max_words].join(" "))
+    }
+}
+
+/// Build a calibration context string from user feedback for the eval judge.
+async fn build_calibration_context(
+    feedback: &[FeedbackEntry],
+    gcs_client: &Client,
+    bucket_name: &str,
+    manifest: &[ManifestEntry],
+) -> Option<String> {
+    if feedback.len() < CALIBRATION_MIN_RATINGS || !has_both_polarities(feedback) {
+        info!(
+            count = feedback.len(),
+            has_polarities = has_both_polarities(feedback),
+            "Insufficient feedback for calibration"
+        );
+        return None;
+    }
+
+    // Take up to 2 most recent "up" and 2 most recent "down" entries
+    let ups: Vec<&FeedbackEntry> = feedback.iter().filter(|f| f.feedback == "up").take(2).collect();
+    let downs: Vec<&FeedbackEntry> = feedback.iter().filter(|f| f.feedback == "down").take(2).collect();
+
+    let url_prefix = format!("https://storage.googleapis.com/{}/", bucket_name);
+
+    let mut highly_rated = Vec::new();
+    let mut poorly_rated = Vec::new();
+
+    for entry in &ups {
+        let gcs_path = entry.summary_url.strip_prefix(&url_prefix).unwrap_or(&entry.summary_url);
+        let title = manifest.iter()
+            .find(|m| m.url == entry.summary_url)
+            .map(|m| m.title.clone())
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        match gcs_client.download_object(
+            &GetObjectRequest {
+                bucket: bucket_name.to_string(),
+                object: gcs_path.to_string(),
+                ..Default::default()
+            },
+            &Range::default(),
+        ).await {
+            Ok(data) => {
+                if let Ok(content) = String::from_utf8(data) {
+                    highly_rated.push(format!(
+                        "[Title: \"{}\"]\n{}",
+                        title,
+                        excerpt(&content, CALIBRATION_EXCERPT_WORDS)
+                    ));
+                }
+            }
+            Err(e) => warn!(url = %entry.summary_url, error = %e, "Failed to download feedback summary"),
+        }
+    }
+
+    for entry in &downs {
+        let gcs_path = entry.summary_url.strip_prefix(&url_prefix).unwrap_or(&entry.summary_url);
+        let title = manifest.iter()
+            .find(|m| m.url == entry.summary_url)
+            .map(|m| m.title.clone())
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        match gcs_client.download_object(
+            &GetObjectRequest {
+                bucket: bucket_name.to_string(),
+                object: gcs_path.to_string(),
+                ..Default::default()
+            },
+            &Range::default(),
+        ).await {
+            Ok(data) => {
+                if let Ok(content) = String::from_utf8(data) {
+                    poorly_rated.push(format!(
+                        "[Title: \"{}\"]\n{}",
+                        title,
+                        excerpt(&content, CALIBRATION_EXCERPT_WORDS)
+                    ));
+                }
+            }
+            Err(e) => warn!(url = %entry.summary_url, error = %e, "Failed to download feedback summary"),
+        }
+    }
+
+    if highly_rated.is_empty() && poorly_rated.is_empty() {
+        warn!("Could not download any feedback summaries for calibration");
+        return None;
+    }
+
+    let mut context = String::from("## User Calibration\n\n");
+
+    if !highly_rated.is_empty() {
+        context.push_str("The user rated these summaries highly:\n\n");
+        for entry in &highly_rated {
+            context.push_str(entry);
+            context.push_str("\n\n");
+        }
+    }
+
+    if !poorly_rated.is_empty() {
+        context.push_str("The user rated these summaries poorly:\n\n");
+        for entry in &poorly_rated {
+            context.push_str(entry);
+            context.push_str("\n\n");
+        }
+    }
+
+    context.push_str("Use these as reference points when scoring. Align your quality assessment with the user's demonstrated preferences.\n");
+
+    info!("Built calibration context with {} highly and {} poorly rated examples", highly_rated.len(), poorly_rated.len());
+    Some(context)
+}
+
+/// Run a single eval pass: send prompt to LLM, parse JSON response, upload report.
+async fn run_eval_pass(
+    http_client: &reqwest::Client,
+    claude_key: &str,
+    prompt: String,
+    gcs_client: &Client,
+    bucket_name: &str,
+    today: &str,
+    report_prefix: &str,
+) -> Option<serde_json::Value> {
+    match call_llm_with_retry(http_client, LlmProvider::Claude, claude_key, prompt).await {
+        Ok(eval_response) => {
+            let cleaned = eval_response
+                .trim()
+                .trim_start_matches("```json")
+                .trim_start_matches("```")
+                .trim_end_matches("```")
+                .trim();
+
+            match serde_json::from_str::<serde_json::Value>(cleaned) {
+                Ok(json) => {
+                    // Upload eval report
+                    let eval_object = format!("{}/{}.json", report_prefix, today);
+                    if let Ok(eval_json) = serde_json::to_vec_pretty(&json) {
+                        match gcs_client.upload_object(
+                            &UploadObjectRequest { bucket: bucket_name.to_string(), ..Default::default() },
+                            eval_json,
+                            &UploadType::Simple(Media::new(eval_object)),
+                        ).await {
+                            Ok(_) => info!(prefix = %report_prefix, "Eval report uploaded"),
+                            Err(e) => warn!(prefix = %report_prefix, error = %e, "Failed to upload eval report"),
+                        }
+                    }
+                    Some(json)
+                }
+                Err(e) => {
+                    warn!(prefix = %report_prefix, error = %e, "Failed to parse eval response as JSON");
+                    None
+                }
+            }
+        }
+        Err(e) => {
+            warn!(prefix = %report_prefix, error = %e, "Eval pass failed");
+            None
+        }
+    }
+}
+
+/// Apply eval scores from parsed JSON to manifest entries.
+fn apply_eval_scores(json: &serde_json::Value, entries: &mut [ManifestEntry]) {
+    if let Some(scores) = json.get("scores").and_then(|s| s.as_array()) {
+        for score in scores {
+            let summary_id = score.get("summary_id").and_then(|s| s.as_str()).unwrap_or("");
+            let clarity = score.get("clarity").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
+            let actionability = score.get("actionability").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
+            let info_density = score.get("information_density").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
+            let structure_score = score.get("structure").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
+            let total = (clarity as f64 + actionability as f64 + info_density as f64 + structure_score as f64) / EVAL_MAX_TOTAL;
+            let reasoning = score.get("reasoning").and_then(|s| s.as_str()).unwrap_or("").to_string();
+
+            info!(summary_id = %summary_id, total = %total, reasoning = %reasoning, "Eval score");
+
+            for entry in entries.iter_mut() {
+                let provider = entry.model.as_deref().unwrap_or("unknown");
+                let version = entry.prompt_version.as_deref().unwrap_or("v1");
+                let suffix = if entry.url.contains("-selection.md") { "-selection" } else { "" };
+                let entry_id = format!("{}-{}{}", version, provider.split('-').next().unwrap_or(provider), suffix);
+                if entry_id == summary_id {
+                    entry.eval_score = Some(total);
+                }
+            }
+        }
+    }
+}
+
+/// Log agreement rate between user feedback and calibrated eval scores.
+fn log_calibration_agreement(
+    feedback: &[FeedbackEntry],
+    calibrated_json: &serde_json::Value,
+    entries: &[ManifestEntry],
+) {
+    let scores_map: std::collections::HashMap<String, f64> = calibrated_json
+        .get("scores")
+        .and_then(|s| s.as_array())
+        .map(|scores| {
+            scores.iter().filter_map(|s| {
+                let id = s.get("summary_id")?.as_str()?;
+                let clarity = s.get("clarity").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE);
+                let actionability = s.get("actionability").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE);
+                let info_density = s.get("information_density").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE);
+                let structure = s.get("structure").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE);
+                let total = (clarity as f64 + actionability as f64 + info_density as f64 + structure as f64) / EVAL_MAX_TOTAL;
+                Some((id.to_string(), total))
+            }).collect()
+        })
+        .unwrap_or_default();
+
+    let mut agreements = 0u32;
+    let mut total_checked = 0u32;
+
+    for fb in feedback {
+        // Find the manifest entry matching this feedback URL
+        if let Some(entry) = entries.iter().find(|e| e.url == fb.summary_url) {
+            let provider = entry.model.as_deref().unwrap_or("unknown");
+            let version = entry.prompt_version.as_deref().unwrap_or("v1");
+            let suffix = if entry.url.contains("-selection.md") { "-selection" } else { "" };
+            let entry_id = format!("{}-{}{}", version, provider.split('-').next().unwrap_or(provider), suffix);
+
+            if let Some(&score) = scores_map.get(&entry_id) {
+                total_checked += 1;
+                let score_is_up = score > 0.6;
+                let feedback_is_up = fb.feedback == "up";
+                if score_is_up == feedback_is_up {
+                    agreements += 1;
+                }
+            }
+        }
+    }
+
+    if total_checked > 0 {
+        let agreement_rate = agreements as f64 / total_checked as f64;
+        info!(
+            agreements = agreements,
+            total = total_checked,
+            rate = format!("{:.1}%", agreement_rate * 100.0),
+            "Calibration agreement with user feedback"
+        );
+    } else {
+        info!("No overlapping entries between feedback and calibrated eval");
+    }
+}
+
 /// Get list of enabled LLM providers based on available API keys.
 /// Claude is first for article selection, others follow for summary generation.
 fn get_enabled_providers() -> Vec<(LlmProvider, String)> {
-    let providers = [LlmProvider::Claude, LlmProvider::Gemini, LlmProvider::OpenAI];
+    let providers = [LlmProvider::Claude, LlmProvider::Gemini];
     let mut enabled = Vec::new();
 
     for provider in providers {
@@ -127,7 +436,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Get enabled providers
     let enabled_providers = get_enabled_providers();
     if enabled_providers.is_empty() {
-        error!("No LLM providers configured. Set at least one of: GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY");
+        error!("No LLM providers configured. Set at least one of: GEMINI_API_KEY, ANTHROPIC_API_KEY");
         return Err("No LLM providers configured".into());
     }
 
@@ -439,7 +748,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!("ANTHROPIC_API_KEY not set, skipping beta pipeline");
     }
 
-    // --- Stage 4: Eval ---
+    // --- Load user feedback for calibration ---
+    let feedback = load_recent_feedback(&gcs_client, &bucket_name).await;
+    let calibration_context = build_calibration_context(&feedback, &gcs_client, &bucket_name, &manifest).await;
+
+    // --- Stage 4: Eval (dual pass with calibration) ---
     if let Some((_, claude_key)) = claude_entry {
         info!("Starting eval stage");
 
@@ -471,7 +784,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
 
         if !eval_summaries.is_empty() {
-            let mut eval_prompt = String::from(
+            let base_eval_prompt = String::from(
                 "You are evaluating article summaries for quality. Score each summary on these criteria (1-5):\n\n\
                 1. Clarity: How easy is it to scan and understand on a mobile phone?\n\
                 2. Actionability: Does it provide concrete takeaways the reader can act on this week?\n\
@@ -482,64 +795,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 {\"scores\": [{\"summary_id\": \"id\", \"clarity\": N, \"actionability\": N, \"information_density\": N, \"structure\": N, \"reasoning\": \"...\"}]}\n\n"
             );
 
+            let mut summaries_section = String::new();
             for (id, content) in &eval_summaries {
-                eval_prompt.push_str(&format!("--- Summary: {} ---\n{}\n\n", id, content));
+                summaries_section.push_str(&format!("--- Summary: {} ---\n{}\n\n", id, content));
             }
 
-            match call_llm_with_retry(&http_client, LlmProvider::Claude, claude_key, eval_prompt).await {
-                Ok(eval_response) => {
-                    // Parse JSON from response (handle possible markdown fences)
-                    let cleaned = eval_response
-                        .trim()
-                        .trim_start_matches("```json")
-                        .trim_start_matches("```")
-                        .trim_end_matches("```")
-                        .trim();
+            // Pass 1: Uncalibrated eval
+            let uncalibrated_prompt = format!("{}{}", base_eval_prompt, summaries_section);
+            if let Some(json) = run_eval_pass(
+                &http_client, claude_key, uncalibrated_prompt, &gcs_client, &bucket_name, &today, "eval"
+            ).await {
+                apply_eval_scores(&json, &mut new_manifest_entries);
+            }
 
-                    match serde_json::from_str::<serde_json::Value>(cleaned) {
-                        Ok(json) => {
-                            if let Some(scores) = json.get("scores").and_then(|s| s.as_array()) {
-                                for score in scores {
-                                    let summary_id = score.get("summary_id").and_then(|s| s.as_str()).unwrap_or("");
-                                    let clarity = score.get("clarity").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
-                                    let actionability = score.get("actionability").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
-                                    let info_density = score.get("information_density").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
-                                    let structure_score = score.get("structure").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
-                                    let total = (clarity as f64 + actionability as f64 + info_density as f64 + structure_score as f64) / EVAL_MAX_TOTAL;
-                                    let reasoning = score.get("reasoning").and_then(|s| s.as_str()).unwrap_or("").to_string();
-
-                                    info!(summary_id = %summary_id, total = %total, reasoning = %reasoning, "Eval score");
-
-                                    // Update matching manifest entry
-                                    for entry in &mut new_manifest_entries {
-                                        let provider = entry.model.as_deref().unwrap_or("unknown");
-                                        let version = entry.prompt_version.as_deref().unwrap_or("v1");
-                                        let suffix = if entry.url.contains("-selection.md") { "-selection" } else { "" };
-                                        let entry_id = format!("{}-{}{}", version, provider.split('-').next().unwrap_or(provider), suffix);
-                                        if entry_id == summary_id {
-                                            entry.eval_score = Some(total);
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Upload eval report
-                            let eval_object = format!("eval/{}.json", today);
-                            if let Ok(eval_json) = serde_json::to_vec_pretty(&json) {
-                                match gcs_client.upload_object(
-                                    &UploadObjectRequest { bucket: bucket_name.to_string(), ..Default::default() },
-                                    eval_json,
-                                    &UploadType::Simple(Media::new(eval_object))
-                                ).await {
-                                    Ok(_) => info!("Eval report uploaded"),
-                                    Err(e) => warn!(error = %e, "Failed to upload eval report"),
-                                }
-                            }
-                        }
-                        Err(e) => warn!(error = %e, "Failed to parse eval response as JSON"),
-                    }
+            // Pass 2: Calibrated eval (only if calibration context is available)
+            if let Some(ref cal_context) = calibration_context {
+                info!("Running calibrated eval pass");
+                let calibrated_prompt = format!("{}{}\n\n{}", cal_context, base_eval_prompt, summaries_section);
+                if let Some(cal_json) = run_eval_pass(
+                    &http_client, claude_key, calibrated_prompt, &gcs_client, &bucket_name, &today, "eval-calibrated"
+                ).await {
+                    // Calibrated scores override uncalibrated
+                    apply_eval_scores(&cal_json, &mut new_manifest_entries);
+                    log_calibration_agreement(&feedback, &cal_json, &new_manifest_entries);
                 }
-                Err(e) => warn!(error = %e, "Eval stage failed"),
             }
         }
     } else {
@@ -652,5 +931,61 @@ mod tests {
     fn test_parse_selection_index_only_special_chars() {
         assert_eq!(parse_selection_index("!@#$%^&*()"), None);
         assert_eq!(parse_selection_index("..."), None);
+    }
+
+    #[test]
+    fn test_has_both_polarities_true() {
+        let feedback = vec![
+            FeedbackEntry {
+                summary_url: "https://example.com/a".to_string(),
+                feedback: "up".to_string(),
+                prompt_version: None,
+                uid: "u1".to_string(),
+                timestamp: "2026-03-15T00:00:00Z".to_string(),
+            },
+            FeedbackEntry {
+                summary_url: "https://example.com/b".to_string(),
+                feedback: "down".to_string(),
+                prompt_version: None,
+                uid: "u1".to_string(),
+                timestamp: "2026-03-15T00:00:00Z".to_string(),
+            },
+        ];
+        assert!(has_both_polarities(&feedback));
+    }
+
+    #[test]
+    fn test_has_both_polarities_all_up() {
+        let feedback = vec![
+            FeedbackEntry {
+                summary_url: "https://example.com/a".to_string(),
+                feedback: "up".to_string(),
+                prompt_version: None,
+                uid: "u1".to_string(),
+                timestamp: "2026-03-15T00:00:00Z".to_string(),
+            },
+            FeedbackEntry {
+                summary_url: "https://example.com/b".to_string(),
+                feedback: "up".to_string(),
+                prompt_version: None,
+                uid: "u1".to_string(),
+                timestamp: "2026-03-15T00:00:00Z".to_string(),
+            },
+        ];
+        assert!(!has_both_polarities(&feedback));
+    }
+
+    #[test]
+    fn test_excerpt_truncation() {
+        let content = "one two three four five six seven eight nine ten";
+        let result = excerpt(content, 5);
+        assert_eq!(result, "one two three four five...");
+    }
+
+    #[test]
+    fn test_excerpt_short_content() {
+        let content = "hello world";
+        let result = excerpt(content, 200);
+        assert_eq!(result, "hello world");
     }
 }
