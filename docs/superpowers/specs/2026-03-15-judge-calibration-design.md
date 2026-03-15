@@ -20,13 +20,17 @@ Before the eval stage, the daily-agent:
 2. Collects all feedback entries until it has enough data
 3. If fewer than 5 total ratings exist, skip calibration — eval runs with the standard prompt unchanged (uncalibrated only)
 
+**URL format note:** Feedback entries store HTTPS public URLs (e.g., `https://storage.googleapis.com/tsvet01-agent-brain/summaries/gemini/2026-03-14.md`). To download from GCS, strip the `https://storage.googleapis.com/{bucket}/` prefix to get the object path. This matches the existing pattern in the eval stage.
+
 ### Few-Shot Context Building
 
 When 5+ ratings are available, the daily-agent builds two types of calibration context:
 
-**Anchor examples:** The 2 most recent "up" and 2 most recent "down" rated summaries. Downloads their content from GCS and includes ~200 word excerpts.
+**Anchor examples:** The 2 most recent "up" and 2 most recent "down" rated summaries. Downloads their content from GCS and includes ~200 word excerpts. Each excerpt is prefixed with the article title for context.
 
-**Preference pairs:** If any date has both an "up" and "down" rating (user preferred one variant over another), includes both with the user's preference noted. Only when available — not required.
+**Polarity requirement:** Calibration requires at least 1 "up" AND 1 "down" rating. If all ratings are the same polarity (e.g., 5 "up" and 0 "down"), skip calibration and run uncalibrated only. One-sided calibration would bias the judge.
+
+**Preference pairs:** Deferred to a future iteration. Matching pairs requires cross-referencing feedback URLs against manifest entries to find summaries of the same underlying article on the same date — more complex than the value justifies with limited data. When implemented later, a preference pair is: two ratings from the same `feedback/{date}.json` file where both summaries share the same `original_url` in the manifest, and the user rated one "up" and the other "down".
 
 ### Eval Prompt Injection
 
@@ -36,20 +40,20 @@ The calibration context is prepended to the eval prompt:
 ## User Calibration
 
 The user rated these summaries highly:
+[Title: "Article Title 1"]
 [Summary 1 excerpt - first ~200 words]
+
+[Title: "Article Title 2"]
 [Summary 2 excerpt - first ~200 words]
 
 The user rated these summaries poorly:
+[Title: "Article Title 3"]
 [Summary 3 excerpt - first ~200 words]
+
+[Title: "Article Title 4"]
 [Summary 4 excerpt - first ~200 words]
 
 Use these as reference points when scoring. Align your quality assessment with the user's demonstrated preferences.
-
-## User Preference Pairs
-On {date}, the user preferred:
-[Preferred summary excerpt]
-Over:
-[Rejected summary excerpt]
 ```
 
 ### Dual Scoring
@@ -60,22 +64,17 @@ Each day the eval runs two passes on the same summaries:
 
 Both scores stored. The calibrated score is what appears in the app via `manifest.json`.
 
+**Cost impact:** +1 Claude call per day when calibration is active. Estimated ~$0.01-0.05/day depending on summary count. Negligible relative to existing pipeline cost (~$0.10-0.30/day).
+
 ### Storage
 
-`eval/{date}.json` adds fields per entry:
+The daily-agent writes two separate eval files:
+- `eval/{date}.json` — uncalibrated scores (current format, unchanged)
+- `eval/{date}-calibrated.json` — calibrated scores (same format)
 
-```json
-{
-  "summary_id": "v1-gemini",
-  "scores": { "clarity": 4, "actionability": 3, "information_density": 4, "structure": 4 },
-  "total": 0.75,
-  "calibrated_total": 0.85,
-  "judge_reasoning": "...",
-  "calibrated_reasoning": "..."
-}
-```
+The daily-agent then merges them in memory before updating `manifest.json`: for each summary, writes `eval_score` from the calibrated result when available, falls back to uncalibrated.
 
-`manifest.json` uses `calibrated_total` for `eval_score` when available, falls back to `total`.
+This avoids modifying the existing eval JSON schema and keeps both results independently inspectable.
 
 ### Display
 
@@ -83,24 +82,23 @@ No UI changes. The app already shows one eval score — it just becomes the cali
 
 ### Disable OpenAI Provider
 
-Remove OpenAI from the summary generation stage. Only Gemini and Claude produce summaries. This simplifies the pipeline and reduces API costs.
+Remove OpenAI from the summary generation stage. Only Gemini and Claude produce summaries. Update the provider check error message to reflect the reduced set: `"Set at least one of: GEMINI_API_KEY, ANTHROPIC_API_KEY"`.
 
 ## Implementation Scope
 
 **Modified files:**
-- `apps/daily-agent/src/main.rs` — feedback loading, calibration prompt building, dual eval, disable OpenAI
+- `apps/daily-agent/src/main.rs` — feedback loading, URL stripping, calibration prompt building, dual eval, disable OpenAI, update error messages
 - `apps/daily-agent/src/prompts.rs` — remove OpenAI provider config if referenced
 
 **No changes to:**
 - Cloud Function
 - Swift or Flutter apps
-- GCS storage structure (additive fields only)
-- Eval output schema (new fields are optional, backwards compatible)
+- Existing `eval/{date}.json` format (new calibrated file is separate)
 
 ## Thresholds and Limits
 
-- Minimum ratings for calibration: 5
+- Minimum ratings for calibration: 5 total, with at least 1 of each polarity (up and down)
 - Lookback window: 30 calendar days (collects 5 most recent ratings regardless of gaps)
-- Anchor examples: 2 "up" + 2 "down" (most recent of each)
-- Summary excerpt length: ~200 words
-- Preference pairs: included when available, not required
+- Anchor examples: up to 2 "up" + up to 2 "down" (most recent of each)
+- Summary excerpt length: ~200 words, prefixed with article title
+- Preference pairs: deferred to future iteration
