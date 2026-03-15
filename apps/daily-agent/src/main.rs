@@ -114,7 +114,6 @@ const CALIBRATION_LOOKBACK_DAYS: i64 = 30;
 const CALIBRATION_EXCERPT_WORDS: usize = 200;
 
 /// Load recent user feedback from GCS, scanning backwards up to CALIBRATION_LOOKBACK_DAYS.
-#[allow(dead_code)]
 async fn load_recent_feedback(gcs_client: &Client, bucket_name: &str) -> Vec<FeedbackEntry> {
     let mut all_feedback = Vec::new();
     let now = Utc::now();
@@ -165,7 +164,6 @@ fn excerpt(content: &str, max_words: usize) -> String {
 }
 
 /// Build a calibration context string from user feedback for the eval judge.
-#[allow(dead_code)]
 async fn build_calibration_context(
     feedback: &[FeedbackEntry],
     gcs_client: &Client,
@@ -273,6 +271,138 @@ async fn build_calibration_context(
 
     info!("Built calibration context with {} highly and {} poorly rated examples", highly_rated.len(), poorly_rated.len());
     Some(context)
+}
+
+/// Run a single eval pass: send prompt to LLM, parse JSON response, upload report.
+async fn run_eval_pass(
+    http_client: &reqwest::Client,
+    claude_key: &str,
+    prompt: String,
+    gcs_client: &Client,
+    bucket_name: &str,
+    today: &str,
+    report_prefix: &str,
+) -> Option<serde_json::Value> {
+    match call_llm_with_retry(http_client, LlmProvider::Claude, claude_key, prompt).await {
+        Ok(eval_response) => {
+            let cleaned = eval_response
+                .trim()
+                .trim_start_matches("```json")
+                .trim_start_matches("```")
+                .trim_end_matches("```")
+                .trim();
+
+            match serde_json::from_str::<serde_json::Value>(cleaned) {
+                Ok(json) => {
+                    // Upload eval report
+                    let eval_object = format!("{}/{}.json", report_prefix, today);
+                    if let Ok(eval_json) = serde_json::to_vec_pretty(&json) {
+                        match gcs_client.upload_object(
+                            &UploadObjectRequest { bucket: bucket_name.to_string(), ..Default::default() },
+                            eval_json,
+                            &UploadType::Simple(Media::new(eval_object)),
+                        ).await {
+                            Ok(_) => info!(prefix = %report_prefix, "Eval report uploaded"),
+                            Err(e) => warn!(prefix = %report_prefix, error = %e, "Failed to upload eval report"),
+                        }
+                    }
+                    Some(json)
+                }
+                Err(e) => {
+                    warn!(prefix = %report_prefix, error = %e, "Failed to parse eval response as JSON");
+                    None
+                }
+            }
+        }
+        Err(e) => {
+            warn!(prefix = %report_prefix, error = %e, "Eval pass failed");
+            None
+        }
+    }
+}
+
+/// Apply eval scores from parsed JSON to manifest entries.
+fn apply_eval_scores(json: &serde_json::Value, entries: &mut [ManifestEntry]) {
+    if let Some(scores) = json.get("scores").and_then(|s| s.as_array()) {
+        for score in scores {
+            let summary_id = score.get("summary_id").and_then(|s| s.as_str()).unwrap_or("");
+            let clarity = score.get("clarity").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
+            let actionability = score.get("actionability").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
+            let info_density = score.get("information_density").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
+            let structure_score = score.get("structure").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
+            let total = (clarity as f64 + actionability as f64 + info_density as f64 + structure_score as f64) / EVAL_MAX_TOTAL;
+            let reasoning = score.get("reasoning").and_then(|s| s.as_str()).unwrap_or("").to_string();
+
+            info!(summary_id = %summary_id, total = %total, reasoning = %reasoning, "Eval score");
+
+            for entry in entries.iter_mut() {
+                let provider = entry.model.as_deref().unwrap_or("unknown");
+                let version = entry.prompt_version.as_deref().unwrap_or("v1");
+                let suffix = if entry.url.contains("-selection.md") { "-selection" } else { "" };
+                let entry_id = format!("{}-{}{}", version, provider.split('-').next().unwrap_or(provider), suffix);
+                if entry_id == summary_id {
+                    entry.eval_score = Some(total);
+                }
+            }
+        }
+    }
+}
+
+/// Log agreement rate between user feedback and calibrated eval scores.
+fn log_calibration_agreement(
+    feedback: &[FeedbackEntry],
+    calibrated_json: &serde_json::Value,
+    entries: &[ManifestEntry],
+) {
+    let scores_map: std::collections::HashMap<String, f64> = calibrated_json
+        .get("scores")
+        .and_then(|s| s.as_array())
+        .map(|scores| {
+            scores.iter().filter_map(|s| {
+                let id = s.get("summary_id")?.as_str()?;
+                let clarity = s.get("clarity").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE);
+                let actionability = s.get("actionability").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE);
+                let info_density = s.get("information_density").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE);
+                let structure = s.get("structure").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE);
+                let total = (clarity as f64 + actionability as f64 + info_density as f64 + structure as f64) / EVAL_MAX_TOTAL;
+                Some((id.to_string(), total))
+            }).collect()
+        })
+        .unwrap_or_default();
+
+    let mut agreements = 0u32;
+    let mut total_checked = 0u32;
+
+    for fb in feedback {
+        // Find the manifest entry matching this feedback URL
+        if let Some(entry) = entries.iter().find(|e| e.url == fb.summary_url) {
+            let provider = entry.model.as_deref().unwrap_or("unknown");
+            let version = entry.prompt_version.as_deref().unwrap_or("v1");
+            let suffix = if entry.url.contains("-selection.md") { "-selection" } else { "" };
+            let entry_id = format!("{}-{}{}", version, provider.split('-').next().unwrap_or(provider), suffix);
+
+            if let Some(&score) = scores_map.get(&entry_id) {
+                total_checked += 1;
+                let score_is_up = score > 0.6;
+                let feedback_is_up = fb.feedback == "up";
+                if score_is_up == feedback_is_up {
+                    agreements += 1;
+                }
+            }
+        }
+    }
+
+    if total_checked > 0 {
+        let agreement_rate = agreements as f64 / total_checked as f64;
+        info!(
+            agreements = agreements,
+            total = total_checked,
+            rate = format!("{:.1}%", agreement_rate * 100.0),
+            "Calibration agreement with user feedback"
+        );
+    } else {
+        info!("No overlapping entries between feedback and calibrated eval");
+    }
 }
 
 /// Get list of enabled LLM providers based on available API keys.
@@ -618,7 +748,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!("ANTHROPIC_API_KEY not set, skipping beta pipeline");
     }
 
-    // --- Stage 4: Eval ---
+    // --- Load user feedback for calibration ---
+    let feedback = load_recent_feedback(&gcs_client, &bucket_name).await;
+    let calibration_context = build_calibration_context(&feedback, &gcs_client, &bucket_name, &manifest).await;
+
+    // --- Stage 4: Eval (dual pass with calibration) ---
     if let Some((_, claude_key)) = claude_entry {
         info!("Starting eval stage");
 
@@ -650,7 +784,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
 
         if !eval_summaries.is_empty() {
-            let mut eval_prompt = String::from(
+            let base_eval_prompt = String::from(
                 "You are evaluating article summaries for quality. Score each summary on these criteria (1-5):\n\n\
                 1. Clarity: How easy is it to scan and understand on a mobile phone?\n\
                 2. Actionability: Does it provide concrete takeaways the reader can act on this week?\n\
@@ -661,64 +795,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 {\"scores\": [{\"summary_id\": \"id\", \"clarity\": N, \"actionability\": N, \"information_density\": N, \"structure\": N, \"reasoning\": \"...\"}]}\n\n"
             );
 
+            let mut summaries_section = String::new();
             for (id, content) in &eval_summaries {
-                eval_prompt.push_str(&format!("--- Summary: {} ---\n{}\n\n", id, content));
+                summaries_section.push_str(&format!("--- Summary: {} ---\n{}\n\n", id, content));
             }
 
-            match call_llm_with_retry(&http_client, LlmProvider::Claude, claude_key, eval_prompt).await {
-                Ok(eval_response) => {
-                    // Parse JSON from response (handle possible markdown fences)
-                    let cleaned = eval_response
-                        .trim()
-                        .trim_start_matches("```json")
-                        .trim_start_matches("```")
-                        .trim_end_matches("```")
-                        .trim();
+            // Pass 1: Uncalibrated eval
+            let uncalibrated_prompt = format!("{}{}", base_eval_prompt, summaries_section);
+            if let Some(json) = run_eval_pass(
+                &http_client, claude_key, uncalibrated_prompt, &gcs_client, &bucket_name, &today, "eval"
+            ).await {
+                apply_eval_scores(&json, &mut new_manifest_entries);
+            }
 
-                    match serde_json::from_str::<serde_json::Value>(cleaned) {
-                        Ok(json) => {
-                            if let Some(scores) = json.get("scores").and_then(|s| s.as_array()) {
-                                for score in scores {
-                                    let summary_id = score.get("summary_id").and_then(|s| s.as_str()).unwrap_or("");
-                                    let clarity = score.get("clarity").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
-                                    let actionability = score.get("actionability").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
-                                    let info_density = score.get("information_density").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
-                                    let structure_score = score.get("structure").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
-                                    let total = (clarity as f64 + actionability as f64 + info_density as f64 + structure_score as f64) / EVAL_MAX_TOTAL;
-                                    let reasoning = score.get("reasoning").and_then(|s| s.as_str()).unwrap_or("").to_string();
-
-                                    info!(summary_id = %summary_id, total = %total, reasoning = %reasoning, "Eval score");
-
-                                    // Update matching manifest entry
-                                    for entry in &mut new_manifest_entries {
-                                        let provider = entry.model.as_deref().unwrap_or("unknown");
-                                        let version = entry.prompt_version.as_deref().unwrap_or("v1");
-                                        let suffix = if entry.url.contains("-selection.md") { "-selection" } else { "" };
-                                        let entry_id = format!("{}-{}{}", version, provider.split('-').next().unwrap_or(provider), suffix);
-                                        if entry_id == summary_id {
-                                            entry.eval_score = Some(total);
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Upload eval report
-                            let eval_object = format!("eval/{}.json", today);
-                            if let Ok(eval_json) = serde_json::to_vec_pretty(&json) {
-                                match gcs_client.upload_object(
-                                    &UploadObjectRequest { bucket: bucket_name.to_string(), ..Default::default() },
-                                    eval_json,
-                                    &UploadType::Simple(Media::new(eval_object))
-                                ).await {
-                                    Ok(_) => info!("Eval report uploaded"),
-                                    Err(e) => warn!(error = %e, "Failed to upload eval report"),
-                                }
-                            }
-                        }
-                        Err(e) => warn!(error = %e, "Failed to parse eval response as JSON"),
-                    }
+            // Pass 2: Calibrated eval (only if calibration context is available)
+            if let Some(ref cal_context) = calibration_context {
+                info!("Running calibrated eval pass");
+                let calibrated_prompt = format!("{}{}\n\n{}", cal_context, base_eval_prompt, summaries_section);
+                if let Some(cal_json) = run_eval_pass(
+                    &http_client, claude_key, calibrated_prompt, &gcs_client, &bucket_name, &today, "eval-calibrated"
+                ).await {
+                    // Calibrated scores override uncalibrated
+                    apply_eval_scores(&cal_json, &mut new_manifest_entries);
+                    log_calibration_agreement(&feedback, &cal_json, &new_manifest_entries);
                 }
-                Err(e) => warn!(error = %e, "Eval stage failed"),
             }
         }
     } else {
