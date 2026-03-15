@@ -64,6 +64,15 @@ struct ManifestEntry {
     eval_score: Option<f64>,
 }
 
+impl ManifestEntry {
+    fn summary_id(&self) -> String {
+        let provider = self.model.as_deref().unwrap_or("unknown");
+        let version = self.prompt_version.as_deref().unwrap_or("v1");
+        let suffix = if self.url.contains("-selection.md") { "-selection" } else { "" };
+        format!("{}-{}{}", version, provider.split('-').next().unwrap_or(provider), suffix)
+    }
+}
+
 /// Eval report stored in GCS at eval/{date}.json
 /// Currently parsed dynamically via serde_json::Value; typed structs retained for schema documentation.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -112,6 +121,7 @@ struct FeedbackEntry {
 const CALIBRATION_MIN_RATINGS: usize = 5;
 const CALIBRATION_LOOKBACK_DAYS: i64 = 30;
 const CALIBRATION_EXCERPT_WORDS: usize = 200;
+const CALIBRATION_AGREEMENT_THRESHOLD: f64 = 0.6;
 
 /// Load recent user feedback from GCS, scanning backwards up to CALIBRATION_LOOKBACK_DAYS.
 async fn load_recent_feedback(gcs_client: &Client, bucket_name: &str) -> Vec<FeedbackEntry> {
@@ -163,6 +173,45 @@ fn excerpt(content: &str, max_words: usize) -> String {
     }
 }
 
+/// Download summary excerpts for a set of feedback entries.
+async fn download_feedback_excerpts(
+    entries: &[&FeedbackEntry],
+    gcs_client: &Client,
+    bucket_name: &str,
+    manifest: &[ManifestEntry],
+    url_prefix: &str,
+) -> Vec<String> {
+    let mut results = Vec::new();
+    for entry in entries {
+        let gcs_path = entry.summary_url.strip_prefix(url_prefix).unwrap_or(&entry.summary_url);
+        let title = manifest.iter()
+            .find(|m| m.url == entry.summary_url)
+            .map(|m| m.title.clone())
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        match gcs_client.download_object(
+            &GetObjectRequest {
+                bucket: bucket_name.to_string(),
+                object: gcs_path.to_string(),
+                ..Default::default()
+            },
+            &Range::default(),
+        ).await {
+            Ok(data) => {
+                if let Ok(content) = String::from_utf8(data) {
+                    results.push(format!(
+                        "[Title: \"{}\"]\n{}",
+                        title,
+                        excerpt(&content, CALIBRATION_EXCERPT_WORDS)
+                    ));
+                }
+            }
+            Err(e) => warn!(url = %entry.summary_url, error = %e, "Failed to download feedback summary"),
+        }
+    }
+    results
+}
+
 /// Build a calibration context string from user feedback for the eval judge.
 async fn build_calibration_context(
     feedback: &[FeedbackEntry],
@@ -185,64 +234,8 @@ async fn build_calibration_context(
 
     let url_prefix = format!("https://storage.googleapis.com/{}/", bucket_name);
 
-    let mut highly_rated = Vec::new();
-    let mut poorly_rated = Vec::new();
-
-    for entry in &ups {
-        let gcs_path = entry.summary_url.strip_prefix(&url_prefix).unwrap_or(&entry.summary_url);
-        let title = manifest.iter()
-            .find(|m| m.url == entry.summary_url)
-            .map(|m| m.title.clone())
-            .unwrap_or_else(|| "Unknown".to_string());
-
-        match gcs_client.download_object(
-            &GetObjectRequest {
-                bucket: bucket_name.to_string(),
-                object: gcs_path.to_string(),
-                ..Default::default()
-            },
-            &Range::default(),
-        ).await {
-            Ok(data) => {
-                if let Ok(content) = String::from_utf8(data) {
-                    highly_rated.push(format!(
-                        "[Title: \"{}\"]\n{}",
-                        title,
-                        excerpt(&content, CALIBRATION_EXCERPT_WORDS)
-                    ));
-                }
-            }
-            Err(e) => warn!(url = %entry.summary_url, error = %e, "Failed to download feedback summary"),
-        }
-    }
-
-    for entry in &downs {
-        let gcs_path = entry.summary_url.strip_prefix(&url_prefix).unwrap_or(&entry.summary_url);
-        let title = manifest.iter()
-            .find(|m| m.url == entry.summary_url)
-            .map(|m| m.title.clone())
-            .unwrap_or_else(|| "Unknown".to_string());
-
-        match gcs_client.download_object(
-            &GetObjectRequest {
-                bucket: bucket_name.to_string(),
-                object: gcs_path.to_string(),
-                ..Default::default()
-            },
-            &Range::default(),
-        ).await {
-            Ok(data) => {
-                if let Ok(content) = String::from_utf8(data) {
-                    poorly_rated.push(format!(
-                        "[Title: \"{}\"]\n{}",
-                        title,
-                        excerpt(&content, CALIBRATION_EXCERPT_WORDS)
-                    ));
-                }
-            }
-            Err(e) => warn!(url = %entry.summary_url, error = %e, "Failed to download feedback summary"),
-        }
-    }
+    let highly_rated = download_feedback_excerpts(&ups, gcs_client, bucket_name, manifest, &url_prefix).await;
+    let poorly_rated = download_feedback_excerpts(&downs, gcs_client, bucket_name, manifest, &url_prefix).await;
 
     if highly_rated.is_empty() && poorly_rated.is_empty() {
         warn!("Could not download any feedback summaries for calibration");
@@ -336,11 +329,7 @@ fn apply_eval_scores(json: &serde_json::Value, entries: &mut [ManifestEntry]) {
             info!(summary_id = %summary_id, total = %total, reasoning = %reasoning, "Eval score");
 
             for entry in entries.iter_mut() {
-                let provider = entry.model.as_deref().unwrap_or("unknown");
-                let version = entry.prompt_version.as_deref().unwrap_or("v1");
-                let suffix = if entry.url.contains("-selection.md") { "-selection" } else { "" };
-                let entry_id = format!("{}-{}{}", version, provider.split('-').next().unwrap_or(provider), suffix);
-                if entry_id == summary_id {
+                if entry.summary_id() == summary_id {
                     entry.eval_score = Some(total);
                 }
             }
@@ -376,14 +365,9 @@ fn log_calibration_agreement(
     for fb in feedback {
         // Find the manifest entry matching this feedback URL
         if let Some(entry) = entries.iter().find(|e| e.url == fb.summary_url) {
-            let provider = entry.model.as_deref().unwrap_or("unknown");
-            let version = entry.prompt_version.as_deref().unwrap_or("v1");
-            let suffix = if entry.url.contains("-selection.md") { "-selection" } else { "" };
-            let entry_id = format!("{}-{}{}", version, provider.split('-').next().unwrap_or(provider), suffix);
-
-            if let Some(&score) = scores_map.get(&entry_id) {
+            if let Some(&score) = scores_map.get(&entry.summary_id()) {
                 total_checked += 1;
-                let score_is_up = score > 0.6;
+                let score_is_up = score > CALIBRATION_AGREEMENT_THRESHOLD;
                 let feedback_is_up = fb.feedback == "up";
                 if score_is_up == feedback_is_up {
                     agreements += 1;
@@ -760,10 +744,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut eval_summaries: Vec<(String, String)> = Vec::new(); // (summary_id, content)
 
         for entry in &new_manifest_entries {
-            let provider = entry.model.as_deref().unwrap_or("unknown");
-            let version = entry.prompt_version.as_deref().unwrap_or("v1");
-            let suffix = if entry.url.contains("-selection.md") { "-selection" } else { "" };
-            let summary_id = format!("{}-{}{}", version, provider.split('-').next().unwrap_or(provider), suffix);
+            let summary_id = entry.summary_id();
 
             // Download the summary we just uploaded
             match gcs_client.download_object(
@@ -811,7 +792,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             // Pass 2: Calibrated eval (only if calibration context is available)
             if let Some(ref cal_context) = calibration_context {
                 info!("Running calibrated eval pass");
-                let calibrated_prompt = format!("{}{}\n\n{}", cal_context, base_eval_prompt, summaries_section);
+                let calibrated_prompt = format!("{}{}{}", cal_context, base_eval_prompt, summaries_section);
                 if let Some(cal_json) = run_eval_pass(
                     &http_client, claude_key, calibrated_prompt, &gcs_client, &bucket_name, &today, "eval-calibrated"
                 ).await {
