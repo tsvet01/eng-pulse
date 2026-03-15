@@ -41,6 +41,23 @@ const SUMMARY_SNIPPET_CHARS: usize = 100;
 const EVAL_DEFAULT_SCORE: u64 = 3;
 const EVAL_MAX_TOTAL: f64 = 20.0;
 
+fn gcs_public_url(bucket: &str, object: &str) -> String {
+    format!("https://storage.googleapis.com/{}/{}", bucket, object)
+}
+
+fn gcs_object_path<'a>(public_url: &'a str, bucket: &str) -> &'a str {
+    let prefix = format!("https://storage.googleapis.com/{}/", bucket);
+    public_url.strip_prefix(&prefix).unwrap_or(public_url)
+}
+
+fn score_total(score: &serde_json::Value) -> f64 {
+    let clarity = score.get("clarity").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64;
+    let actionability = score.get("actionability").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64;
+    let info_density = score.get("information_density").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64;
+    let structure = score.get("structure").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64;
+    (clarity + actionability + info_density + structure) / EVAL_MAX_TOTAL
+}
+
 // --- Manifest Struct ---
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct ManifestEntry {
@@ -150,6 +167,9 @@ async fn load_recent_feedback(gcs_client: &Client, bucket_name: &str) -> Vec<Fee
                 // No feedback file for this date — expected for most days
             }
         }
+        if all_feedback.len() >= CALIBRATION_MIN_RATINGS {
+            break;
+        }
     }
 
     info!(count = all_feedback.len(), "Loaded recent feedback entries");
@@ -179,11 +199,10 @@ async fn download_feedback_excerpts(
     gcs_client: &Client,
     bucket_name: &str,
     manifest: &[ManifestEntry],
-    url_prefix: &str,
 ) -> Vec<String> {
     let mut results = Vec::new();
     for entry in entries {
-        let gcs_path = entry.summary_url.strip_prefix(url_prefix).unwrap_or(&entry.summary_url);
+        let gcs_path = gcs_object_path(&entry.summary_url, bucket_name);
         let title = manifest.iter()
             .find(|m| m.url == entry.summary_url)
             .map(|m| m.title.clone())
@@ -219,10 +238,11 @@ async fn build_calibration_context(
     bucket_name: &str,
     manifest: &[ManifestEntry],
 ) -> Option<String> {
-    if feedback.len() < CALIBRATION_MIN_RATINGS || !has_both_polarities(feedback) {
+    let both_polarities = has_both_polarities(feedback);
+    if feedback.len() < CALIBRATION_MIN_RATINGS || !both_polarities {
         info!(
             count = feedback.len(),
-            has_polarities = has_both_polarities(feedback),
+            has_polarities = both_polarities,
             "Insufficient feedback for calibration"
         );
         return None;
@@ -232,10 +252,10 @@ async fn build_calibration_context(
     let ups: Vec<&FeedbackEntry> = feedback.iter().filter(|f| f.feedback == "up").take(2).collect();
     let downs: Vec<&FeedbackEntry> = feedback.iter().filter(|f| f.feedback == "down").take(2).collect();
 
-    let url_prefix = format!("https://storage.googleapis.com/{}/", bucket_name);
-
-    let highly_rated = download_feedback_excerpts(&ups, gcs_client, bucket_name, manifest, &url_prefix).await;
-    let poorly_rated = download_feedback_excerpts(&downs, gcs_client, bucket_name, manifest, &url_prefix).await;
+    let (highly_rated, poorly_rated) = tokio::join!(
+        download_feedback_excerpts(&ups, gcs_client, bucket_name, manifest),
+        download_feedback_excerpts(&downs, gcs_client, bucket_name, manifest),
+    );
 
     if highly_rated.is_empty() && poorly_rated.is_empty() {
         warn!("Could not download any feedback summaries for calibration");
@@ -319,11 +339,7 @@ fn apply_eval_scores(json: &serde_json::Value, entries: &mut [ManifestEntry]) {
     if let Some(scores) = json.get("scores").and_then(|s| s.as_array()) {
         for score in scores {
             let summary_id = score.get("summary_id").and_then(|s| s.as_str()).unwrap_or("");
-            let clarity = score.get("clarity").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
-            let actionability = score.get("actionability").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
-            let info_density = score.get("information_density").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
-            let structure_score = score.get("structure").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as u8;
-            let total = (clarity as f64 + actionability as f64 + info_density as f64 + structure_score as f64) / EVAL_MAX_TOTAL;
+            let total = score_total(score);
             let reasoning = score.get("reasoning").and_then(|s| s.as_str()).unwrap_or("").to_string();
 
             info!(summary_id = %summary_id, total = %total, reasoning = %reasoning, "Eval score");
@@ -349,12 +365,7 @@ fn log_calibration_agreement(
         .map(|scores| {
             scores.iter().filter_map(|s| {
                 let id = s.get("summary_id")?.as_str()?;
-                let clarity = s.get("clarity").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE);
-                let actionability = s.get("actionability").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE);
-                let info_density = s.get("information_density").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE);
-                let structure = s.get("structure").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE);
-                let total = (clarity as f64 + actionability as f64 + info_density as f64 + structure as f64) / EVAL_MAX_TOTAL;
-                Some((id.to_string(), total))
+                Some((id.to_string(), score_total(s)))
             }).collect()
         })
         .unwrap_or_default();
@@ -596,7 +607,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     Ok(_) => {
                         info!(provider = %provider.as_str(), "Summary upload complete");
 
-                        let public_url = format!("https://storage.googleapis.com/{}/{}", bucket_name, object_name);
+                        let public_url = gcs_public_url(&bucket_name, &object_name);
                         new_manifest_entries.push(ManifestEntry {
                             date: today.clone(),
                             url: public_url,
@@ -657,7 +668,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             &UploadType::Simple(Media::new(object_name.clone()))
                         ).await {
                             Ok(_) => {
-                                let public_url = format!("https://storage.googleapis.com/{}/{}", bucket_name, object_name);
+                                let public_url = gcs_public_url(&bucket_name, &object_name);
                                 new_manifest_entries.push(ManifestEntry {
                                     date: today.clone(),
                                     url: public_url,
@@ -703,7 +714,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 &UploadType::Simple(Media::new(object_name.clone()))
                             ).await {
                                 Ok(_) => {
-                                    let public_url = format!("https://storage.googleapis.com/{}/{}", bucket_name, object_name);
+                                    let public_url = gcs_public_url(&bucket_name, &object_name);
                                     new_manifest_entries.push(ManifestEntry {
                                         date: today.clone(),
                                         url: public_url,
@@ -750,7 +761,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             match gcs_client.download_object(
                 &GetObjectRequest {
                     bucket: bucket_name.to_string(),
-                    object: entry.url.replace(&format!("https://storage.googleapis.com/{}/", bucket_name), ""),
+                    object: gcs_object_path(&entry.url, &bucket_name).to_string(),
                     ..Default::default()
                 },
                 &Range::default()
