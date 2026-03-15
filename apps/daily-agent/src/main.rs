@@ -96,6 +96,78 @@ struct EvalCriteria {
     structure: u8,
 }
 
+// --- User Feedback Calibration ---
+
+#[derive(Deserialize, Debug, Clone)]
+#[allow(dead_code)]
+struct FeedbackEntry {
+    summary_url: String,
+    feedback: String,
+    #[serde(default)]
+    prompt_version: Option<String>,
+    uid: String,
+    timestamp: String,
+}
+
+#[allow(dead_code)]
+const CALIBRATION_MIN_RATINGS: usize = 5;
+const CALIBRATION_LOOKBACK_DAYS: i64 = 30;
+#[allow(dead_code)]
+const CALIBRATION_EXCERPT_WORDS: usize = 200;
+
+/// Load recent user feedback from GCS, scanning backwards up to CALIBRATION_LOOKBACK_DAYS.
+#[allow(dead_code)]
+async fn load_recent_feedback(gcs_client: &Client, bucket_name: &str) -> Vec<FeedbackEntry> {
+    let mut all_feedback = Vec::new();
+    let now = Utc::now();
+
+    for days_ago in 0..CALIBRATION_LOOKBACK_DAYS {
+        let date = (now - chrono::Duration::days(days_ago)).format("%Y-%m-%d").to_string();
+        let object = format!("feedback/{}.json", date);
+
+        match gcs_client.download_object(
+            &GetObjectRequest {
+                bucket: bucket_name.to_string(),
+                object,
+                ..Default::default()
+            },
+            &Range::default(),
+        ).await {
+            Ok(data) => {
+                match serde_json::from_slice::<Vec<FeedbackEntry>>(&data) {
+                    Ok(mut entries) => all_feedback.append(&mut entries),
+                    Err(e) => warn!(date = %date, error = %e, "Failed to parse feedback JSON"),
+                }
+            }
+            Err(_) => {
+                // No feedback file for this date — expected for most days
+            }
+        }
+    }
+
+    info!(count = all_feedback.len(), "Loaded recent feedback entries");
+    all_feedback
+}
+
+/// Check that feedback contains at least one "up" and one "down" vote.
+#[allow(dead_code)]
+fn has_both_polarities(feedback: &[FeedbackEntry]) -> bool {
+    let has_up = feedback.iter().any(|f| f.feedback == "up");
+    let has_down = feedback.iter().any(|f| f.feedback == "down");
+    has_up && has_down
+}
+
+/// Truncate content to approximately max_words words.
+#[allow(dead_code)]
+fn excerpt(content: &str, max_words: usize) -> String {
+    let words: Vec<&str> = content.split_whitespace().collect();
+    if words.len() <= max_words {
+        words.join(" ")
+    } else {
+        format!("{}...", words[..max_words].join(" "))
+    }
+}
+
 /// Get list of enabled LLM providers based on available API keys.
 /// Claude is first for article selection, others follow for summary generation.
 fn get_enabled_providers() -> Vec<(LlmProvider, String)> {
@@ -652,5 +724,61 @@ mod tests {
     fn test_parse_selection_index_only_special_chars() {
         assert_eq!(parse_selection_index("!@#$%^&*()"), None);
         assert_eq!(parse_selection_index("..."), None);
+    }
+
+    #[test]
+    fn test_has_both_polarities_true() {
+        let feedback = vec![
+            FeedbackEntry {
+                summary_url: "https://example.com/a".to_string(),
+                feedback: "up".to_string(),
+                prompt_version: None,
+                uid: "u1".to_string(),
+                timestamp: "2026-03-15T00:00:00Z".to_string(),
+            },
+            FeedbackEntry {
+                summary_url: "https://example.com/b".to_string(),
+                feedback: "down".to_string(),
+                prompt_version: None,
+                uid: "u1".to_string(),
+                timestamp: "2026-03-15T00:00:00Z".to_string(),
+            },
+        ];
+        assert!(has_both_polarities(&feedback));
+    }
+
+    #[test]
+    fn test_has_both_polarities_all_up() {
+        let feedback = vec![
+            FeedbackEntry {
+                summary_url: "https://example.com/a".to_string(),
+                feedback: "up".to_string(),
+                prompt_version: None,
+                uid: "u1".to_string(),
+                timestamp: "2026-03-15T00:00:00Z".to_string(),
+            },
+            FeedbackEntry {
+                summary_url: "https://example.com/b".to_string(),
+                feedback: "up".to_string(),
+                prompt_version: None,
+                uid: "u1".to_string(),
+                timestamp: "2026-03-15T00:00:00Z".to_string(),
+            },
+        ];
+        assert!(!has_both_polarities(&feedback));
+    }
+
+    #[test]
+    fn test_excerpt_truncation() {
+        let content = "one two three four five six seven eight nine ten";
+        let result = excerpt(content, 5);
+        assert_eq!(result, "one two three four five...");
+    }
+
+    #[test]
+    fn test_excerpt_short_content() {
+        let content = "hello world";
+        let result = excerpt(content, 200);
+        assert_eq!(result, "hello world");
     }
 }
