@@ -99,7 +99,7 @@ struct EvalCriteria {
 /// Get list of enabled LLM providers based on available API keys.
 /// Claude is first for article selection, others follow for summary generation.
 fn get_enabled_providers() -> Vec<(LlmProvider, String)> {
-    let providers = [LlmProvider::Claude, LlmProvider::Gemini, LlmProvider::OpenAI];
+    let providers = [LlmProvider::Claude, LlmProvider::Gemini];
     let mut enabled = Vec::new();
 
     for provider in providers {
@@ -127,7 +127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Get enabled providers
     let enabled_providers = get_enabled_providers();
     if enabled_providers.is_empty() {
-        error!("No LLM providers configured. Set at least one of: GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY");
+        error!("No LLM providers configured. Set at least one of: GEMINI_API_KEY, ANTHROPIC_API_KEY");
         return Err("No LLM providers configured".into());
     }
 
