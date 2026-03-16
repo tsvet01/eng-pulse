@@ -54,8 +54,8 @@ fn score_total(score: &serde_json::Value) -> f64 {
     let clarity = score.get("clarity").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64;
     let actionability = score.get("actionability").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64;
     let info_density = score.get("information_density").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64;
-    let structure = score.get("structure").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64;
-    (clarity + actionability + info_density + structure) / EVAL_MAX_TOTAL
+    let faithfulness = score.get("faithfulness").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64;
+    (clarity + actionability + info_density + faithfulness) / EVAL_MAX_TOTAL
 }
 
 // --- Manifest Struct ---
@@ -119,7 +119,7 @@ struct EvalCriteria {
     clarity: u8,
     actionability: u8,
     information_density: u8,
-    structure: u8,
+    faithfulness: u8,
 }
 
 // --- User Feedback Calibration ---
@@ -781,10 +781,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 1. Clarity: How easy is it to scan and understand on a mobile phone?\n\
                 2. Actionability: Does it provide concrete takeaways the reader can act on this week?\n\
                 3. Information density: What is the signal-to-noise ratio? Is every sentence valuable?\n\
-                4. Structure: Is it well-formatted with clear sections, bold key phrases, scannable bullets?\n\n\
-                The reader is a senior engineering leader. They have 2-3 minutes on their phone.\n\n\
+                4. Faithfulness: Does the summary accurately represent the source without adding unsupported claims or forced conclusions?\n\n\
+                The reader is a senior engineering leader. They have 2-3 minutes on their phone.\n\
+                Judge the content quality, not whether it uses any particular formatting style.\n\n\
                 For each summary below, return ONLY a JSON object (no markdown fences):\n\
-                {\"scores\": [{\"summary_id\": \"id\", \"clarity\": N, \"actionability\": N, \"information_density\": N, \"structure\": N, \"reasoning\": \"...\"}]}\n\n"
+                {\"scores\": [{\"summary_id\": \"id\", \"clarity\": N, \"actionability\": N, \"information_density\": N, \"faithfulness\": N, \"reasoning\": \"...\"}]}\n\n"
             );
 
             let mut summaries_section = String::new();
@@ -803,7 +804,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             // Pass 2: Calibrated eval (only if calibration context is available)
             if let Some(ref cal_context) = calibration_context {
                 info!("Running calibrated eval pass");
-                let calibrated_prompt = format!("{}{}{}", cal_context, base_eval_prompt, summaries_section);
+                let calibrated_prompt = format!("{}{}\n{}", base_eval_prompt, cal_context, summaries_section);
                 if let Some(cal_json) = run_eval_pass(
                     &http_client, claude_key, calibrated_prompt, &gcs_client, &bucket_name, &today, "eval-calibrated"
                 ).await {
