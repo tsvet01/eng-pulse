@@ -50,12 +50,14 @@ fn gcs_object_path<'a>(public_url: &'a str, bucket: &str) -> &'a str {
     public_url.strip_prefix(&prefix).unwrap_or(public_url)
 }
 
+const SCORE_KEYS: &[&str] = &["clarity", "actionability", "information_density", "faithfulness"];
+
 fn score_total(score: &serde_json::Value) -> f64 {
-    let clarity = score.get("clarity").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64;
-    let actionability = score.get("actionability").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64;
-    let info_density = score.get("information_density").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64;
-    let structure = score.get("structure").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64;
-    (clarity + actionability + info_density + structure) / EVAL_MAX_TOTAL
+    let total: f64 = SCORE_KEYS
+        .iter()
+        .map(|&key| score.get(key).and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64)
+        .sum();
+    total / EVAL_MAX_TOTAL
 }
 
 // --- Manifest Struct ---
@@ -119,7 +121,7 @@ struct EvalCriteria {
     clarity: u8,
     actionability: u8,
     information_density: u8,
-    structure: u8,
+    faithfulness: u8,
 }
 
 // --- User Feedback Calibration ---
@@ -419,6 +421,120 @@ fn get_enabled_providers() -> Vec<(LlmProvider, String)> {
     enabled
 }
 
+// --- Backfill Beta ---
+
+/// Re-generate V2 beta summaries for recent days using existing manifest entries.
+/// Reads the manifest, finds prod entries for the target dates, fetches original articles,
+/// generates new V2 summaries, and updates the manifest.
+async fn backfill_beta(
+    days: usize,
+    http_client: &reqwest::Client,
+    gcs_client: &Client,
+    bucket_name: &str,
+    claude_key: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let now = Utc::now();
+    let target_dates: Vec<String> = (1..=days)
+        .map(|d| (now - chrono::Duration::days(d as i64)).format("%Y-%m-%d").to_string())
+        .collect();
+
+    info!(dates = ?target_dates, "Backfilling beta summaries");
+
+    // Download manifest
+    let mut manifest: Vec<ManifestEntry> = {
+        let data = gcs_client.download_object(
+            &GetObjectRequest {
+                bucket: bucket_name.to_string(),
+                object: "manifest.json".to_string(),
+                ..Default::default()
+            },
+            &Range::default(),
+        ).await?;
+        serde_json::from_slice(&data)?
+    };
+
+    let beta_config = prompts::PromptConfig::V2;
+
+    for date in &target_dates {
+        // Find a prod entry for this date (prompt_version is None for v1)
+        let prod_entry = manifest.iter().find(|e| {
+            e.date == *date && e.prompt_version.is_none() && e.original_url.is_some()
+        });
+
+        let (title, original_url) = match prod_entry {
+            Some(e) => (e.title.clone(), e.original_url.clone().unwrap()),
+            None => {
+                warn!(date = %date, "No prod entry found, skipping");
+                continue;
+            }
+        };
+
+        info!(date = %date, title = %title, "Backfilling beta summary");
+
+        // Fetch original article content
+        let article_text = match fetch_article_content(http_client, &original_url).await {
+            Ok(content) => content,
+            Err(e) => {
+                warn!(date = %date, error = %e, "Failed to fetch article, skipping");
+                continue;
+            }
+        };
+        let truncated: String = article_text.chars().take(MAX_ARTICLE_CHARS).collect();
+        let source = extract_domain(&original_url);
+
+        let prompt = beta_config.summary_prompt(&source, &title, &truncated);
+        match call_llm_with_retry(http_client, LlmProvider::Claude, claude_key, prompt).await {
+            Ok(summary) => {
+                let summary_snippet: String = summary.chars().take(SUMMARY_SNIPPET_CHARS).collect();
+                let object_name = format!("summaries/beta/claude/{}.md", date);
+                let summary_bytes = summary.into_bytes();
+
+                match gcs_client.upload_object(
+                    &UploadObjectRequest { bucket: bucket_name.to_string(), ..Default::default() },
+                    summary_bytes,
+                    &UploadType::Simple(Media::new(object_name.clone())),
+                ).await {
+                    Ok(_) => {
+                        let public_url = gcs_public_url(bucket_name, &object_name);
+
+                        // Remove old beta entries for this date
+                        manifest.retain(|e| !(e.date == *date && e.prompt_version.as_deref() == Some("v2")));
+
+                        // Find insertion point: after the last entry for this date
+                        let insert_idx = manifest.iter().position(|e| e.date < *date).unwrap_or(manifest.len());
+                        manifest.insert(insert_idx, ManifestEntry {
+                            date: date.clone(),
+                            url: public_url,
+                            title: title.clone(),
+                            summary_snippet,
+                            original_url: Some(original_url.clone()),
+                            model: Some(LlmProvider::Claude.model_name().to_string()),
+                            selected_by: None,
+                            prompt_version: Some(beta_config.version().to_string()),
+                            eval_score: None,
+                        });
+
+                        info!(date = %date, "Beta summary backfilled");
+                    }
+                    Err(e) => warn!(date = %date, error = %e, "Failed to upload backfill summary"),
+                }
+            }
+            Err(e) => warn!(date = %date, error = %e, "Failed to generate backfill summary"),
+        }
+    }
+
+    // Upload updated manifest
+    let manifest_json = serde_json::to_vec_pretty(&manifest)?;
+    gcs_client.upload_object(
+        &UploadObjectRequest { bucket: bucket_name.to_string(), ..Default::default() },
+        manifest_json,
+        &UploadType::Simple(Media::new("manifest.json".to_string())),
+    ).await?;
+
+    info!(days = days, "Beta backfill complete");
+    Ok(())
+}
+
 // --- Main ---
 
 #[tokio::main]
@@ -440,6 +556,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         providers = ?enabled_providers.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(),
         "Starting SE Daily Agent"
     );
+
+    // 0. Initialize shared HTTP client (reused for connection pooling)
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .build()?;
+
+    // Initialize GCS Client
+    let config = ClientConfig::default().with_auth().await?;
+    let gcs_client = Client::new(config);
+
+    // --- Backfill mode: regenerate V2 beta summaries for recent days ---
+    if let Ok(days_str) = std::env::var("BACKFILL_BETA_DAYS") {
+        let days: usize = days_str.parse().unwrap_or(3);
+        let claude_key = enabled_providers.iter()
+            .find(|(p, _)| *p == LlmProvider::Claude)
+            .map(|(_, k)| k.as_str())
+            .ok_or("BACKFILL_BETA_DAYS requires ANTHROPIC_API_KEY")?;
+        return backfill_beta(days, &http_client, &gcs_client, &bucket_name, claude_key).await;
+    }
 
     // Use first provider for article selection (Claude preferred)
     let (selection_provider, selection_key) = enabled_providers.first().unwrap().clone();
@@ -781,10 +916,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 1. Clarity: How easy is it to scan and understand on a mobile phone?\n\
                 2. Actionability: Does it provide concrete takeaways the reader can act on this week?\n\
                 3. Information density: What is the signal-to-noise ratio? Is every sentence valuable?\n\
-                4. Structure: Is it well-formatted with clear sections, bold key phrases, scannable bullets?\n\n\
-                The reader is a senior engineering leader. They have 2-3 minutes on their phone.\n\n\
+                4. Faithfulness: Does the summary accurately represent the source without adding unsupported claims or forced conclusions?\n\n\
+                The reader is a senior engineering leader. They have 2-3 minutes on their phone.\n\
+                Judge the content quality, not whether it uses any particular formatting style.\n\n\
                 For each summary below, return ONLY a JSON object (no markdown fences):\n\
-                {\"scores\": [{\"summary_id\": \"id\", \"clarity\": N, \"actionability\": N, \"information_density\": N, \"structure\": N, \"reasoning\": \"...\"}]}\n\n"
+                {\"scores\": [{\"summary_id\": \"id\", \"clarity\": N, \"actionability\": N, \"information_density\": N, \"faithfulness\": N, \"reasoning\": \"...\"}]}\n\n"
             );
 
             let mut summaries_section = String::new();
@@ -803,7 +939,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             // Pass 2: Calibrated eval (only if calibration context is available)
             if let Some(ref cal_context) = calibration_context {
                 info!("Running calibrated eval pass");
-                let calibrated_prompt = format!("{}{}{}", cal_context, base_eval_prompt, summaries_section);
+                let calibrated_prompt = format!("{}{}\n{}", base_eval_prompt, cal_context, summaries_section);
                 if let Some(cal_json) = run_eval_pass(
                     &http_client, claude_key, calibrated_prompt, &gcs_client, &bucket_name, &today, "eval-calibrated"
                 ).await {

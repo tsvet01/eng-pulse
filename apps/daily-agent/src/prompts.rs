@@ -41,15 +41,21 @@ impl PromptConfig {
         format!(
             r#"You are curating a daily technical digest for this reader:
 
-Engineering leader and systems programmer (C++/Rust/Python/Go) in quantitative finance, building developer platforms at a hedge fund in London. 20 years across storage systems, derivatives risk, and WhatsApp commerce. Obsessed with low-level performance, AI-assisted development, and the builder-vs-manager tension.
+Engineering leader building developer platforms at a hedge fund in London. Systems programmer (C++/Rust) with 20 years across low-latency trading, storage systems, and developer tooling.
 
-Their interest areas: C++ (modern standards, performance, SIMD), Rust (systems, async), Python (typing, performance), low-latency computing, distributed systems, CI/CD & build systems, platform engineering, LLM-assisted coding (agentic workflows, MCP), AI engineering (RAG, tool use), trading systems architecture, real-time risk/P&L, engineering leadership (Staff/Principal paths, IC vs manager), Neovim/terminal tooling, adult developmental psychology.
+Top interests (ranked):
+1. Low-latency systems and performance engineering (C++, Rust, SIMD)
+2. AI-assisted development and agentic coding workflows
+3. Platform engineering and developer experience
+4. Engineering leadership — Staff/Principal IC paths
+5. Trading systems architecture and real-time risk
 
 From today's articles, select the SINGLE most valuable one. Prioritize:
 1. Actionable insight they can apply this week
 2. Technical depth — not surface-level news or beginner content
 3. Novelty — fresh perspective, not common knowledge
-4. Relevance to their specific role and interests
+
+When criteria conflict, prefer actionability over novelty, and depth over breadth.
 
 Avoid: product announcements, vendor marketing, beginner tutorials, pure news without insight.
 
@@ -69,28 +75,30 @@ Reply ONLY with the integer index number (e.g., '3'). No explanation."#,
 
     fn v2_summary_prompt(&self, source: &str, title: &str, content: &str) -> String {
         format!(
-            r#"Summarize this article in exactly this structure (400-500 words total):
+            r#"Summarize this article for a senior engineering leader (2-3 minutes on mobile).
 
-## {{concise title, 8-12 words}}
+Use this structure:
 
-**{{one-line hook: why this matters to an engineering leader}}**
+## [concise title]
+
+**[one-line hook: why this matters]**
 
 ### Key Points
-- **{{bold lead phrase}}**: {{explanation}}
+- **[bold lead phrase]**: [explanation]
 (3-5 bullets, each self-contained)
 
 ### Why It Matters
-{{2-3 sentences connecting to real engineering work — architecture decisions, team impact, or industry shift}}
+[2-3 sentences connecting to real engineering work — architecture decisions, team impact, or industry shift.]
 
-### Action Items
-- {{1-2 specific, concrete things to evaluate or do this week}}
+### Action Items (include ONLY if the article suggests concrete actions — omit this section otherwise)
+- [1-2 specific things to evaluate or try this week]
 
 Rules:
-- Reader is a senior engineering leader who builds developer platforms at a hedge fund
+- Reader builds developer platforms at a hedge fund (C++/Rust, low-latency, AI tooling)
+- Match length to content depth — aim for 300-500 words but prioritize density over hitting a word count
 - No fluff, no filler, no "in conclusion", no "in summary"
 - Bold the lead phrase of each bullet for scannability
-- Each paragraph max 50 words (mobile readability)
-- Be specific and opinionated, not hedging
+- Be direct and state conclusions clearly, but acknowledge genuine tradeoffs
 - Ignore promotional content
 
 Article Source: {}
@@ -115,7 +123,8 @@ mod tests {
     #[test]
     fn test_v2_selection_prompt_contains_persona() {
         let prompt = PromptConfig::V2.selection_prompt("0. [HN] Test Article");
-        assert!(prompt.contains("quantitative finance"));
+        assert!(prompt.contains("hedge fund"));
+        assert!(prompt.contains("prefer actionability over novelty"));
         assert!(prompt.contains("0. [HN] Test Article"));
     }
 
@@ -132,6 +141,7 @@ mod tests {
         assert!(prompt.contains("### Key Points"));
         assert!(prompt.contains("### Why It Matters"));
         assert!(prompt.contains("### Action Items"));
-        assert!(prompt.contains("400-500 words"));
+        assert!(prompt.contains("300-500 words"));
+        assert!(prompt.contains("prioritize density over hitting a word count"));
     }
 }
