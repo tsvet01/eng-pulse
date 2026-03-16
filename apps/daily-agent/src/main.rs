@@ -50,12 +50,14 @@ fn gcs_object_path<'a>(public_url: &'a str, bucket: &str) -> &'a str {
     public_url.strip_prefix(&prefix).unwrap_or(public_url)
 }
 
+const SCORE_KEYS: &[&str] = &["clarity", "actionability", "information_density", "faithfulness"];
+
 fn score_total(score: &serde_json::Value) -> f64 {
-    let clarity = score.get("clarity").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64;
-    let actionability = score.get("actionability").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64;
-    let info_density = score.get("information_density").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64;
-    let faithfulness = score.get("faithfulness").and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64;
-    (clarity + actionability + info_density + faithfulness) / EVAL_MAX_TOTAL
+    let total: f64 = SCORE_KEYS
+        .iter()
+        .map(|&key| score.get(key).and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64)
+        .sum();
+    total / EVAL_MAX_TOTAL
 }
 
 // --- Manifest Struct ---

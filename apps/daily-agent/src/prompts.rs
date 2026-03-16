@@ -88,10 +88,10 @@ Use this structure:
 (3-5 bullets, each self-contained)
 
 ### Why It Matters
-2-3 sentences connecting to real engineering work — architecture decisions, team impact, or industry shift.
+[2-3 sentences connecting to real engineering work — architecture decisions, team impact, or industry shift.]
 
 ### Action Items (include ONLY if the article suggests concrete actions — omit this section otherwise)
-- 1-2 specific things to evaluate or try this week
+- [1-2 specific things to evaluate or try this week]
 
 Rules:
 - Reader builds developer platforms at a hedge fund (C++/Rust, low-latency, AI tooling)
