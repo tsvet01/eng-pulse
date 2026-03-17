@@ -138,6 +138,7 @@ struct DetailView: View {
                     LabeledContent("Source", value: summary.source)
                     LabeledContent("Date", value: summary.date)
                     LabeledContent("Summarized by", value: summary.modelDisplayName)
+                    LabeledContent("Prompt", value: summary.promptVersion == "v2" ? "Beta (v2)" : "Production")
                     if let selectedBy = summary.selectedBy {
                         LabeledContent("Selected by", value: selectedBy)
                     }

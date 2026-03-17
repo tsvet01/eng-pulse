@@ -144,16 +144,28 @@ struct SummaryCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(summary.displayDate, format: .dateTime.month(.abbreviated).day())
-                .font(.caption2)
-                .foregroundColor(.secondary)
+            HStack(spacing: 6) {
+                Text(summary.displayDate, format: .dateTime.month(.abbreviated).day())
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+
+                if summary.promptVersion == "v2" {
+                    Text("Beta")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(.orange)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.orange.opacity(0.12))
+                        .clipShape(Capsule())
+                }
+            }
 
             Text(summary.title)
                 .font(.body)
                 .fontWeight(.semibold)
                 .lineLimit(2)
 
-            if let snippet = summary.summarySnippet {
+            if let snippet = summary.cleanSnippet {
                 Text(snippet)
                     .font(.caption)
                     .foregroundColor(.secondary)

@@ -64,7 +64,7 @@ struct MarkdownContentView: View {
     }
 
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 blockView(block)
             }
