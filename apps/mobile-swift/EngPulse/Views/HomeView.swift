@@ -149,14 +149,8 @@ struct SummaryCardView: View {
                     .font(.caption2)
                     .foregroundColor(.secondary)
 
-                if summary.promptVersion == "v2" {
-                    Text("Beta")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(.orange)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Color.orange.opacity(0.12))
-                        .clipShape(Capsule())
+                if summary.isBeta {
+                    BetaBadge()
                 }
             }
 
@@ -174,6 +168,19 @@ struct SummaryCardView: View {
 
         }
         .padding(.vertical, 2)
+    }
+}
+
+// MARK: - Beta Badge
+struct BetaBadge: View {
+    var body: some View {
+        Text("Beta")
+            .font(.system(size: 9, weight: .medium))
+            .foregroundColor(.orange)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(Color.orange.opacity(0.12))
+            .clipShape(Capsule())
     }
 }
 
