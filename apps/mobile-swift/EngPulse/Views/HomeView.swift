@@ -40,7 +40,7 @@ struct HomeViewContent: View {
         if promptVersionFilter == "production" {
             result = result.filter { $0.promptVersion == nil }
         } else if promptVersionFilter == "beta" {
-            result = result.filter { $0.promptVersion == "v2" }
+            result = result.filter { $0.isBeta }
         }
         // "both" shows all
 

@@ -67,18 +67,7 @@ struct Summary: Identifiable, Codable, Equatable, Hashable {
 
     /// Snippet with markdown syntax stripped for clean list display.
     var cleanSnippet: String? {
-        guard let snippet = summarySnippet else { return nil }
-        return snippet
-            .replacingOccurrences(of: "#{1,6}\\s*", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "\\*\\*\\*(.*?)\\*\\*\\*", with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: "\\*\\*(.*?)\\*\\*", with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: "__(.*?)__", with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: "\\*(.*?)\\*", with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: "_(.*?)_", with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: "~~(.*?)~~", with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: "`([^`]+)`", with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: "^[-*]\\s+", with: "", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        summarySnippet.map { TextCleaner.cleanForSpeech($0) }
     }
 
     var modelDisplayName: String {
