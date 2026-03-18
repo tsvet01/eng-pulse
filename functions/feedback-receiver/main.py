@@ -48,23 +48,35 @@ def _load_feedback(bucket, date_str):
         return []
 
 
-def _upsert_feedback(entries, uid, summary_url, feedback, prompt_version):
+def _upsert_feedback(entries, uid, summary_url, feedback, prompt_version,
+                     selection_feedback=None, summary_feedback=None):
     """Upsert feedback entry by uid + summary_url."""
     now = datetime.now(timezone.utc).isoformat()
     for entry in entries:
         if entry["uid"] == uid and entry["summary_url"] == summary_url:
-            entry["feedback"] = feedback
+            if feedback is not None:
+                entry["feedback"] = feedback
+            if selection_feedback is not None:
+                entry["selection_feedback"] = selection_feedback
+            if summary_feedback is not None:
+                entry["summary_feedback"] = summary_feedback
             entry["prompt_version"] = prompt_version
             entry["timestamp"] = now
             return entries
 
-    entries.append({
+    new_entry = {
         "summary_url": summary_url,
-        "feedback": feedback,
         "prompt_version": prompt_version,
         "uid": uid,
         "timestamp": now,
-    })
+    }
+    if feedback is not None:
+        new_entry["feedback"] = feedback
+    if selection_feedback is not None:
+        new_entry["selection_feedback"] = selection_feedback
+    if summary_feedback is not None:
+        new_entry["summary_feedback"] = summary_feedback
+    entries.append(new_entry)
     return entries
 
 
@@ -90,10 +102,20 @@ def receive_feedback(request):
 
     summary_url = body.get("summary_url")
     feedback = body.get("feedback")
+    selection_feedback = body.get("selection_feedback")
+    summary_feedback = body.get("summary_feedback")
     prompt_version = body.get("prompt_version")
 
-    if not summary_url or feedback not in ("up", "down"):
-        return error_response("summary_url required, feedback must be 'up' or 'down'", 400)
+    if not summary_url:
+        return error_response("summary_url required", 400)
+
+    valid = ("up", "down")
+    if feedback is None and selection_feedback is None and summary_feedback is None:
+        return error_response("at least one feedback field required", 400)
+    if (feedback is not None and feedback not in valid) or \
+       (selection_feedback is not None and selection_feedback not in valid) or \
+       (summary_feedback is not None and summary_feedback not in valid):
+        return error_response("feedback values must be 'up' or 'down'", 400)
 
     # Derive date server-side
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -103,7 +125,8 @@ def receive_feedback(request):
     bucket = client.bucket(BUCKET_NAME)
 
     entries = _load_feedback(bucket, date_str)
-    entries = _upsert_feedback(entries, uid, summary_url, feedback, prompt_version)
+    entries = _upsert_feedback(entries, uid, summary_url, feedback, prompt_version,
+                               selection_feedback, summary_feedback)
 
     blob = bucket.blob(f"feedback/{date_str}.json")
     blob.upload_from_string(
@@ -111,5 +134,6 @@ def receive_feedback(request):
         content_type="application/json",
     )
 
-    logger.info("Feedback recorded", uid=uid[:8], url=summary_url, feedback=feedback)
+    logger.info("Feedback recorded", uid=uid[:8], url=summary_url,
+                feedback=feedback, selection=selection_feedback, summary=summary_feedback)
     return json_response({"status": "ok"})

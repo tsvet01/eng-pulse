@@ -8,12 +8,14 @@ actor FeedbackService {
 
     private struct RequestBody: Encodable {
         let summaryUrl: String
-        let feedback: String
+        let selectionFeedback: String?
+        let summaryFeedback: String?
         let promptVersion: String?
 
         enum CodingKeys: String, CodingKey {
             case summaryUrl = "summary_url"
-            case feedback
+            case selectionFeedback = "selection_feedback"
+            case summaryFeedback = "summary_feedback"
             case promptVersion = "prompt_version"
         }
     }
@@ -25,10 +27,12 @@ actor FeedbackService {
         self.endpointURL = url
     }
 
-    /// Upload feedback to Cloud Function. Fire-and-forget — errors are logged, not surfaced.
+    /// Upload per-aspect feedback to Cloud Function. Fire-and-forget — errors are logged, not surfaced.
     /// Note: If auth hasn't completed yet (offline first launch), feedback is silently skipped.
     /// Local UserDefaults still captures it. Offline queuing deferred to future iteration.
-    func submitFeedback(summaryURL: String, feedback: String, promptVersion: String?) async {
+    func submitFeedback(summaryURL: String, selectionFeedback: String?,
+                        summaryFeedback: String?, promptVersion: String?) async {
+        guard selectionFeedback != nil || summaryFeedback != nil else { return }
         guard let user = Auth.auth().currentUser else {
             print("FeedbackService: No authenticated user, skipping upload")
             return
@@ -43,7 +47,8 @@ actor FeedbackService {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
             request.httpBody = try JSONEncoder().encode(
-                RequestBody(summaryUrl: summaryURL, feedback: feedback, promptVersion: promptVersion)
+                RequestBody(summaryUrl: summaryURL, selectionFeedback: selectionFeedback,
+                            summaryFeedback: summaryFeedback, promptVersion: promptVersion)
             )
 
             let (_, response) = try await URLSession.shared.data(for: request)

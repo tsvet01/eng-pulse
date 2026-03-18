@@ -67,6 +67,7 @@ struct MarkdownContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 blockView(block)
+                    .textSelection(.enabled)
             }
         }
     }

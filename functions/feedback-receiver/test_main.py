@@ -139,3 +139,58 @@ def test_upserts_existing_feedback(app, mock_firebase, mock_gcs):
     uploaded = json.loads(mock_blob.upload_from_string.call_args[0][0])
     assert len(uploaded) == 1
     assert uploaded[0]["feedback"] == "down"
+
+
+def test_stores_aspect_feedback(app, mock_firebase, mock_gcs):
+    _, mock_bucket, mock_blob = mock_gcs
+    request = make_request(json_body={
+        "summary_url": "gs://tsvet01-agent-brain/summaries/gemini/2026-03-14.md",
+        "selection_feedback": "up",
+        "summary_feedback": "down",
+    })
+    response = app(request)
+    body = json.loads(response[0].get_data(as_text=True))
+    assert body["status"] == "ok"
+    uploaded = json.loads(mock_blob.upload_from_string.call_args[0][0])
+    assert uploaded[0]["selection_feedback"] == "up"
+    assert uploaded[0]["summary_feedback"] == "down"
+    assert "feedback" not in uploaded[0]
+
+
+def test_rejects_invalid_aspect_feedback(app, mock_firebase, mock_gcs):
+    request = make_request(json_body={
+        "summary_url": "gs://test",
+        "selection_feedback": "maybe",
+    })
+    response = app(request)
+    assert response[1] == 400
+
+
+def test_rejects_no_feedback_fields(app, mock_firebase, mock_gcs):
+    request = make_request(json_body={
+        "summary_url": "gs://test",
+    })
+    response = app(request)
+    assert response[1] == 400
+
+
+def test_upserts_aspect_on_existing(app, mock_firebase, mock_gcs):
+    _, mock_bucket, mock_blob = mock_gcs
+    existing = json.dumps([{
+        "summary_url": "gs://tsvet01-agent-brain/summaries/gemini/2026-03-14.md",
+        "selection_feedback": "up",
+        "uid": "test-uid-123",
+        "timestamp": "2026-03-14T08:00:00+00:00",
+    }])
+    mock_blob.download_as_text.side_effect = None
+    mock_blob.download_as_text.return_value = existing
+
+    request = make_request(json_body={
+        "summary_url": "gs://tsvet01-agent-brain/summaries/gemini/2026-03-14.md",
+        "summary_feedback": "down",
+    })
+    response = app(request)
+    uploaded = json.loads(mock_blob.upload_from_string.call_args[0][0])
+    assert len(uploaded) == 1
+    assert uploaded[0]["selection_feedback"] == "up"   # preserved
+    assert uploaded[0]["summary_feedback"] == "down"   # newly added
