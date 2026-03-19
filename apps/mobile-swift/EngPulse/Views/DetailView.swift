@@ -231,9 +231,8 @@ struct DetailView: View {
         else { summaryFeedback = newValue }
         UserDefaults.standard.set(newValue, forKey: Self.feedbackKey(aspect, summary.url))
 
-        // Only send the aspect that changed; let server partial-update handle the rest
-        let val = newValue.isEmpty ? nil : newValue
-        guard val != nil else { return }
+        // Send "clear" when toggling off so server removes the field
+        let val = newValue.isEmpty ? "clear" : newValue
         Task {
             await FeedbackService.shared.submitFeedback(
                 summaryURL: summary.url,

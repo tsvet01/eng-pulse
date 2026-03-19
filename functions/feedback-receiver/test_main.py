@@ -194,3 +194,26 @@ def test_upserts_aspect_on_existing(app, mock_firebase, mock_gcs):
     assert len(uploaded) == 1
     assert uploaded[0]["selection_feedback"] == "up"   # preserved
     assert uploaded[0]["summary_feedback"] == "down"   # newly added
+
+
+def test_clears_aspect_feedback(app, mock_firebase, mock_gcs):
+    _, mock_bucket, mock_blob = mock_gcs
+    existing = json.dumps([{
+        "summary_url": "gs://tsvet01-agent-brain/summaries/gemini/2026-03-14.md",
+        "selection_feedback": "up",
+        "summary_feedback": "down",
+        "uid": "test-uid-123",
+        "timestamp": "2026-03-14T08:00:00+00:00",
+    }])
+    mock_blob.download_as_text.side_effect = None
+    mock_blob.download_as_text.return_value = existing
+
+    request = make_request(json_body={
+        "summary_url": "gs://tsvet01-agent-brain/summaries/gemini/2026-03-14.md",
+        "selection_feedback": "clear",
+    })
+    response = app(request)
+    uploaded = json.loads(mock_blob.upload_from_string.call_args[0][0])
+    assert len(uploaded) == 1
+    assert "selection_feedback" not in uploaded[0]     # cleared
+    assert uploaded[0]["summary_feedback"] == "down"    # preserved

@@ -52,14 +52,17 @@ def _upsert_feedback(entries, uid, summary_url, feedback, prompt_version,
                      selection_feedback=None, summary_feedback=None):
     """Upsert feedback entry by uid + summary_url."""
     now = datetime.now(timezone.utc).isoformat()
+    def _apply(entry, key, value):
+        if value == "clear":
+            entry.pop(key, None)
+        elif value is not None:
+            entry[key] = value
+
     for entry in entries:
         if entry["uid"] == uid and entry["summary_url"] == summary_url:
-            if feedback is not None:
-                entry["feedback"] = feedback
-            if selection_feedback is not None:
-                entry["selection_feedback"] = selection_feedback
-            if summary_feedback is not None:
-                entry["summary_feedback"] = summary_feedback
+            _apply(entry, "feedback", feedback)
+            _apply(entry, "selection_feedback", selection_feedback)
+            _apply(entry, "summary_feedback", summary_feedback)
             entry["prompt_version"] = prompt_version
             entry["timestamp"] = now
             return entries
@@ -70,12 +73,9 @@ def _upsert_feedback(entries, uid, summary_url, feedback, prompt_version,
         "uid": uid,
         "timestamp": now,
     }
-    if feedback is not None:
-        new_entry["feedback"] = feedback
-    if selection_feedback is not None:
-        new_entry["selection_feedback"] = selection_feedback
-    if summary_feedback is not None:
-        new_entry["summary_feedback"] = summary_feedback
+    _apply(new_entry, "feedback", feedback)
+    _apply(new_entry, "selection_feedback", selection_feedback)
+    _apply(new_entry, "summary_feedback", summary_feedback)
     entries.append(new_entry)
     return entries
 
@@ -109,13 +109,13 @@ def receive_feedback(request):
     if not summary_url:
         return error_response("summary_url required", 400)
 
-    valid = ("up", "down")
+    valid = ("up", "down", "clear")
     if feedback is None and selection_feedback is None and summary_feedback is None:
         return error_response("at least one feedback field required", 400)
     if (feedback is not None and feedback not in valid) or \
        (selection_feedback is not None and selection_feedback not in valid) or \
        (summary_feedback is not None and summary_feedback not in valid):
-        return error_response("feedback values must be 'up' or 'down'", 400)
+        return error_response("feedback values must be 'up', 'down', or 'clear'", 400)
 
     # Derive date server-side
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
