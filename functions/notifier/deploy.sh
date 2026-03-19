@@ -35,7 +35,7 @@ gcloud services enable cloudfunctions.googleapis.com eventarc.googleapis.com run
 echo "Deploying Function..."
 gcloud functions deploy $FUNCTION_NAME \
   --gen2 \
-  --runtime=python311 \
+  --runtime=python313 \
   --region=$REGION \
   --source=. \
   --entry-point=send_summary_email \

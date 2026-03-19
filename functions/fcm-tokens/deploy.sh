@@ -10,7 +10,7 @@ echo "Deploying FCM Token Registration functions..."
 echo "Deploying register-token..."
 gcloud functions deploy register-token \
     --gen2 \
-    --runtime=python312 \
+    --runtime=python313 \
     --region="$REGION" \
     --source=. \
     --entry-point=register_token \
@@ -24,7 +24,7 @@ gcloud functions deploy register-token \
 echo "Deploying unregister-token..."
 gcloud functions deploy unregister-token \
     --gen2 \
-    --runtime=python312 \
+    --runtime=python313 \
     --region="$REGION" \
     --source=. \
     --entry-point=unregister_token \
