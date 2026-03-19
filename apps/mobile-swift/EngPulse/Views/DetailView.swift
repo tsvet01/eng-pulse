@@ -10,12 +10,14 @@ struct DetailView: View {
     @State private var isLoadingContent = false
     @State private var loadingError: String?
     @State private var showInfo = false
-    @State private var feedbackState: String = ""
+    @State private var selectionFeedback: String = ""
+    @State private var summaryFeedback: String = ""
 
     init(summary: Summary, cacheService: CacheService? = nil) {
         self.summary = summary
         self.cacheService = cacheService
-        _feedbackState = State(initialValue: UserDefaults.standard.string(forKey: "feedback_\(summary.url)") ?? "")
+        _selectionFeedback = State(initialValue: UserDefaults.standard.string(forKey: Self.feedbackKey("selection", summary.url)) ?? "")
+        _summaryFeedback = State(initialValue: UserDefaults.standard.string(forKey: Self.feedbackKey("summary", summary.url)) ?? "")
     }
 
     // MARK: - TTS State
@@ -127,7 +129,6 @@ struct DetailView: View {
 
     private func fullContentSection(_ content: String) -> some View {
         MarkdownContentView(content: content)
-            .textSelection(.enabled)
             .padding(.top, 4)
     }
 
@@ -216,30 +217,30 @@ struct DetailView: View {
         .accessibilityElement(children: .combine)
     }
 
-    // MARK: - Feedback
+    // MARK: - Aspect Feedback
 
-    private func feedbackButton(type: String, icon: String, activeColor: Color) -> some View {
-        let isActive = feedbackState == type
-        return Button {
-            let newValue = isActive ? "" : type
-            feedbackState = newValue
-            UserDefaults.standard.set(newValue, forKey: "feedback_\(summary.url)")
-            // Upload feedback to cloud (fire-and-forget, skip if cleared)
-            if !newValue.isEmpty {
-                Task {
-                    await FeedbackService.shared.submitFeedback(
-                        summaryURL: summary.url,
-                        feedback: newValue,
-                        promptVersion: summary.promptVersion
-                    )
-                }
-            }
-        } label: {
-            Image(systemName: isActive ? "\(icon).fill" : icon)
-                .font(.caption2)
+    private static func feedbackKey(_ aspect: String, _ url: String) -> String {
+        "feedback_\(aspect)_\(url)"
+    }
+
+    private func rateAspect(aspect: String, type: String) {
+        let current = aspect == "selection" ? selectionFeedback : summaryFeedback
+        let newValue = current == type ? "" : type
+
+        if aspect == "selection" { selectionFeedback = newValue }
+        else { summaryFeedback = newValue }
+        UserDefaults.standard.set(newValue, forKey: Self.feedbackKey(aspect, summary.url))
+
+        // Send "clear" when toggling off so server removes the field
+        let val = newValue.isEmpty ? "clear" : newValue
+        Task {
+            await FeedbackService.shared.submitFeedback(
+                summaryURL: summary.url,
+                selectionFeedback: aspect == "selection" ? val : nil,
+                summaryFeedback: aspect == "summary" ? val : nil,
+                promptVersion: summary.promptVersion
+            )
         }
-        .tint(isActive ? activeColor : .secondary)
-        .accessibilityLabel(isActive ? "Remove thumbs \(type)" : "Thumbs \(type)")
     }
 
     // MARK: - Toolbar
@@ -263,8 +264,33 @@ struct DetailView: View {
                     .accessibilityLabel(isLoadingTTS ? "Generating audio" : (isPlaying ? "Pause audio" : (isPaused ? "Resume audio" : "Listen to summary")))
                 }
 
-                feedbackButton(type: "up", icon: "hand.thumbsup", activeColor: .green)
-                feedbackButton(type: "down", icon: "hand.thumbsdown", activeColor: .red)
+                Menu {
+                    Section("Article Pick") {
+                        Button { rateAspect(aspect: "selection", type: "up") } label: {
+                            Label(selectionFeedback == "up" ? "Liked (tap to clear)" : "Good pick",
+                                  systemImage: selectionFeedback == "up" ? "hand.thumbsup.fill" : "hand.thumbsup")
+                        }
+                        Button { rateAspect(aspect: "selection", type: "down") } label: {
+                            Label(selectionFeedback == "down" ? "Disliked (tap to clear)" : "Not interesting",
+                                  systemImage: selectionFeedback == "down" ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                        }
+                    }
+                    Section("Summary Quality") {
+                        Button { rateAspect(aspect: "summary", type: "up") } label: {
+                            Label(summaryFeedback == "up" ? "Liked (tap to clear)" : "Well written",
+                                  systemImage: summaryFeedback == "up" ? "hand.thumbsup.fill" : "hand.thumbsup")
+                        }
+                        Button { rateAspect(aspect: "summary", type: "down") } label: {
+                            Label(summaryFeedback == "down" ? "Disliked (tap to clear)" : "Could be better",
+                                  systemImage: summaryFeedback == "down" ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                        }
+                    }
+                } label: {
+                    let hasAny = !selectionFeedback.isEmpty || !summaryFeedback.isEmpty
+                    Image(systemName: hasAny ? "hand.thumbsup.circle.fill" : "hand.thumbsup.circle")
+                        .foregroundColor(hasAny ? .green : .secondary)
+                }
+                .accessibilityLabel("Rate this article")
 
                 Button { showInfo = true } label: {
                     Image(systemName: "info.circle")

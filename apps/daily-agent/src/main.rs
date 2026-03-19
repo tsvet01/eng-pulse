@@ -130,11 +130,25 @@ struct EvalCriteria {
 #[allow(dead_code)]
 struct FeedbackEntry {
     summary_url: String,
-    feedback: String,
+    #[serde(default)]
+    feedback: Option<String>,
+    #[serde(default)]
+    selection_feedback: Option<String>,
+    #[serde(default)]
+    summary_feedback: Option<String>,
     #[serde(default)]
     prompt_version: Option<String>,
     uid: String,
     timestamp: String,
+}
+
+impl FeedbackEntry {
+    /// Effective feedback signal: legacy field, then selection (stronger), then summary as last resort.
+    fn effective_feedback(&self) -> Option<&str> {
+        self.feedback.as_deref()
+            .or(self.selection_feedback.as_deref())
+            .or(self.summary_feedback.as_deref())
+    }
 }
 
 const CALIBRATION_MIN_RATINGS: usize = 5;
@@ -180,8 +194,8 @@ async fn load_recent_feedback(gcs_client: &Client, bucket_name: &str) -> Vec<Fee
 
 /// Check that feedback contains at least one "up" and one "down" vote.
 fn has_both_polarities(feedback: &[FeedbackEntry]) -> bool {
-    let has_up = feedback.iter().any(|f| f.feedback == "up");
-    let has_down = feedback.iter().any(|f| f.feedback == "down");
+    let has_up = feedback.iter().any(|f| f.effective_feedback() == Some("up"));
+    let has_down = feedback.iter().any(|f| f.effective_feedback() == Some("down"));
     has_up && has_down
 }
 
@@ -251,8 +265,8 @@ async fn build_calibration_context(
     }
 
     // Take up to 2 most recent "up" and 2 most recent "down" entries
-    let ups: Vec<&FeedbackEntry> = feedback.iter().filter(|f| f.feedback == "up").take(2).collect();
-    let downs: Vec<&FeedbackEntry> = feedback.iter().filter(|f| f.feedback == "down").take(2).collect();
+    let ups: Vec<&FeedbackEntry> = feedback.iter().filter(|f| f.effective_feedback() == Some("up")).take(2).collect();
+    let downs: Vec<&FeedbackEntry> = feedback.iter().filter(|f| f.effective_feedback() == Some("down")).take(2).collect();
 
     let (highly_rated, poorly_rated) = tokio::join!(
         download_feedback_excerpts(&ups, gcs_client, bucket_name, manifest),
@@ -381,7 +395,7 @@ fn log_calibration_agreement(
             if let Some(&score) = scores_map.get(&entry.summary_id()) {
                 total_checked += 1;
                 let score_is_up = score > CALIBRATION_AGREEMENT_THRESHOLD;
-                let feedback_is_up = fb.feedback == "up";
+                let feedback_is_up = fb.effective_feedback() == Some("up");
                 if score_is_up == feedback_is_up {
                     agreements += 1;
                 }
@@ -1066,14 +1080,18 @@ mod tests {
         let feedback = vec![
             FeedbackEntry {
                 summary_url: "https://example.com/a".to_string(),
-                feedback: "up".to_string(),
+                feedback: Some("up".to_string()),
+                selection_feedback: None,
+                summary_feedback: None,
                 prompt_version: None,
                 uid: "u1".to_string(),
                 timestamp: "2026-03-15T00:00:00Z".to_string(),
             },
             FeedbackEntry {
                 summary_url: "https://example.com/b".to_string(),
-                feedback: "down".to_string(),
+                feedback: Some("down".to_string()),
+                selection_feedback: None,
+                summary_feedback: None,
                 prompt_version: None,
                 uid: "u1".to_string(),
                 timestamp: "2026-03-15T00:00:00Z".to_string(),
@@ -1087,14 +1105,18 @@ mod tests {
         let feedback = vec![
             FeedbackEntry {
                 summary_url: "https://example.com/a".to_string(),
-                feedback: "up".to_string(),
+                feedback: Some("up".to_string()),
+                selection_feedback: None,
+                summary_feedback: None,
                 prompt_version: None,
                 uid: "u1".to_string(),
                 timestamp: "2026-03-15T00:00:00Z".to_string(),
             },
             FeedbackEntry {
                 summary_url: "https://example.com/b".to_string(),
-                feedback: "up".to_string(),
+                feedback: Some("up".to_string()),
+                selection_feedback: None,
+                summary_feedback: None,
                 prompt_version: None,
                 uid: "u1".to_string(),
                 timestamp: "2026-03-15T00:00:00Z".to_string(),
