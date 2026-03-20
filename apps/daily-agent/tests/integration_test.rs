@@ -3,6 +3,7 @@ use wiremock::matchers::{method, path};
 use gemini_engine::{call_llm_with_retry, LlmProvider};
 use std::time::Duration;
 use reqwest::Client;
+use serial_test::serial;
 
 /// Helper to setup a mock server and run a test for a specific provider
 async fn test_provider_mock(
@@ -23,9 +24,9 @@ async fn test_provider_mock(
         .await;
 
     // 3. Configure Environment
-    std::env::set_var(base_url_env_var, mock_server.uri());
+    unsafe { std::env::set_var(base_url_env_var, mock_server.uri()); }
     if let Some((key, value)) = extra_env_setup {
-        std::env::set_var(key, value);
+        unsafe { std::env::set_var(key, value); }
     }
 
     // 4. Create Client
@@ -33,9 +34,9 @@ async fn test_provider_mock(
 
     // 5. Call API
     let result = call_llm_with_retry(
-        &client, 
-        provider, 
-        "test-key", 
+        &client,
+        provider,
+        "test-key",
         "Hello".to_string()
     ).await;
 
@@ -50,6 +51,7 @@ async fn test_provider_mock(
 }
 
 #[tokio::test]
+#[serial]
 async fn test_gemini_api_mocking() {
     let response = serde_json::json!({
         "candidates": [{
@@ -69,6 +71,7 @@ async fn test_gemini_api_mocking() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_openai_api_mocking() {
     let response = serde_json::json!({
         "choices": [{
@@ -86,6 +89,7 @@ async fn test_openai_api_mocking() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_claude_api_mocking() {
     let response = serde_json::json!({
         "content": [{ "text": "Mocked Claude Response" }]

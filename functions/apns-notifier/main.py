@@ -83,12 +83,17 @@ def register_apns_token(request: Request):
         return error_response("Internal server error", 500)
 
 
+INTERNAL_TOKEN_ENV = "INTERNAL_TRIGGER_TOKEN"
+
+
 @functions_framework.http
 def trigger_apns_notification(request: Request):
     """
-    Manual trigger for APNs notifications (for testing).
+    Internal trigger for APNs notifications.
+    Requires X-Internal-Token header matching INTERNAL_TRIGGER_TOKEN env var.
 
     POST /trigger-apns
+    Headers: X-Internal-Token: <secret>
     Body: {
         "title": "Notification title",
         "body": "Notification body",
@@ -101,11 +106,20 @@ def trigger_apns_notification(request: Request):
     if request.method != "POST":
         return error_response("Method not allowed", 405)
 
+    # Verify internal token
+    expected_token = os.environ.get(INTERNAL_TOKEN_ENV, "")
+    provided_token = request.headers.get("X-Internal-Token", "")
+    if not expected_token or provided_token != expected_token:
+        return error_response("Unauthorized", 403)
+
     try:
         data = request.get_json(silent=True) or {}
-        title = data.get("title", "Test Notification")
-        body = data.get("body", "This is a test notification")
+        title = data.get("title", "Test Notification")[:64]
+        body = data.get("body", "This is a test notification")[:256]
         article_url = data.get("article_url", "https://example.com")
+        if not isinstance(article_url, str) or not article_url.startswith("https://"):
+            article_url = "https://example.com"
+        article_url = article_url[:2048]
 
         count = send_apns_notifications(title, body, article_url)
 

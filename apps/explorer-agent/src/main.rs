@@ -12,7 +12,7 @@ use rss::Channel;
 use atom_syndication::Feed;
 use tracing::{info, warn, error, debug, instrument};
 use std::time::Duration as StdDuration;
-use gemini_engine::{call_gemini_with_retry, init_logging, SourceConfig, extract_domain, DEFAULT_BUCKET};
+use gemini_engine::{call_llm_with_retry, init_logging, SourceConfig, SourceType, extract_domain, DEFAULT_BUCKET, LlmProvider};
 
 // --- Configuration Constants ---
 const HTTP_TIMEOUT_SECS: u64 = 30;
@@ -24,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     dotenvy::dotenv().ok();
     init_logging();
 
-    let gemini_api_key = std::env::var("GEMINI_API_KEY").map_err(|_| {
+    let api_key = std::env::var("GEMINI_API_KEY").map_err(|_| {
         error!("GEMINI_API_KEY environment variable not set");
         "GEMINI_API_KEY environment variable not set"
     })?;
@@ -72,7 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             for rec in user_recs {
                 if !all_sources.contains(&rec) {
                     info!(name = %rec.name, url = %rec.url, "Investigating user candidate");
-                    match discover_and_validate_feed(&http_client, &gemini_api_key, &rec.url, &rec.name).await {
+                    match discover_and_validate_feed(&http_client, &api_key, &rec.url, &rec.name).await {
                         Ok(Some(validated_source)) => {
                             if !all_sources.contains(&validated_source) {
                                 info!(
@@ -118,7 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             existing_names_for_gemini, json_example
         );
 
-        let response_text = call_gemini_with_retry(&http_client, &gemini_api_key, prompt).await?;
+        let response_text = call_llm_with_retry(&http_client, LlmProvider::Gemini, &api_key, prompt).await?;
 
         let clean_json = clean_gemini_json(&response_text);
 
@@ -139,10 +139,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!(count = recommendations.len(), "Gemini recommended new sources");
 
         for rec in recommendations {
-            let temp_source = SourceConfig { name: rec.name.clone(), source_type: "rss".to_string(), url: rec.url.clone() };
+            let temp_source = SourceConfig { name: rec.name.clone(), source_type: SourceType::Rss, url: rec.url.clone() };
             if !all_sources.contains(&temp_source) {
                 info!(name = %rec.name, url = %rec.url, "Investigating Gemini recommendation");
-                match discover_and_validate_feed(&http_client, &gemini_api_key, &rec.url, &rec.name).await {
+                match discover_and_validate_feed(&http_client, &api_key, &rec.url, &rec.name).await {
                     Ok(Some(validated_source)) => {
                         if !all_sources.contains(&validated_source) {
                             info!(
@@ -171,7 +171,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     for source in all_sources.iter() {
         // HN is always fresh - skip freshness check for it
-        if source.source_type == "hackernews" {
+        if source.source_type == SourceType::HackerNews {
             reviewed_sources.insert(source.clone());
             continue;
         }
@@ -232,8 +232,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Ok(())
 }
 
-#[instrument(skip(client, gemini_api_key), fields(source_name = %name, url_domain = %extract_domain(url)))]
-async fn discover_and_validate_feed(client: &reqwest::Client, gemini_api_key: &str, url: &str, name: &str) -> Result<Option<SourceConfig>, Box<dyn std::error::Error + Send + Sync>> {
+#[instrument(skip(client, api_key), fields(source_name = %name, url_domain = %extract_domain(url)))]
+async fn discover_and_validate_feed(client: &reqwest::Client, api_key: &str, url: &str, name: &str) -> Result<Option<SourceConfig>, Box<dyn std::error::Error + Send + Sync>> {
     let mut current_url_str = url.to_string();
 
     for _ in 0..MAX_FEED_DISCOVERY_ATTEMPTS {
@@ -248,13 +248,15 @@ async fn discover_and_validate_feed(client: &reqwest::Client, gemini_api_key: &s
         let text = res.text().await?;
 
         let is_feed_content_type = content_type.contains("xml") || content_type.contains("rss") || content_type.contains("atom");
-        let is_valid_feed = rss::Channel::read_from(text.as_bytes()).is_ok() || atom_syndication::Feed::read_from(text.as_bytes()).is_ok();
+        let is_rss = rss::Channel::read_from(text.as_bytes()).is_ok();
+        let is_atom = atom_syndication::Feed::read_from(text.as_bytes()).is_ok();
 
         if is_feed_content_type
-            && is_valid_feed
-            && is_relevant_with_gemini(client, gemini_api_key, name, &final_url_str, &text).await?
+            && (is_rss || is_atom)
+            && is_relevant_with_gemini(client, api_key, name, &final_url_str, &text).await?
         {
-            return Ok(Some(SourceConfig { name: name.to_string(), source_type: "rss".to_string(), url: final_url_str }));
+            let feed_type = if is_atom { SourceType::Atom } else { SourceType::Rss };
+            return Ok(Some(SourceConfig { name: name.to_string(), source_type: feed_type, url: final_url_str }));
         }
 
         // HTML Discovery
@@ -271,9 +273,9 @@ async fn discover_and_validate_feed(client: &reqwest::Client, gemini_api_key: &s
                 let head_result = client.head(&resolved_url_str).send().await;
                 if let Ok(resp) = head_result {
                     if resp.status().is_success()
-                        && is_relevant_with_gemini(client, gemini_api_key, name, &resolved_url_str, "").await.unwrap_or(false)
+                        && is_relevant_with_gemini(client, api_key, name, &resolved_url_str, "").await.unwrap_or(false)
                     {
-                        return Ok(Some(SourceConfig { name: name.to_string(), source_type: "rss".to_string(), url: resolved_url_str }));
+                        return Ok(Some(SourceConfig { name: name.to_string(), source_type: SourceType::Rss, url: resolved_url_str }));
                     }
                 }
             }
@@ -303,9 +305,9 @@ async fn discover_and_validate_feed(client: &reqwest::Client, gemini_api_key: &s
             let head_result = client.head(&candidate_url_str).send().await;
             if let Ok(resp) = head_result {
                 if resp.status().is_success()
-                    && is_relevant_with_gemini(client, gemini_api_key, name, &candidate_url_str, "").await.unwrap_or(false)
+                    && is_relevant_with_gemini(client, api_key, name, &candidate_url_str, "").await.unwrap_or(false)
                 {
-                    return Ok(Some(SourceConfig { name: name.to_string(), source_type: "rss".to_string(), url: candidate_url_str }));
+                    return Ok(Some(SourceConfig { name: name.to_string(), source_type: SourceType::Rss, url: candidate_url_str }));
                 }
             }
         }
@@ -352,7 +354,7 @@ async fn is_relevant_with_gemini(client: &reqwest::Client, api_key: &str, name: 
         name, url, content_sample
     );
 
-    let response = call_gemini_with_retry(client, api_key, prompt).await?;
+    let response = call_llm_with_retry(client, LlmProvider::Gemini, api_key, prompt).await?;
     Ok(response.trim().to_lowercase().starts_with("yes"))
 }
 
@@ -424,12 +426,12 @@ mod tests {
     fn test_source_config_equality() {
         let s1 = SourceConfig {
             name: "Test".to_string(),
-            source_type: "rss".to_string(),
+            source_type: SourceType::Rss,
             url: "https://example.com/feed".to_string(),
         };
         let s2 = SourceConfig {
             name: "Test".to_string(),
-            source_type: "rss".to_string(),
+            source_type: SourceType::Rss,
             url: "https://example.com/feed".to_string(),
         };
         assert_eq!(s1, s2);
@@ -440,7 +442,7 @@ mod tests {
         let mut sources: HashSet<SourceConfig> = HashSet::new();
         let s1 = SourceConfig {
             name: "Test".to_string(),
-            source_type: "rss".to_string(),
+            source_type: SourceType::Rss,
             url: "https://example.com/feed".to_string(),
         };
         let s2 = s1.clone();
@@ -493,7 +495,7 @@ mod tests {
     fn test_source_config_equality_and_inequality() {
         let s1 = SourceConfig {
             name: "Blog".to_string(),
-            source_type: "rss".to_string(),
+            source_type: SourceType::Rss,
             url: "https://example.com/feed".to_string(),
         };
         let s1_clone = s1.clone();
@@ -502,7 +504,7 @@ mod tests {
         let different_name = SourceConfig { name: "Other".to_string(), ..s1.clone() };
         assert_ne!(s1, different_name);
 
-        let different_type = SourceConfig { source_type: "atom".to_string(), ..s1.clone() };
+        let different_type = SourceConfig { source_type: SourceType::Atom, ..s1.clone() };
         assert_ne!(s1, different_type);
 
         let different_url = SourceConfig { url: "https://other.com/feed".to_string(), ..s1.clone() };
