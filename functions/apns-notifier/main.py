@@ -8,6 +8,7 @@ Handles:
 import functions_framework
 from flask import Request
 from datetime import datetime, timezone
+import hmac
 import os
 import sys
 
@@ -109,7 +110,7 @@ def trigger_apns_notification(request: Request):
     # Verify internal token
     expected_token = os.environ.get(INTERNAL_TOKEN_ENV, "")
     provided_token = request.headers.get("X-Internal-Token", "")
-    if not expected_token or provided_token != expected_token:
+    if not expected_token or not hmac.compare_digest(provided_token, expected_token):
         return error_response("Unauthorized", 403)
 
     try:
