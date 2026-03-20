@@ -6,8 +6,8 @@ use std::time::Duration as StdDuration;
 use chrono::{DateTime, Utc, Duration};
 use tracing::{warn, debug};
 
-// Re-export SourceConfig from gemini-engine for convenience
-pub use gemini_engine::SourceConfig;
+// Re-export from gemini-engine for convenience
+pub use gemini_engine::{SourceConfig, SourceType};
 
 /// HTTP timeout for fetching feeds
 const FETCH_TIMEOUT_SECS: u64 = 30;
@@ -42,13 +42,10 @@ pub fn create_http_client() -> Result<reqwest::Client, Box<dyn Error + Send + Sy
 }
 
 pub async fn fetch_from_source(source: &SourceConfig, client: &reqwest::Client) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
-    match source.source_type.as_str() {
-        "rss" => fetch_rss(source, client).await,
-        "atom" => fetch_atom(source, client).await,
-        "hackernews" => fetch_hackernews(source, client).await,
-        other => {
-            Err(format!("Unknown source type: '{}' for source '{}'", other, source.name).into())
-        }
+    match source.source_type {
+        SourceType::Rss => fetch_rss(source, client).await,
+        SourceType::Atom => fetch_atom(source, client).await,
+        SourceType::HackerNews => fetch_hackernews(source, client).await,
     }
 }
 
@@ -324,7 +321,7 @@ mod tests {
     fn test_source_config_clone() {
         let source = SourceConfig {
             name: "Blog".to_string(),
-            source_type: "rss".to_string(),
+            source_type: SourceType::Rss,
             url: "https://blog.example.com/rss".to_string(),
         };
         let cloned = source.clone();
@@ -362,7 +359,7 @@ mod tests {
 
         let source = SourceConfig {
             name: "Mock Source".to_string(),
-            source_type: "rss".to_string(),
+            source_type: SourceType::Rss,
             url: format!("{}/feed.xml", mock_server.uri()),
         };
 

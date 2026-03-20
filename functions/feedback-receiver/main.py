@@ -109,6 +109,12 @@ def receive_feedback(request):
     if not summary_url:
         return error_response("summary_url required", 400)
 
+    if not isinstance(summary_url, str) or len(summary_url) > 256:
+        return error_response("summary_url must be a string under 256 characters", 400)
+
+    if not (summary_url.startswith("https://") or summary_url.startswith("gs://")):
+        return error_response("summary_url must be a valid URL", 400)
+
     valid = ("up", "down", "clear")
     if feedback is None and selection_feedback is None and summary_feedback is None:
         return error_response("at least one feedback field required", 400)

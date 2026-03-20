@@ -71,12 +71,22 @@ pub fn extract_domain(url: &str) -> String {
 
 // --- Shared Types ---
 
+/// Type of content source
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum SourceType {
+    Rss,
+    Atom,
+    #[serde(rename = "hackernews")]
+    HackerNews,
+}
+
 /// Configuration for a news/article source
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SourceConfig {
     pub name: String,
     #[serde(rename = "type")]
-    pub source_type: String,
+    pub source_type: SourceType,
     pub url: String,
 }
 
@@ -140,44 +150,12 @@ pub struct GeminiError {
 }
 
 /// Call Gemini API with exponential backoff retry for transient failures
-#[instrument(skip(client, api_key, prompt), fields(prompt_len = prompt.len()))]
 pub async fn call_gemini_with_retry(
     client: &reqwest::Client,
     api_key: &str,
     prompt: String,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let backoff = ExponentialBackoff {
-        max_elapsed_time: Some(Duration::from_secs(MAX_RETRY_ELAPSED_SECS)),
-        ..Default::default()
-    };
-
-    let client = client.clone();
-    let api_key = api_key.to_string();
-
-    let result = retry(backoff, || {
-        let client = client.clone();
-        let api_key = api_key.clone();
-        let prompt = prompt.clone();
-
-        async move {
-            match call_gemini(&client, &api_key, prompt).await {
-                Ok(response) => Ok(response),
-                Err(e) => {
-                    let err_str = e.to_string();
-                    // Retry on transient errors (network, rate limits, server errors)
-                    if is_transient_error(&err_str) {
-                        warn!(error = %err_str, "Transient Gemini error, retrying");
-                        Err(backoff::Error::transient(e))
-                    } else {
-                        error!(error = %err_str, "Permanent Gemini error, not retrying");
-                        Err(backoff::Error::permanent(e))
-                    }
-                }
-            }
-        }
-    }).await?;
-
-    Ok(result)
+    call_llm_with_retry(client, LlmProvider::Gemini, api_key, prompt).await
 }
 
 fn is_transient_error(err: &str) -> bool {
@@ -207,10 +185,9 @@ async fn call_gemini(client: &reqwest::Client, api_key: &str, text: String) -> R
     let base_url = std::env::var("GEMINI_BASE_URL")
         .unwrap_or_else(|_| "https://generativelanguage.googleapis.com".to_string());
 
-    // Note: API key in URL is required by Gemini API - we redact it in logs
     let url = format!(
-        "{}/v1beta/models/{}:generateContent?key={}",
-        base_url, model, api_key
+        "{}/v1beta/models/{}:generateContent",
+        base_url, model
     );
 
     let request = GeminiRequest {
@@ -224,6 +201,7 @@ async fn call_gemini(client: &reqwest::Client, api_key: &str, text: String) -> R
     debug!("Sending request to Gemini API");
 
     let res = client.post(&url)
+        .header("x-goog-api-key", api_key)
         .json(&request)
         .send()
         .await?;
@@ -289,43 +267,12 @@ struct OpenAIError {
 }
 
 /// Call OpenAI API with exponential backoff retry for transient failures
-#[instrument(skip(client, api_key, prompt), fields(prompt_len = prompt.len()))]
 pub async fn call_openai_with_retry(
     client: &reqwest::Client,
     api_key: &str,
     prompt: String,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let backoff = ExponentialBackoff {
-        max_elapsed_time: Some(Duration::from_secs(MAX_RETRY_ELAPSED_SECS)),
-        ..Default::default()
-    };
-
-    let client = client.clone();
-    let api_key = api_key.to_string();
-
-    let result = retry(backoff, || {
-        let client = client.clone();
-        let api_key = api_key.clone();
-        let prompt = prompt.clone();
-
-        async move {
-            match call_openai(&client, &api_key, prompt).await {
-                Ok(response) => Ok(response),
-                Err(e) => {
-                    let err_str = e.to_string();
-                    if is_transient_error(&err_str) {
-                        warn!(error = %err_str, "Transient OpenAI error, retrying");
-                        Err(backoff::Error::transient(e))
-                    } else {
-                        error!(error = %err_str, "Permanent OpenAI error, not retrying");
-                        Err(backoff::Error::permanent(e))
-                    }
-                }
-            }
-        }
-    }).await?;
-
-    Ok(result)
+    call_llm_with_retry(client, LlmProvider::OpenAI, api_key, prompt).await
 }
 
 async fn call_openai(client: &reqwest::Client, api_key: &str, text: String) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -406,43 +353,12 @@ struct ClaudeError {
 }
 
 /// Call Claude API with exponential backoff retry for transient failures
-#[instrument(skip(client, api_key, prompt), fields(prompt_len = prompt.len()))]
 pub async fn call_claude_with_retry(
     client: &reqwest::Client,
     api_key: &str,
     prompt: String,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let backoff = ExponentialBackoff {
-        max_elapsed_time: Some(Duration::from_secs(MAX_RETRY_ELAPSED_SECS)),
-        ..Default::default()
-    };
-
-    let client = client.clone();
-    let api_key = api_key.to_string();
-
-    let result = retry(backoff, || {
-        let client = client.clone();
-        let api_key = api_key.clone();
-        let prompt = prompt.clone();
-
-        async move {
-            match call_claude(&client, &api_key, prompt).await {
-                Ok(response) => Ok(response),
-                Err(e) => {
-                    let err_str = e.to_string();
-                    if is_transient_error(&err_str) {
-                        warn!(error = %err_str, "Transient Claude error, retrying");
-                        Err(backoff::Error::transient(e))
-                    } else {
-                        error!(error = %err_str, "Permanent Claude error, not retrying");
-                        Err(backoff::Error::permanent(e))
-                    }
-                }
-            }
-        }
-    }).await?;
-
-    Ok(result)
+    call_llm_with_retry(client, LlmProvider::Claude, api_key, prompt).await
 }
 
 async fn call_claude(client: &reqwest::Client, api_key: &str, text: String) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -506,11 +422,41 @@ pub async fn call_llm_with_retry(
     api_key: &str,
     prompt: String,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    match provider {
-        LlmProvider::Gemini => call_gemini_with_retry(client, api_key, prompt).await,
-        LlmProvider::OpenAI => call_openai_with_retry(client, api_key, prompt).await,
-        LlmProvider::Claude => call_claude_with_retry(client, api_key, prompt).await,
-    }
+    let backoff = ExponentialBackoff {
+        max_elapsed_time: Some(Duration::from_secs(MAX_RETRY_ELAPSED_SECS)),
+        ..Default::default()
+    };
+
+    let client = client.clone();
+    let api_key = api_key.to_string();
+    let provider_name = provider.as_str();
+
+    retry(backoff, || {
+        let client = client.clone();
+        let api_key = api_key.clone();
+        let prompt = prompt.clone();
+
+        async move {
+            let result = match provider {
+                LlmProvider::Gemini => call_gemini(&client, &api_key, prompt).await,
+                LlmProvider::OpenAI => call_openai(&client, &api_key, prompt).await,
+                LlmProvider::Claude => call_claude(&client, &api_key, prompt).await,
+            };
+            match result {
+                Ok(response) => Ok(response),
+                Err(e) => {
+                    let err_str = e.to_string();
+                    if is_transient_error(&err_str) {
+                        warn!(error = %err_str, provider = %provider_name, "Transient error, retrying");
+                        Err(backoff::Error::transient(e))
+                    } else {
+                        error!(error = %err_str, provider = %provider_name, "Permanent error, not retrying");
+                        Err(backoff::Error::permanent(e))
+                    }
+                }
+            }
+        }
+    }).await
 }
 
 /// Get the API key environment variable name for a provider
@@ -655,7 +601,7 @@ mod tests {
     fn test_source_config_serialization() {
         let source = SourceConfig {
             name: "Test Blog".to_string(),
-            source_type: "rss".to_string(),
+            source_type: SourceType::Rss,
             url: "https://example.com/feed".to_string(),
         };
 
@@ -671,8 +617,20 @@ mod tests {
         let source: SourceConfig = serde_json::from_str(json).unwrap();
 
         assert_eq!(source.name, "My Blog");
-        assert_eq!(source.source_type, "rss");
+        assert_eq!(source.source_type, SourceType::Rss);
         assert_eq!(source.url, "https://myblog.com/feed");
+    }
+
+    #[test]
+    fn test_source_type_serde_all_variants() {
+        for (json_str, expected) in [
+            (r#""rss""#, SourceType::Rss),
+            (r#""atom""#, SourceType::Atom),
+            (r#""hackernews""#, SourceType::HackerNews),
+        ] {
+            let parsed: SourceType = serde_json::from_str(json_str).unwrap();
+            assert_eq!(parsed, expected);
+        }
     }
 
     // --- LlmProvider tests ---
