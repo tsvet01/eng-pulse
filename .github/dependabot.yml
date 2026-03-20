@@ -1,0 +1,61 @@
+version: 2
+updates:
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Rust — daily-agent
+  - package-ecosystem: "cargo"
+    directory: "/apps/daily-agent"
+    schedule:
+      interval: "weekly"
+
+  # Rust — explorer-agent
+  - package-ecosystem: "cargo"
+    directory: "/apps/explorer-agent"
+    schedule:
+      interval: "weekly"
+
+  # Rust — gemini-engine
+  - package-ecosystem: "cargo"
+    directory: "/libs/gemini-engine"
+    schedule:
+      interval: "weekly"
+
+  # Python — notifier
+  - package-ecosystem: "pip"
+    directory: "/functions/notifier"
+    schedule:
+      interval: "monthly"
+
+  # Python — apns-notifier
+  - package-ecosystem: "pip"
+    directory: "/functions/apns-notifier"
+    schedule:
+      interval: "monthly"
+
+  # Python — fcm-tokens
+  - package-ecosystem: "pip"
+    directory: "/functions/fcm-tokens"
+    schedule:
+      interval: "monthly"
+
+  # Python — feedback-receiver
+  - package-ecosystem: "pip"
+    directory: "/functions/feedback-receiver"
+    schedule:
+      interval: "monthly"
+
+  # Docker — daily-agent
+  - package-ecosystem: "docker"
+    directory: "/apps/daily-agent"
+    schedule:
+      interval: "monthly"
+
+  # Docker — explorer-agent
+  - package-ecosystem: "docker"
+    directory: "/apps/explorer-agent"
+    schedule:
+      interval: "monthly"
