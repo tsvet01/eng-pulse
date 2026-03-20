@@ -7,7 +7,7 @@ PROJECT="tsvet01"
 echo "Deploying APNs token registration function..."
 gcloud functions deploy register-apns-token \
   --gen2 \
-  --runtime=python313 \
+  --runtime=python312 \
   --region=$REGION \
   --source=. \
   --entry-point=register_apns_token \
@@ -20,7 +20,7 @@ gcloud functions deploy register-apns-token \
 echo "Deploying APNs notification trigger function..."
 gcloud functions deploy trigger-apns-notification \
   --gen2 \
-  --runtime=python313 \
+  --runtime=python312 \
   --region=$REGION \
   --source=. \
   --entry-point=trigger_apns_notification \

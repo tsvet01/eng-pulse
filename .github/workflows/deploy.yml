@@ -113,7 +113,7 @@ jobs:
         cd functions/notifier
         gcloud functions deploy se-daily-notifier \
           --gen2 \
-          --runtime=python313 \
+          --runtime=python312 \
           --region=${{ env.REGION }} \
           --source=. \
           --entry-point=send_summary_email \
@@ -145,7 +145,7 @@ jobs:
         cd functions/feedback-receiver
         gcloud functions deploy feedback-receiver \
           --gen2 \
-          --runtime=python313 \
+          --runtime=python312 \
           --region=${{ env.REGION }} \
           --project=${{ env.PROJECT_ID }} \
           --source=. \
@@ -172,7 +172,7 @@ jobs:
         cd functions/apns-notifier
         gcloud functions deploy register-apns-token \
           --gen2 \
-          --runtime=python313 \
+          --runtime=python312 \
           --region=${{ env.REGION }} \
           --project=${{ env.PROJECT_ID }} \
           --source=. \
@@ -187,7 +187,7 @@ jobs:
         cd functions/apns-notifier
         gcloud functions deploy trigger-apns-notification \
           --gen2 \
-          --runtime=python313 \
+          --runtime=python312 \
           --region=${{ env.REGION }} \
           --project=${{ env.PROJECT_ID }} \
           --source=. \
@@ -216,7 +216,7 @@ jobs:
         cd functions/fcm-tokens
         gcloud functions deploy register-token \
           --gen2 \
-          --runtime=python313 \
+          --runtime=python312 \
           --region=${{ env.REGION }} \
           --project=${{ env.PROJECT_ID }} \
           --source=. \
@@ -231,7 +231,7 @@ jobs:
         cd functions/fcm-tokens
         gcloud functions deploy unregister-token \
           --gen2 \
-          --runtime=python313 \
+          --runtime=python312 \
           --region=${{ env.REGION }} \
           --project=${{ env.PROJECT_ID }} \
           --source=. \
