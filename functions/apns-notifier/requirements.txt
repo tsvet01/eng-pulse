@@ -2,5 +2,5 @@ functions-framework==3.5.0
 google-cloud-firestore==2.19.0
 google-cloud-secret-manager==2.21.0
 PyJWT==2.8.0
-cryptography==42.0.4
+cryptography==46.0.5
 httpx[http2]==0.27.0
