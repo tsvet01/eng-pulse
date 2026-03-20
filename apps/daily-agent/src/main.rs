@@ -42,6 +42,9 @@ use crate::feedback::{load_recent_feedback, build_calibration_context};
 // --- Configuration Constants ---
 const HTTP_TIMEOUT_SECS: u64 = 60;
 const MAX_ARTICLE_CHARS: usize = 50_000;
+/// Minimum extracted content length to attempt summarization.
+/// Pages below this threshold are likely JS-rendered SPAs or paywalled.
+const MIN_ARTICLE_CHARS: usize = 200;
 
 /// Get list of enabled LLM providers based on available API keys.
 /// Claude is first for article selection, others follow for summary generation.
@@ -461,10 +464,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     let beta_article_content = match fetch_article_content(&http_client, &beta_article.url).await {
                         Ok(content) => content,
                         Err(e) => {
-                            warn!(error = %e, "Failed to fetch beta article content, using title");
-                            format!("Title: {}, URL: {}", beta_article.title, beta_article.url)
+                            warn!(error = %e, "Skipping beta selection summary");
+                            String::new()
                         }
                     };
+                    if beta_article_content.is_empty() {
+                        // Content extraction failed — skip rather than generating noise
+                    } else {
                     let beta_truncated: String = beta_article_content.chars().take(MAX_ARTICLE_CHARS).collect();
                     let beta_summary_prompt_b = beta_config.summary_prompt(
                         &beta_article.source, &beta_article.title, &beta_truncated
@@ -499,6 +505,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             }
                         }
                         Err(e) => warn!(error = %e, "Failed to generate beta selection summary"),
+                    }
                     }
                 } else {
                     info!("Beta selected same article as prod, skipping duplicate summary");
@@ -617,7 +624,15 @@ async fn fetch_article_content(client: &reqwest::Client, url: &str) -> Result<St
     let product = extractor::extract(&mut reader, &parsed_url)
         .map_err(|e| format!("Readability extract error: {:?}", e))?;
 
-    Ok(product.text)
+    let text = product.text;
+    if text.chars().count() < MIN_ARTICLE_CHARS {
+        return Err(format!(
+            "Extracted content too short ({} chars, minimum {}). Page is likely JS-rendered or paywalled.",
+            text.chars().count(), MIN_ARTICLE_CHARS
+        ).into());
+    }
+
+    Ok(text)
 }
 
 #[cfg(test)]
