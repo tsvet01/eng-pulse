@@ -75,30 +75,16 @@ Reply ONLY with the integer index number (e.g., '3'). No explanation."#,
 
     fn v2_summary_prompt(&self, source: &str, title: &str, content: &str) -> String {
         format!(
-            r#"Summarize this article for a senior engineering leader (2-3 minutes on mobile).
+            r#"Summarize this article for a senior engineering leader who builds developer platforms at a hedge fund (C++/Rust, low-latency, AI tooling). They'll read this on their phone in 2-3 minutes.
 
-Use this structure:
+Lead with a one-line hook: why this matters to them specifically. Then cover the key insights — use bold lead phrases and bullets for scannability, but match the structure to the content. Some articles warrant 3 bullets; others need 2 paragraphs.
 
-## [concise title]
-
-**[one-line hook: why this matters]**
-
-### Key Points
-- **[bold lead phrase]**: [explanation]
-(3-5 bullets, each self-contained)
-
-### Why It Matters
-[2-3 sentences connecting to real engineering work — architecture decisions, team impact, or industry shift.]
-
-### Action Items (include ONLY if the article suggests concrete actions — omit this section otherwise)
-- [1-2 specific things to evaluate or try this week]
+If the article suggests something concrete to try or evaluate this week, end with that. If it doesn't, don't invent action items.
 
 Rules:
-- Reader builds developer platforms at a hedge fund (C++/Rust, low-latency, AI tooling)
-- Match length to content depth — aim for 300-500 words but prioritize density over hitting a word count
-- No fluff, no filler, no "in conclusion", no "in summary"
-- Bold the lead phrase of each bullet for scannability
-- Be direct and state conclusions clearly, but acknowledge genuine tradeoffs
+- Be compact — say it in fewer words, not more
+- No fluff: no "in conclusion", no "in summary", no filler transitions
+- Be direct and opinionated — state what matters, skip the hedging
 - Ignore promotional content
 
 Article Source: {}
@@ -136,12 +122,12 @@ mod tests {
     }
 
     #[test]
-    fn test_v2_summary_prompt_has_structure() {
+    fn test_v2_summary_prompt_has_persona_and_rules() {
         let prompt = PromptConfig::V2.summary_prompt("HN", "Title", "Content");
-        assert!(prompt.contains("### Key Points"));
-        assert!(prompt.contains("### Why It Matters"));
-        assert!(prompt.contains("### Action Items"));
-        assert!(prompt.contains("300-500 words"));
-        assert!(prompt.contains("prioritize density over hitting a word count"));
+        assert!(prompt.contains("senior engineering leader who builds developer platforms"));
+        assert!(prompt.contains("bold lead phrases and bullets"));
+        assert!(prompt.contains("don't invent action items"));
+        assert!(prompt.contains("Be compact"));
+        assert!(prompt.contains("Article Source: HN"));
     }
 }
