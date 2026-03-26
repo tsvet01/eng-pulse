@@ -47,8 +47,8 @@ jobs:
     - name: Clippy Lint Explorer Agent
       run: cd apps/explorer-agent && cargo clippy -- -D warnings
 
-    - name: Test gemini-engine
-      run: cd libs/gemini-engine && cargo test --verbose
+    - name: Test llm-client
+      run: cd libs/llm-client && cargo test --verbose
 
     - name: Test Daily Agent
       run: cd apps/daily-agent && cargo test --verbose

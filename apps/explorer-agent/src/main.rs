@@ -12,7 +12,7 @@ use rss::Channel;
 use atom_syndication::Feed;
 use tracing::{info, warn, error, debug, instrument};
 use std::time::Duration as StdDuration;
-use gemini_engine::{call_llm_with_retry, init_logging, SourceConfig, SourceType, extract_domain, DEFAULT_BUCKET, LlmProvider};
+use llm_client::{call_llm_with_retry, init_logging, SourceConfig, SourceType, extract_domain, DEFAULT_BUCKET, LlmProvider};
 
 // --- Configuration Constants ---
 const HTTP_TIMEOUT_SECS: u64 = 30;
@@ -172,6 +172,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     for source in all_sources.iter() {
         // HN is always fresh - skip freshness check for it
         if source.source_type == SourceType::HackerNews {
+            reviewed_sources.insert(source.clone());
+            continue;
+        }
+
+        // Always keep newly discovered sources — freshness check is only for existing ones
+        if !current_sources.contains(source) {
+            info!(name = %source.name, "New source discovered, keeping without freshness check");
             reviewed_sources.insert(source.clone());
             continue;
         }

@@ -6,8 +6,8 @@ use std::time::Duration as StdDuration;
 use chrono::{DateTime, Utc, Duration};
 use tracing::{warn, debug};
 
-// Re-export from gemini-engine for convenience
-pub use gemini_engine::{SourceConfig, SourceType};
+// Re-export from llm-client for convenience
+pub use llm_client::{SourceConfig, SourceType};
 
 /// HTTP timeout for fetching feeds
 const FETCH_TIMEOUT_SECS: u64 = 30;

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use google_cloud_storage::client::Client;
 use google_cloud_storage::http::objects::upload::{UploadObjectRequest, UploadType, Media};
-use gemini_engine::{call_llm_with_retry, LlmProvider};
+use llm_client::{call_llm, LlmProvider, LlmOptions};
 
 use crate::manifest::ManifestEntry;
 use crate::feedback::{FeedbackEntry, CALIBRATION_AGREEMENT_THRESHOLD};
@@ -52,16 +52,19 @@ pub(crate) struct EvalCriteria {
 }
 
 /// Run a single eval pass: send prompt to LLM, parse JSON response, upload report.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_eval_pass(
     http_client: &reqwest::Client,
-    claude_key: &str,
+    provider: LlmProvider,
+    api_key: &str,
     prompt: String,
     gcs_client: &Client,
     bucket_name: &str,
     today: &str,
     report_prefix: &str,
 ) -> Option<serde_json::Value> {
-    match call_llm_with_retry(http_client, LlmProvider::Claude, claude_key, prompt).await {
+    let eval_opts = LlmOptions { temperature: Some(0.3), ..Default::default() };
+    match call_llm(http_client, provider, api_key, prompt, &eval_opts).await {
         Ok(eval_response) => {
             let cleaned = eval_response
                 .trim()

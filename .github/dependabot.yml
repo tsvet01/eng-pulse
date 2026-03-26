@@ -18,9 +18,9 @@ updates:
     schedule:
       interval: "weekly"
 
-  # Rust — gemini-engine
+  # Rust — llm-client
   - package-ecosystem: "cargo"
-    directory: "/libs/gemini-engine"
+    directory: "/libs/llm-client"
     schedule:
       interval: "weekly"
 

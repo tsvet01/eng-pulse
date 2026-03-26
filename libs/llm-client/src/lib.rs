@@ -90,6 +90,15 @@ pub struct SourceConfig {
     pub url: String,
 }
 
+/// Options for LLM calls (temperature, system message, etc.)
+#[derive(Debug, Clone, Default)]
+pub struct LlmOptions {
+    /// Temperature for generation (0.0-2.0). None = provider default.
+    pub temperature: Option<f32>,
+    /// System message (Claude/OpenAI). Ignored by Gemini.
+    pub system: Option<String>,
+}
+
 // --- Shared Logging ---
 
 /// Initialize structured logging with JSON format in production (when RUST_LOG is set),
@@ -129,8 +138,18 @@ pub struct GeminiContent {
 }
 
 #[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct GeminiGenerationConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct GeminiRequest {
     pub contents: Vec<GeminiContent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generation_config: Option<GeminiGenerationConfig>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -177,10 +196,10 @@ fn is_transient_error(err: &str) -> bool {
     transient_patterns.iter().any(|p| err_lower.contains(p))
 }
 
-async fn call_gemini(client: &reqwest::Client, api_key: &str, text: String) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+async fn call_gemini(client: &reqwest::Client, api_key: &str, text: String, options: &LlmOptions) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     // Get model from environment or use default
     let model = std::env::var("GEMINI_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
-    
+
     // Allow overriding base URL for testing
     let base_url = std::env::var("GEMINI_BASE_URL")
         .unwrap_or_else(|_| "https://generativelanguage.googleapis.com".to_string());
@@ -190,12 +209,15 @@ async fn call_gemini(client: &reqwest::Client, api_key: &str, text: String) -> R
         base_url, model
     );
 
+    let generation_config = options.temperature.map(|t| GeminiGenerationConfig { temperature: Some(t) });
+
     let request = GeminiRequest {
         contents: vec![
             GeminiContent {
                 parts: vec![ GeminiPart { text } ]
             }
-        ]
+        ],
+        generation_config,
     };
 
     debug!("Sending request to Gemini API");
@@ -243,6 +265,8 @@ struct OpenAIMessage {
 struct OpenAIRequest {
     model: String,
     messages: Vec<OpenAIMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -275,19 +299,23 @@ pub async fn call_openai_with_retry(
     call_llm_with_retry(client, LlmProvider::OpenAI, api_key, prompt).await
 }
 
-async fn call_openai(client: &reqwest::Client, api_key: &str, text: String) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+async fn call_openai(client: &reqwest::Client, api_key: &str, text: String, options: &LlmOptions) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| DEFAULT_OPENAI_MODEL.to_string());
-    
+
     // Allow overriding base URL for testing
     let base_url = std::env::var("OPENAI_BASE_URL")
         .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
 
+    let mut messages = Vec::new();
+    if let Some(ref system) = options.system {
+        messages.push(OpenAIMessage { role: "system".to_string(), content: system.clone() });
+    }
+    messages.push(OpenAIMessage { role: "user".to_string(), content: text });
+
     let request = OpenAIRequest {
         model,
-        messages: vec![OpenAIMessage {
-            role: "user".to_string(),
-            content: text,
-        }],
+        messages,
+        temperature: options.temperature,
     };
 
     debug!("Sending request to OpenAI API");
@@ -333,7 +361,11 @@ struct ClaudeMessage {
 struct ClaudeRequest {
     model: String,
     max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<String>,
     messages: Vec<ClaudeMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -361,9 +393,9 @@ pub async fn call_claude_with_retry(
     call_llm_with_retry(client, LlmProvider::Claude, api_key, prompt).await
 }
 
-async fn call_claude(client: &reqwest::Client, api_key: &str, text: String) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+async fn call_claude(client: &reqwest::Client, api_key: &str, text: String, options: &LlmOptions) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let model = std::env::var("CLAUDE_MODEL").unwrap_or_else(|_| DEFAULT_CLAUDE_MODEL.to_string());
-    
+
     // Allow overriding base URL for testing
     let base_url = std::env::var("CLAUDE_BASE_URL")
         .unwrap_or_else(|_| "https://api.anthropic.com/v1".to_string());
@@ -371,10 +403,12 @@ async fn call_claude(client: &reqwest::Client, api_key: &str, text: String) -> R
     let request = ClaudeRequest {
         model,
         max_tokens: 4096,
+        system: options.system.clone(),
         messages: vec![ClaudeMessage {
             role: "user".to_string(),
             content: text,
         }],
+        temperature: options.temperature,
     };
 
     debug!("Sending request to Claude API");
@@ -422,6 +456,18 @@ pub async fn call_llm_with_retry(
     api_key: &str,
     prompt: String,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    call_llm(client, provider, api_key, prompt, &LlmOptions::default()).await
+}
+
+/// Call any LLM provider with options and exponential backoff retry
+#[instrument(skip(client, api_key, prompt, options), fields(provider = %provider.as_str(), prompt_len = prompt.len()))]
+pub async fn call_llm(
+    client: &reqwest::Client,
+    provider: LlmProvider,
+    api_key: &str,
+    prompt: String,
+    options: &LlmOptions,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let backoff = ExponentialBackoff {
         max_elapsed_time: Some(Duration::from_secs(MAX_RETRY_ELAPSED_SECS)),
         ..Default::default()
@@ -430,17 +476,19 @@ pub async fn call_llm_with_retry(
     let client = client.clone();
     let api_key = api_key.to_string();
     let provider_name = provider.as_str();
+    let options = options.clone();
 
     retry(backoff, || {
         let client = client.clone();
         let api_key = api_key.clone();
         let prompt = prompt.clone();
+        let options = options.clone();
 
         async move {
             let result = match provider {
-                LlmProvider::Gemini => call_gemini(&client, &api_key, prompt).await,
-                LlmProvider::OpenAI => call_openai(&client, &api_key, prompt).await,
-                LlmProvider::Claude => call_claude(&client, &api_key, prompt).await,
+                LlmProvider::Gemini => call_gemini(&client, &api_key, prompt, &options).await,
+                LlmProvider::OpenAI => call_openai(&client, &api_key, prompt, &options).await,
+                LlmProvider::Claude => call_claude(&client, &api_key, prompt, &options).await,
             };
             match result {
                 Ok(response) => Ok(response),
@@ -532,6 +580,7 @@ mod tests {
                     text: "Hello, Gemini!".to_string(),
                 }],
             }],
+            generation_config: None,
         };
 
         let json = serde_json::to_string(&request).unwrap();
@@ -701,6 +750,7 @@ mod tests {
                 role: "user".to_string(),
                 content: "Hello, OpenAI!".to_string(),
             }],
+            temperature: None,
         };
 
         let json = serde_json::to_string(&request).unwrap();
@@ -746,10 +796,12 @@ mod tests {
         let request = ClaudeRequest {
             model: "claude-opus-4-6".to_string(),
             max_tokens: 4096,
+            system: None,
             messages: vec![ClaudeMessage {
                 role: "user".to_string(),
                 content: "Hello, Claude!".to_string(),
             }],
+            temperature: None,
         };
 
         let json = serde_json::to_string(&request).unwrap();
@@ -757,6 +809,9 @@ mod tests {
         assert!(json.contains("Hello, Claude!"));
         assert!(json.contains("4096"));
         assert!(json.contains("max_tokens"));
+        // system and temperature should be omitted when None
+        assert!(!json.contains("system"));
+        assert!(!json.contains("temperature"));
     }
 
     #[test]

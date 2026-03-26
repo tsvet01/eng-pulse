@@ -1,6 +1,6 @@
 use wiremock::{MockServer, Mock, ResponseTemplate};
 use wiremock::matchers::{method, path};
-use gemini_engine::{call_llm_with_retry, LlmProvider};
+use llm_client::{call_llm_with_retry, LlmProvider};
 use std::time::Duration;
 use reqwest::Client;
 use serial_test::serial;

@@ -4,12 +4,12 @@ FROM rust:1.94-bookworm as builder
 WORKDIR /app
 
 # Copy only Cargo files first for dependency caching
-COPY libs/gemini-engine/Cargo.toml libs/gemini-engine/Cargo.toml
+COPY libs/llm-client/Cargo.toml libs/llm-client/Cargo.toml
 COPY apps/explorer-agent/Cargo.toml apps/explorer-agent/Cargo.toml
 COPY apps/explorer-agent/Cargo.lock apps/explorer-agent/Cargo.lock
 
 # Create dummy source files to build dependencies
-RUN mkdir -p libs/gemini-engine/src && echo "pub fn dummy() {}" > libs/gemini-engine/src/lib.rs
+RUN mkdir -p libs/llm-client/src && echo "pub fn dummy() {}" > libs/llm-client/src/lib.rs
 RUN mkdir -p apps/explorer-agent/src && echo "fn main() {}" > apps/explorer-agent/src/main.rs
 
 # Build dependencies only (this layer will be cached)
@@ -18,18 +18,18 @@ RUN cargo build --release || true
 
 # Remove dummy source and compiled artifacts to force rebuild
 # Keep deps/ intact for caching, but remove the main binary and its fingerprints
-RUN rm -rf /app/libs/gemini-engine/src /app/apps/explorer-agent/src \
+RUN rm -rf /app/libs/llm-client/src /app/apps/explorer-agent/src \
     /app/apps/explorer-agent/target/release/se-explorer-agent \
     /app/apps/explorer-agent/target/release/.fingerprint/se-explorer-agent-* \
-    /app/apps/explorer-agent/target/release/.fingerprint/gemini-engine-* \
+    /app/apps/explorer-agent/target/release/.fingerprint/llm-client-* \
     /app/apps/explorer-agent/target/release/deps/libse_explorer_agent* \
-    /app/apps/explorer-agent/target/release/deps/libgemini_engine* \
+    /app/apps/explorer-agent/target/release/deps/libllm_client* \
     /app/apps/explorer-agent/target/release/deps/se_explorer_agent* \
-    /app/apps/explorer-agent/target/release/deps/gemini_engine*
+    /app/apps/explorer-agent/target/release/deps/llm_client*
 
 # Now copy actual source code
 WORKDIR /app
-COPY libs/gemini-engine/src libs/gemini-engine/src
+COPY libs/llm-client/src libs/llm-client/src
 COPY apps/explorer-agent/src apps/explorer-agent/src
 
 # Build the application

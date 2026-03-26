@@ -32,7 +32,7 @@ gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
 # 2. Build and Push Image
 IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${IMAGE_NAME}:${IMAGE_TAG}"
 echo "Building and Pushing image to $IMAGE_URI..."
-# Build from project root to include libs/gemini-engine shared crate
+# Build from project root to include libs/llm-client shared crate
 cd ../..
 docker build --platform linux/amd64 -t $IMAGE_URI -f apps/explorer-agent/Dockerfile .
 cd apps/explorer-agent

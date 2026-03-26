@@ -30,9 +30,9 @@ use google_cloud_storage::http::objects::upload::{UploadObjectRequest, UploadTyp
 use chrono::Utc;
 use tracing::{info, warn, error, debug, instrument};
 use std::time::Duration;
-use gemini_engine::{
-    call_llm_with_retry, init_logging, extract_domain,
-    DEFAULT_BUCKET, LlmProvider, get_api_key_env_var,
+use llm_client::{
+    call_llm_with_retry, call_llm, init_logging, extract_domain,
+    DEFAULT_BUCKET, LlmProvider, LlmOptions, get_api_key_env_var,
 };
 
 use crate::manifest::{ManifestEntry, gcs_public_url, gcs_object_path, SUMMARY_SNIPPET_CHARS};
@@ -259,6 +259,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     info!(total_articles = all_articles.len(), "Total articles collected");
 
+    // --- Manifest: download once, all stages append, single upload at the end ---
+    let today = Utc::now().format("%Y-%m-%d").to_string();
+
+    let mut manifest: Vec<ManifestEntry> = match gcs_client.download_object(
+        &GetObjectRequest {
+            bucket: bucket_name.to_string(),
+            object: "manifest.json".to_string(),
+            ..Default::default()
+        },
+        &Range::default()
+    ).await {
+        Ok(data) => {
+            serde_json::from_slice(&data).map_err(|e| {
+                error!(error = %e, "Failed to parse existing manifest.json - file may be corrupted");
+                e
+            })?
+        },
+        Err(e) if e.to_string().contains("No such object") || e.to_string().contains("404") => {
+            info!("No existing manifest.json found, creating new one");
+            Vec::new()
+        },
+        Err(e) => {
+            return Err(format!("Failed to download manifest.json: {}", e).into());
+        }
+    };
+
+    // Cross-day dedup: collect URLs selected in the last 7 days
+    let recent_urls: std::collections::HashSet<String> = manifest.iter()
+        .filter(|e| e.date >= Utc::now().checked_sub_signed(chrono::Duration::days(7))
+            .map(|d| d.format("%Y-%m-%d").to_string())
+            .unwrap_or_default())
+        .filter(|e| e.prompt_version.is_none()) // only dedup against v1 (prod) picks
+        .filter_map(|e| e.original_url.clone())
+        .collect();
+
+    let pre_dedup_count = all_articles.len();
+    all_articles.retain(|a| !recent_urls.contains(&a.url));
+    if all_articles.len() < pre_dedup_count {
+        info!(
+            removed = pre_dedup_count - all_articles.len(),
+            remaining = all_articles.len(),
+            "Filtered articles already selected in last 7 days"
+        );
+    }
+
+    if all_articles.is_empty() {
+        warn!("No articles remain after dedup — all recent articles were already selected");
+        return Ok(());
+    }
+
+    // Remove existing entries for today (all models)
+    manifest.retain(|e| e.date != today);
+    let mut new_manifest_entries: Vec<ManifestEntry> = Vec::new();
+
     // 3. Selection (using first available provider)
     info!(provider = %selection_provider.as_str(), "Asking LLM to select best article");
 
@@ -270,7 +324,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let prod_config = prompts::PromptConfig::V1;
     let selection_prompt = prod_config.selection_prompt(&articles_text);
 
-    let selected_index = call_llm_with_retry(&http_client, selection_provider, &selection_key, selection_prompt).await?;
+    let selection_opts = LlmOptions { temperature: Some(0.3), ..Default::default() };
+    let selected_index = call_llm(&http_client, selection_provider, &selection_key, selection_prompt, &selection_opts).await?;
 
     // Parse the index using our helper function
     let index = parse_selection_index(&selected_index).ok_or_else(|| {
@@ -314,36 +369,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     debug!(char_count = truncated_text.len(), "Article text truncated");
 
     let summary_prompt = prod_config.summary_prompt(&best_article.source, &best_article.title, &truncated_text);
-
-    // --- Manifest: download once, all stages append, single upload at the end ---
-    let today = Utc::now().format("%Y-%m-%d").to_string();
-
-    let mut manifest: Vec<ManifestEntry> = match gcs_client.download_object(
-        &GetObjectRequest {
-            bucket: bucket_name.to_string(),
-            object: "manifest.json".to_string(),
-            ..Default::default()
-        },
-        &Range::default()
-    ).await {
-        Ok(data) => {
-            serde_json::from_slice(&data).map_err(|e| {
-                error!(error = %e, "Failed to parse existing manifest.json - file may be corrupted");
-                e
-            })?
-        },
-        Err(e) if e.to_string().contains("No such object") || e.to_string().contains("404") => {
-            info!("No existing manifest.json found, creating new one");
-            Vec::new()
-        },
-        Err(e) => {
-            return Err(format!("Failed to download manifest.json: {}", e).into());
-        }
-    };
-
-    // Remove existing entries for today (all models)
-    manifest.retain(|e| e.date != today);
-    let mut new_manifest_entries: Vec<ManifestEntry> = Vec::new();
 
     // --- Stage 2: Prod (v1) ---
 
@@ -415,7 +440,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         // Beta selection: pick a different article using persona-driven prompt
         let beta_selection_prompt = beta_config.selection_prompt(&articles_text);
-        match call_llm_with_retry(&http_client, LlmProvider::Claude, claude_key, beta_selection_prompt).await {
+        match call_llm(&http_client, LlmProvider::Claude, claude_key, beta_selection_prompt, &selection_opts).await {
             Ok(beta_selected) => {
                 let beta_index = parse_selection_index(&beta_selected).unwrap_or(0);
                 let beta_safe_index = if beta_index >= all_articles.len() { 0 } else { beta_index };
@@ -522,8 +547,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let calibration_context = build_calibration_context(&feedback, &gcs_client, &bucket_name, &manifest).await;
 
     // --- Stage 4: Eval (dual pass with calibration) ---
-    if let Some((_, claude_key)) = claude_entry {
-        info!("Starting eval stage");
+    // Use Gemini as judge to avoid self-preference bias (Claude judging Claude summaries)
+    let eval_entry = enabled_providers.iter().find(|(p, _)| *p == LlmProvider::Gemini)
+        .or(enabled_providers.iter().find(|(p, _)| *p == LlmProvider::Claude));
+    if let Some((eval_provider, eval_key)) = eval_entry {
+        info!(provider = %eval_provider.as_str(), "Starting eval stage");
 
         // Collect all summaries generated today for evaluation
         let mut eval_summaries: Vec<(String, String)> = Vec::new(); // (summary_id, content)
@@ -570,7 +598,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             // Pass 1: Uncalibrated eval
             let uncalibrated_prompt = format!("{}{}", base_eval_prompt, summaries_section);
             if let Some(json) = run_eval_pass(
-                &http_client, claude_key, uncalibrated_prompt, &gcs_client, &bucket_name, &today, "eval"
+                &http_client, *eval_provider, eval_key, uncalibrated_prompt, &gcs_client, &bucket_name, &today, "eval"
             ).await {
                 apply_eval_scores(&json, &mut new_manifest_entries);
             }
@@ -580,7 +608,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 info!("Running calibrated eval pass");
                 let calibrated_prompt = format!("{}{}\n{}", base_eval_prompt, cal_context, summaries_section);
                 if let Some(cal_json) = run_eval_pass(
-                    &http_client, claude_key, calibrated_prompt, &gcs_client, &bucket_name, &today, "eval-calibrated"
+                    &http_client, *eval_provider, eval_key, calibrated_prompt, &gcs_client, &bucket_name, &today, "eval-calibrated"
                 ).await {
                     // Calibrated scores override uncalibrated
                     apply_eval_scores(&cal_json, &mut new_manifest_entries);
@@ -589,7 +617,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         }
     } else {
-        info!("ANTHROPIC_API_KEY not set, skipping eval stage");
+        info!("No LLM provider available for eval, skipping eval stage");
     }
 
     // --- Final: Upload manifest (all stages have appended to new_manifest_entries) ---
