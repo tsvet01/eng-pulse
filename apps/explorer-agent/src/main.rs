@@ -108,13 +108,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Err(e) => error!(error = %e, "Error downloading user_candidates.json"),
     }
 
-    // 4. Discover new sources via Gemini (if not processing user candidates)
-    if all_sources.len() == initial_source_count {
+    // 4. Discover new sources via Gemini (always runs, complements user candidates)
+    {
         info!("Asking Gemini for new recommendations (Explorer mode)");
         let existing_names_for_gemini: HashSet<String> = all_sources.iter().map(|s| s.name.clone()).collect();
         let json_example = r#"[{"name": "Netflix TechBlog", "url": "https://netflixtechblog.com/feed"}]"#;
         let prompt = format!(
-            "You are a Software Engineering Resource Scout. Your goal is to find high-quality, technical engineering blogs that publish regular, deep content.\n\nCurrent sources include: {:?}\n\nPlease recommend 3 NEW, different engineering blogs (company engineering blogs or high-profile individual blogs) that are NOT in this list.\nFor each recommendation, provide its RSS/Atom feed URL if you know it directly. Otherwise, provide the main website URL.\nReturn ONLY a valid JSON array of objects, where each object has 'name' and 'url'.\nExample: {}",
+            r#"You are discovering technical blogs for a senior engineering leader at a hedge fund who works on developer platforms, low-latency systems (C++/Rust), and AI tooling.
+
+Current sources: {:?}
+
+Recommend 5 NEW engineering blogs NOT in this list. Prioritize:
+1. Company engineering blogs with deep technical posts (systems, infrastructure, performance)
+2. Individual blogs by Staff/Principal engineers writing about architecture, leadership, or AI engineering
+3. Active blogs that published within the last 3 months
+4. Blogs with RSS or Atom feeds (most do — provide the feed URL if you know it, otherwise the main URL)
+
+Avoid: news aggregators, product marketing blogs, beginner tutorial sites.
+
+Return ONLY a valid JSON array: {}
+Do not wrap in markdown fences."#,
             existing_names_for_gemini, json_example
         );
 
@@ -266,7 +279,7 @@ async fn discover_and_validate_feed(client: &reqwest::Client, api_key: &str, url
             return Ok(Some(SourceConfig { name: name.to_string(), source_type: feed_type, url: final_url_str }));
         }
 
-        // HTML Discovery
+        // HTML Discovery — find <link rel="alternate"> feed URLs
         let document = Document::from(text.as_str());
         for node in document.find(Name("link").and(Attr("rel", "alternate"))
                                    .and(Attr("type", "application/rss+xml")
@@ -276,13 +289,19 @@ async fn discover_and_validate_feed(client: &reqwest::Client, api_key: &str, url
                 let Ok(resolved_url) = base_url.join(href) else { continue };
                 let resolved_url_str = resolved_url.to_string();
 
-                // Check if feed exists (ignore HEAD failures)
-                let head_result = client.head(&resolved_url_str).send().await;
-                if let Ok(resp) = head_result {
-                    if resp.status().is_success()
-                        && is_relevant_with_gemini(client, api_key, name, &resolved_url_str, "").await.unwrap_or(false)
-                    {
-                        return Ok(Some(SourceConfig { name: name.to_string(), source_type: SourceType::Rss, url: resolved_url_str }));
+                // Fetch actual feed content for relevance check
+                if let Ok(feed_resp) = client.get(&resolved_url_str).send().await {
+                    if feed_resp.status().is_success() {
+                        let feed_text = feed_resp.text().await.unwrap_or_default();
+                        let sample: String = feed_text.chars().take(2000).collect();
+                        let feed_type = if atom_syndication::Feed::read_from(sample.as_bytes()).is_ok() {
+                            SourceType::Atom
+                        } else {
+                            SourceType::Rss
+                        };
+                        if is_relevant_with_gemini(client, api_key, name, &resolved_url_str, &sample).await.unwrap_or(false) {
+                            return Ok(Some(SourceConfig { name: name.to_string(), source_type: feed_type, url: resolved_url_str }));
+                        }
                     }
                 }
             }
@@ -299,22 +318,28 @@ async fn discover_and_validate_feed(client: &reqwest::Client, api_key: &str, url
         break;
     }
 
-    // Try common suffixes
+    // Try common feed path suffixes
     if let Ok(parsed_url) = Url::parse(url) {
         let base_domain = format!("{}://{}", parsed_url.scheme(), parsed_url.host_str().unwrap_or_default());
-        let suffixes = ["/feed", "/rss", "/atom.xml", "/feed.xml", "/rss.xml"];
+        let suffixes = ["/feed", "/rss", "/atom.xml", "/feed.xml", "/rss.xml", "/index.xml", "/feed/rss"];
         for suffix in suffixes {
             let Ok(base) = Url::parse(&base_domain) else { continue };
             let Ok(candidate_url) = base.join(suffix) else { continue };
             let candidate_url_str = candidate_url.to_string();
 
-            // Check if feed exists (ignore HEAD failures)
-            let head_result = client.head(&candidate_url_str).send().await;
-            if let Ok(resp) = head_result {
-                if resp.status().is_success()
-                    && is_relevant_with_gemini(client, api_key, name, &candidate_url_str, "").await.unwrap_or(false)
-                {
-                    return Ok(Some(SourceConfig { name: name.to_string(), source_type: SourceType::Rss, url: candidate_url_str }));
+            // Fetch feed content (not just HEAD) for relevance check
+            if let Ok(resp) = client.get(&candidate_url_str).send().await {
+                if resp.status().is_success() {
+                    let feed_text = resp.text().await.unwrap_or_default();
+                    let is_rss = rss::Channel::read_from(feed_text.as_bytes()).is_ok();
+                    let is_atom = atom_syndication::Feed::read_from(feed_text.as_bytes()).is_ok();
+                    if is_rss || is_atom {
+                        let sample: String = feed_text.chars().take(2000).collect();
+                        if is_relevant_with_gemini(client, api_key, name, &candidate_url_str, &sample).await.unwrap_or(false) {
+                            let feed_type = if is_atom { SourceType::Atom } else { SourceType::Rss };
+                            return Ok(Some(SourceConfig { name: name.to_string(), source_type: feed_type, url: candidate_url_str }));
+                        }
+                    }
                 }
             }
         }
@@ -356,9 +381,14 @@ async fn fetch_latest_pub_date(client: &reqwest::Client, feed_url: &str) -> Resu
 
 #[instrument(skip(client, api_key, content_sample), fields(source_name = %name))]
 async fn is_relevant_with_gemini(client: &reqwest::Client, api_key: &str, name: &str, url: &str, content_sample: &str) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    let content_context = if content_sample.is_empty() {
+        "No content sample available — judge by name and URL only.".to_string()
+    } else {
+        format!("Content sample:\n{}", content_sample)
+    };
     let prompt = format!(
-        "Given the blog titled '{}' at URL '{}', and a sample of its content: '{}'.\n\nDoes this source consistently publish high-quality, technically deep content relevant to a senior software engineer in 2025?\n\nRespond ONLY with 'yes' or 'no'.",
-        name, url, content_sample
+        "Blog: '{}' at {}\n\n{}\n\nIs this a technical engineering blog that publishes substantive, deep content relevant to a senior systems engineer (C++/Rust, infrastructure, AI tooling)? Not a news site, not marketing, not beginner tutorials.\n\nRespond ONLY with 'yes' or 'no'.",
+        name, url, content_context
     );
 
     let response = call_llm_with_retry(client, LlmProvider::Gemini, api_key, prompt).await?;

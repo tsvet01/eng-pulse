@@ -14,11 +14,27 @@ impl PromptConfig {
         }
     }
 
-    /// Build the article selection prompt.
+    /// Build the article selection prompt (headline-only, single pick).
     pub fn selection_prompt(&self, articles_text: &str) -> String {
         match self {
             Self::V1 => self.v1_selection_prompt(articles_text),
             Self::V2 => self.v2_selection_prompt(articles_text),
+        }
+    }
+
+    /// Build the shortlist prompt (pick top 5 candidates from headlines).
+    pub fn shortlist_prompt(&self, articles_text: &str) -> String {
+        match self {
+            Self::V1 => self.v1_shortlist_prompt(articles_text),
+            Self::V2 => self.v2_shortlist_prompt(articles_text),
+        }
+    }
+
+    /// Build the final selection prompt (pick 1 from shortlist with content snippets).
+    pub fn final_selection_prompt(&self, candidates_text: &str) -> String {
+        match self {
+            Self::V1 => self.v1_final_selection_prompt(candidates_text),
+            Self::V2 => self.v2_final_selection_prompt(candidates_text),
         }
     }
 
@@ -63,6 +79,63 @@ Avoid: product announcements, vendor marketing, beginner tutorials, pure news wi
 
 Reply ONLY with the integer index number (e.g., '3'). No explanation."#,
             articles_text
+        )
+    }
+
+    fn v1_shortlist_prompt(&self, articles_text: &str) -> String {
+        format!(
+            "You are an expert Software Engineering Editor. From the following headlines, shortlist the 5 most promising articles for a senior software engineer. Consider technical depth, novelty, and educational value.\n\n{}\n\nReply ONLY with 5 comma-separated index numbers (e.g., '3,7,12,25,41'). No explanation.",
+            articles_text
+        )
+    }
+
+    fn v2_shortlist_prompt(&self, articles_text: &str) -> String {
+        format!(
+            r#"You are curating a daily technical digest for this reader:
+
+Engineering leader building developer platforms at a hedge fund in London. Systems programmer (C++/Rust) with 20 years across low-latency trading, storage systems, and developer tooling.
+
+Top interests (ranked):
+1. Low-latency systems and performance engineering (C++, Rust, SIMD)
+2. AI-assisted development and agentic coding workflows
+3. Platform engineering and developer experience
+4. Engineering leadership — Staff/Principal IC paths
+5. Trading systems architecture and real-time risk
+
+From today's articles, shortlist the 5 most promising candidates. Prioritize:
+1. Actionable insight they can apply this week
+2. Technical depth — not surface-level news or beginner content
+3. Novelty — fresh perspective, not common knowledge
+
+Avoid: product announcements, vendor marketing, beginner tutorials, pure news without insight.
+
+{}
+
+Reply ONLY with 5 comma-separated index numbers (e.g., '3,7,12,25,41'). No explanation."#,
+            articles_text
+        )
+    }
+
+    fn v1_final_selection_prompt(&self, candidates_text: &str) -> String {
+        format!(
+            "You are an expert Software Engineering Editor. Below are 5 candidate articles with content previews. Select the SINGLE best article — the one with the most substantive, technically deep content (not just an appealing headline).\n\n{}\n\nReply ONLY with the index number of the chosen article (e.g., '3'). No explanation.",
+            candidates_text
+        )
+    }
+
+    fn v2_final_selection_prompt(&self, candidates_text: &str) -> String {
+        format!(
+            r#"You are making the final pick for a daily technical digest. The reader is a senior engineering leader at a hedge fund (C++/Rust, low-latency, AI tooling).
+
+Below are 5 candidate articles with content previews. Now that you can see the actual content, select the SINGLE best one. Look for:
+- Substantive technical depth (not just a catchy headline)
+- Actionable insight, not surface-level reporting
+- Content density — every paragraph teaches something
+
+{}
+
+Reply ONLY with the index number (e.g., '3'). No explanation."#,
+            candidates_text
         )
     }
 

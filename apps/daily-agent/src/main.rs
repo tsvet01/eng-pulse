@@ -4,8 +4,7 @@ mod eval;
 mod feedback;
 mod manifest;
 
-/// Parse an index from Gemini's response, extracting the first contiguous digit sequence.
-/// Returns None if no valid number is found.
+/// Parse an index from LLM response, extracting the first contiguous digit sequence.
 fn parse_selection_index(response: &str) -> Option<usize> {
     let digits: String = response
         .trim()
@@ -20,6 +19,19 @@ fn parse_selection_index(response: &str) -> Option<usize> {
         digits.parse().ok()
     }
 }
+
+/// Parse comma-separated indices from LLM shortlist response (e.g., "3,7,12,25,41").
+fn parse_shortlist_indices(response: &str, max_index: usize) -> Vec<usize> {
+    response
+        .trim()
+        .split(',')
+        .filter_map(|s| parse_selection_index(s.trim()))
+        .filter(|&i| i < max_index)
+        .collect()
+}
+
+/// Content snippet length for two-phase selection
+const SELECTION_SNIPPET_CHARS: usize = 1000;
 use readability::extractor;
 use std::io::Cursor;
 use crate::fetcher::{SourceConfig, Article};
@@ -313,8 +325,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     manifest.retain(|e| e.date != today);
     let mut new_manifest_entries: Vec<ManifestEntry> = Vec::new();
 
-    // 3. Selection (using first available provider)
-    info!(provider = %selection_provider.as_str(), "Asking LLM to select best article");
+    // 3. Two-phase selection: shortlist by headlines, then pick by content
+    info!(provider = %selection_provider.as_str(), "Phase 1: Shortlisting top candidates from headlines");
 
     let mut articles_text = String::new();
     for (i, article) in all_articles.iter().enumerate() {
@@ -322,30 +334,62 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     let prod_config = prompts::PromptConfig::V1;
-    let selection_prompt = prod_config.selection_prompt(&articles_text);
-
     let selection_opts = LlmOptions { temperature: Some(0.3), ..Default::default() };
-    let selected_index = call_llm(&http_client, selection_provider, &selection_key, selection_prompt, &selection_opts).await?;
 
-    // Parse the index using our helper function
-    let index = parse_selection_index(&selected_index).ok_or_else(|| {
-        format!("Failed to parse LLM selection '{}': no valid number found", selected_index.trim())
-    })?;
+    // Phase 1: Shortlist top 5 from headlines
+    let shortlist_prompt = prod_config.shortlist_prompt(&articles_text);
+    let shortlist_response = call_llm(&http_client, selection_provider, &selection_key, shortlist_prompt, &selection_opts).await?;
+    let mut shortlist = parse_shortlist_indices(&shortlist_response, all_articles.len());
 
-    // Validate index is within bounds (all_articles cannot be empty - we return early above)
-    let safe_index = if index >= all_articles.len() {
-        warn!(
-            returned_index = index,
-            total_articles = all_articles.len(),
-            provider = %selection_provider.as_str(),
-            "LLM returned invalid index, using first article"
-        );
-        0
+    // Fallback: if shortlist parsing fails, use single-shot selection
+    if shortlist.is_empty() {
+        warn!(response = %shortlist_response.trim(), "Failed to parse shortlist, falling back to single-shot");
+        let fallback_prompt = prod_config.selection_prompt(&articles_text);
+        let fallback = call_llm(&http_client, selection_provider, &selection_key, fallback_prompt, &selection_opts).await?;
+        let idx = parse_selection_index(&fallback).unwrap_or(0).min(all_articles.len().saturating_sub(1));
+        shortlist = vec![idx];
+    }
+
+    info!(candidates = ?shortlist, "Shortlisted candidates");
+
+    // Phase 2: Fetch content snippets for shortlisted articles, then final pick
+    let safe_index = if shortlist.len() == 1 {
+        shortlist[0]
     } else {
-        index
-    };
-    let best_article = &all_articles[safe_index];
+        info!("Phase 2: Fetching content for {} candidates", shortlist.len());
+        let mut candidates_text = String::new();
+        for &idx in &shortlist {
+            let article = &all_articles[idx];
+            let snippet = match fetch_article_content(&http_client, &article.url).await {
+                Ok(content) => {
+                    let s: String = content.chars().take(SELECTION_SNIPPET_CHARS).collect();
+                    s
+                }
+                Err(e) => {
+                    debug!(title = %article.title, error = %e, "Could not fetch content for candidate");
+                    "(content unavailable)".to_string()
+                }
+            };
+            candidates_text.push_str(&format!(
+                "--- Article {} ---\n[{}] {}\n\n{}\n\n",
+                idx, article.source, article.title, snippet
+            ));
+        }
 
+        let final_prompt = prod_config.final_selection_prompt(&candidates_text);
+        let final_response = call_llm(&http_client, selection_provider, &selection_key, final_prompt, &selection_opts).await?;
+        let picked = parse_selection_index(&final_response).unwrap_or(shortlist[0]);
+
+        // Validate the pick is in our shortlist
+        if shortlist.contains(&picked) {
+            picked
+        } else {
+            warn!(picked = picked, "Final pick not in shortlist, using first candidate");
+            shortlist[0]
+        }
+    };
+
+    let best_article = &all_articles[safe_index];
     info!(
         title = %best_article.title,
         url = %best_article.url,
@@ -353,8 +397,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "Selected best article"
     );
 
-    // 4. Fetch article content once (shared across all providers)
-    info!("Scraping article content");
+    // 4. Fetch full article content (may reuse cached content from phase 2)
+    info!("Fetching full article content");
 
     let article_text = match fetch_article_content(&http_client, &best_article.url).await {
         Ok(content) => content,

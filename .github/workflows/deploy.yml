@@ -167,6 +167,9 @@ jobs:
     - name: Set up Cloud SDK
       uses: google-github-actions/setup-gcloud@v2
 
+    - name: Bundle shared module
+      run: cp -r functions/shared functions/apns-notifier/shared
+
     - name: Deploy register-apns-token
       run: |
         cd functions/apns-notifier
@@ -210,6 +213,9 @@ jobs:
 
     - name: Set up Cloud SDK
       uses: google-github-actions/setup-gcloud@v2
+
+    - name: Bundle shared module
+      run: cp -r functions/shared functions/fcm-tokens/shared
 
     - name: Deploy register-token
       run: |
