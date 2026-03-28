@@ -1,8 +1,8 @@
 use serde::Deserialize;
-use google_cloud_storage::client::{Client, ClientConfig};
-use google_cloud_storage::http::objects::download::Range;
-use google_cloud_storage::http::objects::get::GetObjectRequest;
-use google_cloud_storage::http::objects::upload::{UploadObjectRequest, UploadType, Media};
+use gcloud_storage::client::{Client, ClientConfig};
+use gcloud_storage::http::objects::download::Range;
+use gcloud_storage::http::objects::get::GetObjectRequest;
+use gcloud_storage::http::objects::upload::{UploadObjectRequest, UploadType, Media};
 use select::document::Document;
 use select::predicate::{Name, Attr, Predicate};
 use std::collections::HashSet;
@@ -95,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             // Delete user_candidates.json after processing
             info!("Deleting user_candidates.json from GCS");
             gcs_client.delete_object(
-                &google_cloud_storage::http::objects::delete::DeleteObjectRequest {
+                &gcloud_storage::http::objects::delete::DeleteObjectRequest {
                     bucket: bucket_name.to_string(),
                     object: user_candidates_object_name.to_string(),
                     ..Default::default()
