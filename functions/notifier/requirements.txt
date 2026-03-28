@@ -6,6 +6,6 @@ google-auth==2.36.0
 requests==2.32.0
 markdown==3.5.2
 bleach==6.1.0
-PyJWT==2.8.0
+PyJWT==2.12.1
 cryptography==46.0.6
 httpx[http2]==0.28.1
