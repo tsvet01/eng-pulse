@@ -105,7 +105,7 @@ class NotificationService {
     );
 
     await _localNotifications.initialize(
-      initSettings,
+      settings: initSettings,
       onDidReceiveNotificationResponse: (details) {
         // Handle notification tap
         debugPrint('Local notification tapped: ${details.payload}');
@@ -178,10 +178,10 @@ class NotificationService {
     // Show local notification when app is in foreground
     if (notification != null) {
       _localNotifications.show(
-        notification.hashCode,
-        notification.title,
-        notification.body,
-        NotificationDetails(
+        id: notification.hashCode,
+        title: notification.title,
+        body: notification.body,
+        notificationDetails: NotificationDetails(
           android: AndroidNotificationDetails(
             'eng_pulse_daily',
             'Daily Briefings',

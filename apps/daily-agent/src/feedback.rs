@@ -1,9 +1,9 @@
 use serde::Deserialize;
 use chrono::Utc;
 use tracing::{info, warn};
-use google_cloud_storage::client::Client;
-use google_cloud_storage::http::objects::download::Range;
-use google_cloud_storage::http::objects::get::GetObjectRequest;
+use gcloud_storage::client::Client;
+use gcloud_storage::http::objects::download::Range;
+use gcloud_storage::http::objects::get::GetObjectRequest;
 
 use crate::manifest::{ManifestEntry, gcs_object_path};
 

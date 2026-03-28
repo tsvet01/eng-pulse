@@ -1,11 +1,11 @@
-functions-framework==3.5.0
-google-cloud-storage==2.18.0
-google-cloud-firestore==2.19.0
+functions-framework==3.10.1
+google-cloud-storage==3.10.1
+google-cloud-firestore==2.26.0
 google-cloud-secret-manager==2.21.0
 google-auth==2.36.0
 requests==2.32.0
 markdown==3.5.2
 bleach==6.1.0
 PyJWT==2.8.0
-cryptography==42.0.4
-httpx[http2]==0.27.0
+cryptography==46.0.6
+httpx[http2]==0.28.1

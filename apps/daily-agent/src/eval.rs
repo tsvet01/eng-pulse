@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
-use google_cloud_storage::client::Client;
-use google_cloud_storage::http::objects::upload::{UploadObjectRequest, UploadType, Media};
+use gcloud_storage::client::Client;
+use gcloud_storage::http::objects::upload::{UploadObjectRequest, UploadType, Media};
 use llm_client::{call_llm, LlmProvider, LlmOptions};
 
 use crate::manifest::ManifestEntry;

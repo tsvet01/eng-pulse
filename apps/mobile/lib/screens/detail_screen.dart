@@ -165,9 +165,11 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 
   Future<void> _shareArticle() async {
-    await Share.share(
-      '${_currentSummary.title}\n\n${_currentSummary.summarySnippet}\n\nRead on Eng Pulse',
-      subject: _currentSummary.title,
+    await SharePlus.instance.share(
+      ShareParams(
+        text: '${_currentSummary.title}\n\n${_currentSummary.summarySnippet}\n\nRead on Eng Pulse',
+        subject: _currentSummary.title,
+      ),
     );
   }
 
