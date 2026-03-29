@@ -66,6 +66,16 @@ class AudioPlayerService: NSObject, ObservableObject {
         duration = 0.0
     }
 
+    var currentTime: TimeInterval {
+        audioPlayer?.currentTime ?? 0
+    }
+
+    func seek(by seconds: TimeInterval) {
+        guard let player = audioPlayer else { return }
+        let newTime = max(0, min(player.currentTime + seconds, player.duration))
+        player.currentTime = newTime
+    }
+
     // MARK: - Progress Tracking
 
     private func startProgressTimer() {

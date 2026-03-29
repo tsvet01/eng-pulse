@@ -6,65 +6,95 @@ struct TTSPlayerBarView: View {
     let isPaused: Bool
     let isLoading: Bool
     let title: String
+    let currentTime: String
+    let duration: String
     let onToggle: () -> Void
     let onStop: () -> Void
-
-    private enum Layout {
-        static let progressBarHeight: CGFloat = 3
-        static let controlPadding: CGFloat = 10
-    }
+    let onSkipBack: () -> Void
+    let onSkipForward: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 8) {
+            // Progress bar
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
-                    Rectangle()
-                        .fill(Color.secondary.opacity(0.15))
-                    Rectangle()
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.onSurfaceVariant.opacity(0.15))
+                    RoundedRectangle(cornerRadius: 2)
                         .fill(Color.accentColor)
                         .frame(width: geometry.size.width * progress)
                 }
             }
-            .frame(height: Layout.progressBarHeight)
+            .frame(height: 3)
 
-            HStack(spacing: 16) {
+            // Timestamps
+            HStack {
+                Text(currentTime)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(.onSurfaceVariant)
+                Spacer()
+                Text(duration)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(.onSurfaceVariant)
+            }
+
+            // Controls: skip back, play/pause, skip forward
+            HStack(spacing: 24) {
+                Spacer()
+
+                Button(action: onSkipBack) {
+                    Image(systemName: "gobackward.15")
+                        .font(.title2)
+                        .foregroundColor(.onSurface)
+                }
+                .disabled(isLoading)
+                .accessibilityLabel("Skip back 15 seconds")
+
                 Button(action: onToggle) {
                     if isLoading {
                         ProgressView()
                             .scaleEffect(0.9)
                     } else {
-                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                            .font(.title2)
+                        Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                            .font(.system(size: 44))
+                            .foregroundColor(.accentColor)
                     }
                 }
                 .disabled(isLoading)
                 .accessibilityLabel(isPlaying ? "Pause" : "Play")
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .lineLimit(1)
-                    Text(isLoading ? "Generating audio..." : (isPlaying ? "Playing..." : "Paused"))
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                Button(action: onSkipForward) {
+                    Image(systemName: "goforward.15")
+                        .font(.title2)
+                        .foregroundColor(.onSurface)
                 }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(title), \(isLoading ? "generating audio" : (isPlaying ? "playing" : "paused"))")
-                .accessibilityValue("\(Int(progress * 100)) percent complete")
+                .disabled(isLoading)
+                .accessibilityLabel("Skip forward 15 seconds")
 
                 Spacer()
+            }
 
+            // Title + stop
+            HStack {
+                Text(title)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(.onSurface)
+                    .lineLimit(1)
+                Spacer()
                 Button(action: onStop) {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
-                        .foregroundColor(.secondary)
+                        .font(.body)
+                        .foregroundColor(.onSurfaceVariant)
                 }
                 .accessibilityLabel("Stop playback")
             }
-            .padding(.horizontal)
-            .padding(.vertical, Layout.controlPadding)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: .black.opacity(0.3), radius: 16, y: 8)
+        .padding(.horizontal, 12)
     }
 }

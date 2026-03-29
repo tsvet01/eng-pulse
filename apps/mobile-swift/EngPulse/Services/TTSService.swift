@@ -230,4 +230,28 @@ class TTSService: ObservableObject {
     func isPlayingArticle(_ url: String) -> Bool {
         (state == .playing || state == .loading) && currentArticleUrl == url
     }
+
+    func skipForward(seconds: TimeInterval = 15) {
+        guard state == .playing || state == .paused else { return }
+        audioPlayer.seek(by: seconds)
+    }
+
+    func skipBackward(seconds: TimeInterval = 15) {
+        guard state == .playing || state == .paused else { return }
+        audioPlayer.seek(by: -seconds)
+    }
+
+    var currentTimeFormatted: String {
+        formatTime(audioPlayer.currentTime)
+    }
+
+    var durationFormatted: String {
+        formatTime(audioPlayer.duration)
+    }
+
+    private func formatTime(_ seconds: TimeInterval) -> String {
+        let mins = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        return String(format: "%02d:%02d", mins, secs)
+    }
 }

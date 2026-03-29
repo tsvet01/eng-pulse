@@ -178,8 +178,12 @@ struct DetailView: View {
                         isPaused: isPaused,
                         isLoading: isLoadingTTS,
                         title: summary.title,
+                        currentTime: ttsService.currentTimeFormatted,
+                        duration: ttsService.durationFormatted,
                         onToggle: { toggleTTS() },
-                        onStop: { ttsService.stop() }
+                        onStop: { ttsService.stop() },
+                        onSkipBack: { ttsService.skipBackward() },
+                        onSkipForward: { ttsService.skipForward() }
                     )
                 }
             }
