@@ -75,7 +75,11 @@ struct HomeViewContent: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Summary.self) { summary in
-            DetailView(summary: summary, cacheService: summariesStore.cacheService)
+            DetailView(
+                summary: summary,
+                allSummaries: summariesStore.summaries,
+                cacheService: summariesStore.cacheService
+            )
         }
         .navigationDestination(for: String.self) { value in
             if value == "settings" {
