@@ -32,6 +32,7 @@
 		C1000005 /* TextCleanerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000005 /* TextCleanerTests.swift */; };
 		D1000001 /* LocalTTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000001 /* LocalTTSService.swift */; };
 		D1000002 /* LocalTTSServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000003 /* LocalTTSServiceTests.swift */; };
+		E1000002 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000001 /* Theme.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -74,6 +75,7 @@
 		D2000001 /* LocalTTSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalTTSService.swift; sourceTree = "<group>"; };
 		D2000002 /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.xcconfig; sourceTree = "<group>"; };
 		D2000003 /* LocalTTSServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalTTSServiceTests.swift; sourceTree = "<group>"; };
+		E1000001 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -109,6 +111,7 @@
 			isa = PBXGroup;
 			children = (
 				A2000001 /* EngPulseApp.swift */,
+				E1000001 /* Theme.swift */,
 				A5000004 /* Views */,
 				A5000005 /* Models */,
 				A5000006 /* Services */,
@@ -300,6 +303,7 @@
 				C1000002 /* TTSPlayerBarView.swift in Sources */,
 				C1000004 /* TTSErrorBanner.swift in Sources */,
 				D1000001 /* LocalTTSService.swift in Sources */,
+				E1000002 /* Theme.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
