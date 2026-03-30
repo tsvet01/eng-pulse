@@ -1,5 +1,31 @@
 import SwiftUI
 
+struct SettingsSection<Content: View>: View {
+    let title: String
+    let icon: String
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.subheadline)
+                    .foregroundColor(.accentColor)
+                Text(title)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .fontDesign(.serif)
+                    .foregroundColor(.onSurface)
+            }
+            .padding(.bottom, 4)
+            content()
+        }
+        .padding(DesignTokens.cardPadding)
+        .background(Color.container)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
+    }
+}
+
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var ttsService: TTSService
@@ -14,139 +40,180 @@ struct SettingsView: View {
     @State private var showClearCacheAlert = false
 
     var body: some View {
-        List {
-                // Feed Filter Section
-                Section {
-                    Picker("Source", selection: $selectedFilter) {
-                        ForEach(ModelFilter.allCases, id: \.rawValue) { filter in
-                            Text(filter.rawValue).tag(filter.rawValue)
-                        }
-                    }
-                } header: {
-                    Text("Feed")
-                } footer: {
-                    Text("Filter articles by AI model source.")
-                }
+        ScrollView {
+            VStack(spacing: DesignTokens.sectionSpacing) {
 
-                // Prompt Version Section
-                Section {
-                    Picker("Summary Format", selection: $promptVersionFilter) {
-                        Text("Production").tag("production")
-                        Text("Beta").tag("beta")
-                        Text("Both").tag("both")
-                    }
-                } header: {
-                    Text("Prompt Version")
-                } footer: {
-                    Text("Compare production and beta summary formats.")
-                }
-
-                // Feedback Tally Section
-                Section {
-                    let tally = feedbackTally
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("v1 (Production)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                // Intelligence
+                SettingsSection(title: "Intelligence", icon: "sparkles") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Model Filter")
+                            .font(.caption)
+                            .foregroundColor(.onSurfaceVariant)
+                        ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
-                                Label("\(tally.v1Up)", systemImage: "hand.thumbsup.fill")
-                                    .font(.caption2)
-                                    .foregroundColor(.green)
-                                Label("\(tally.v1Down)", systemImage: "hand.thumbsdown.fill")
-                                    .font(.caption2)
-                                    .foregroundColor(.red)
-                            }
-                        }
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("v2 (Beta)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            HStack(spacing: 8) {
-                                Label("\(tally.v2Up)", systemImage: "hand.thumbsup.fill")
-                                    .font(.caption2)
-                                    .foregroundColor(.green)
-                                Label("\(tally.v2Down)", systemImage: "hand.thumbsdown.fill")
-                                    .font(.caption2)
-                                    .foregroundColor(.red)
+                                ForEach(ModelFilter.allCases, id: \.rawValue) { filter in
+                                    let selected = selectedFilter == filter.rawValue
+                                    Button {
+                                        selectedFilter = filter.rawValue
+                                    } label: {
+                                        Text(filter.rawValue)
+                                            .font(.subheadline)
+                                            .foregroundColor(selected ? .accentColor : .onSurfaceVariant)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 8)
+                                            .background(selected ? Color.accentColor.opacity(0.2) : Color.containerHigh)
+                                            .clipShape(Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                             }
                         }
                     }
-                } header: {
-                    Text("Feedback")
-                } footer: {
-                    Text("Your ratings across summary versions.")
+
+                    Divider()
+                        .background(Color.outlineVariant)
+                        .padding(.vertical, 4)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Prompt Version")
+                            .font(.caption)
+                            .foregroundColor(.onSurfaceVariant)
+                        HStack(spacing: 8) {
+                            ForEach([("v1", "production"), ("v2", "beta"), ("Both", "both")], id: \.1) { label, value in
+                                let selected = promptVersionFilter == value
+                                Button {
+                                    promptVersionFilter = value
+                                } label: {
+                                    Text(label)
+                                        .font(.subheadline)
+                                        .foregroundColor(selected ? .accentColor : .onSurfaceVariant)
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 8)
+                                        .background(selected ? Color.accentColor.opacity(0.2) : Color.containerHigh)
+                                        .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
                 }
 
-                // Listening Section
-                Section {
-                    VStack(alignment: .leading) {
+                // Listening
+                SettingsSection(title: "Listening", icon: "waveform") {
+                    VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text("Speech Rate")
+                                .font(.subheadline)
+                                .foregroundColor(.onSurface)
                             Spacer()
-                            Text(speechRateLabel)
-                                .foregroundColor(.secondary)
+                            Text(rateLabel)
+                                .font(.caption)
+                                .fontDesign(.monospaced)
+                                .foregroundColor(.accentColor)
                         }
                         Slider(value: $speechRate, in: 0.25...0.75, step: 0.05)
+                            .tint(.accentColor)
                     }
 
-                    VStack(alignment: .leading) {
+                    Divider()
+                        .background(Color.outlineVariant)
+                        .padding(.vertical, 4)
+
+                    VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text("Pitch")
+                            Text("Voice Pitch")
+                                .font(.subheadline)
+                                .foregroundColor(.onSurface)
                             Spacer()
                             Text(pitchLabel)
-                                .foregroundColor(.secondary)
+                                .font(.caption)
+                                .fontDesign(.monospaced)
+                                .foregroundColor(.accentColor)
                         }
                         Slider(value: $pitch, in: 0.5...1.5, step: 0.1)
+                            .tint(.accentColor)
                     }
+                }
 
-                    if !ttsService.isUsingLocalTTS {
-                        Picker("Voice", selection: $selectedVoice) {
-                            ForEach(Neural2Voice.allCases) { voice in
-                                Text(voice.displayName).tag(voice.rawValue)
+                // Notifications
+                SettingsSection(title: "Notifications", icon: "bell.badge") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Toggle(isOn: $notificationsEnabled) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Daily Briefing")
+                                    .font(.subheadline)
+                                    .foregroundColor(.onSurface)
+                                Text("Receive a daily summary of top engineering articles.")
+                                    .font(.caption)
+                                    .foregroundColor(.onSurfaceVariant)
                             }
                         }
+                        .tint(.accentColor)
                     }
-                } header: {
-                    Text("Listening")
-                } footer: {
-                    if ttsService.isUsingLocalTTS {
-                        Text("Using device speech synthesis. Add a Google Cloud TTS API key in Secrets.xcconfig for Neural2 voices.")
-                    } else {
-                        Text("Uses Google Cloud Neural2 voices for natural-sounding speech.")
-                    }
-                }
-
-                // Notifications Section
-                Section {
-                    Toggle("Daily Briefings", isOn: $notificationsEnabled)
 
                     if notificationsEnabled {
+                        Divider()
+                            .background(Color.outlineVariant)
+                            .padding(.vertical, 4)
+
                         HStack {
-                            Text("Briefing Time")
+                            Text("Delivery Time")
+                                .font(.subheadline)
+                                .foregroundColor(.onSurface)
                             Spacer()
                             Text(dailyBriefingTime)
-                                .foregroundColor(.secondary)
+                                .font(.caption)
+                                .fontDesign(.monospaced)
+                                .foregroundColor(.accentColor)
                         }
                     }
-                } header: {
-                    Text("Notifications")
-                } footer: {
-                    Text("Receive a daily summary of the latest engineering articles.")
                 }
 
-                // Cache Section
-                Section {
-                    Button(role: .destructive) {
-                        showClearCacheAlert = true
-                    } label: {
-                        Label("Clear Cache", systemImage: "trash")
+                // Archive
+                SettingsSection(title: "Archive", icon: "archivebox") {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Reading History")
+                                .font(.subheadline)
+                                .foregroundColor(.onSurface)
+                            Text("\(readCount) articles read")
+                                .font(.caption)
+                                .foregroundColor(.onSurfaceVariant)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(.onSurfaceVariant)
                     }
-                } header: {
-                    Text("Storage")
-                } footer: {
-                    Text("Clear cached summaries and content to free up space.")
+                }
+
+                // Infrastructure
+                SettingsSection(title: "Infrastructure", icon: "externaldrive") {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Local Storage")
+                                .font(.subheadline)
+                                .foregroundColor(.onSurface)
+                            Text(cacheSize)
+                                .font(.caption)
+                                .fontDesign(.monospaced)
+                                .foregroundColor(.onSurfaceVariant)
+                        }
+                        Spacer()
+                        Button {
+                            showClearCacheAlert = true
+                        } label: {
+                            Text("Clear Cache")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(Color.red)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
                 .alert("Clear Cache?", isPresented: $showClearCacheAlert) {
                     Button("Cancel", role: .cancel) { }
@@ -157,60 +224,70 @@ struct SettingsView: View {
                     Text("This will remove all downloaded articles. You'll need internet to read them again.")
                 }
 
-                // About Section
-                Section {
-                    HStack {
-                        Text("Version")
-                        Spacer()
-                        Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0")
-                            .foregroundColor(.secondary)
+                // About
+                SettingsSection(title: "About", icon: "info.circle") {
+                    VStack(spacing: 8) {
+                        Image(systemName: "bolt.fill")
+                            .font(.largeTitle)
+                            .foregroundColor(.accentColor)
+                        Text("Eng Pulse")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                            .fontDesign(.serif)
+                            .foregroundColor(.onSurface)
+                        Text("v\(appVersion)")
+                            .font(.caption)
+                            .fontDesign(.monospaced)
+                            .foregroundColor(.onSurfaceVariant)
                     }
-
-                    if let url = URL(string: "https://github.com/tsvet01/eng-pulse") {
-                        Link(destination: url) {
-                            HStack {
-                                Text("Source Code")
-                                Spacer()
-                                Image(systemName: "arrow.up.right.square")
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                } header: {
-                    Text("About")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
                 }
             }
-        .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private var feedbackTally: (v1Up: Int, v1Down: Int, v2Up: Int, v2Down: Int) {
-        let allDefaults = UserDefaults.standard.dictionaryRepresentation()
-        var tally = (v1Up: 0, v1Down: 0, v2Up: 0, v2Down: 0)
-        for (key, value) in allDefaults {
-            guard key.hasPrefix("feedback_"), let rating = value as? String else { continue }
-            let isBeta = key.contains("/beta/")
-            switch (isBeta, rating) {
-            case (false, "up"):   tally.v1Up += 1
-            case (false, "down"): tally.v1Down += 1
-            case (true, "up"):    tally.v2Up += 1
-            case (true, "down"):  tally.v2Down += 1
-            default: break
-            }
+            .padding(.horizontal, DesignTokens.cardPadding)
+            .padding(.vertical, DesignTokens.sectionSpacing)
         }
-        return tally
+        .background(Color.surface)
+        .scrollContentBackground(.hidden)
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.large)
     }
 
-    private var speechRateLabel: String {
-        if speechRate < 0.4 { return "Slow" }
-        if speechRate > 0.6 { return "Fast" }
-        return "Normal"
+    // MARK: - Computed helpers
+
+    private var readCount: Int {
+        UserDefaults.standard.dictionaryRepresentation()
+            .keys.filter { $0.hasPrefix("feedback_selection_") }
+            .count
+    }
+
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+    }
+
+    private var rateLabel: String {
+        speechRate < 0.35 ? "Slow" : speechRate > 0.65 ? "Fast" : "Normal"
     }
 
     private var pitchLabel: String {
-        if pitch < 0.8 { return "Low" }
-        if pitch > 1.2 { return "High" }
-        return "Normal"
+        pitch < 0.7 ? "Low" : pitch > 1.3 ? "High" : "Normal"
+    }
+
+    private var cacheSize: String {
+        guard let cachesURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
+              let enumerator = FileManager.default.enumerator(
+                at: cachesURL,
+                includingPropertiesForKeys: [.fileSizeKey],
+                options: [.skipsHiddenFiles]
+              ) else { return "Unknown" }
+        var totalBytes: Int = 0
+        for case let fileURL as URL in enumerator {
+            if let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                totalBytes += size
+            }
+        }
+        let mb = Double(totalBytes) / 1_048_576
+        return String(format: "%.1f MB", mb)
     }
 
     private func clearCache() {
