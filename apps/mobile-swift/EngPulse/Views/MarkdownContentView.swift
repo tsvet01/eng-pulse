@@ -269,12 +269,12 @@ struct MarkdownContentView: View {
             .replacingOccurrences(of: "^```\\w*\\n?", with: "", options: .regularExpression)
             .replacingOccurrences(of: "\\n?```$", with: "", options: .regularExpression)
 
-        let bg = colorScheme == .dark ? Color(white: 0.15) : Color(white: 0.96)
+        let bg = colorScheme == .dark ? Color.Dark.surfaceContainerHigh : Color.Light.surfaceContainerHigh
 
         return ScrollView(.horizontal, showsIndicators: false) {
             Text(code)
                 .font(.system(.caption, design: .monospaced))
-                .foregroundColor(colorScheme == .dark ? .white : .black)
+                .foregroundColor(colorScheme == .dark ? Color.Dark.onSurface : Color.Light.onSurface)
                 .padding(12)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
