@@ -8,6 +8,7 @@ struct ContentView: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             HomeViewContent(navigationPath: $navigationPath)
+                .background(Color.surface)
         }
         .task {
             await appState.loadSummaries()

@@ -75,7 +75,11 @@ struct HomeViewContent: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Summary.self) { summary in
-            DetailView(summary: summary, cacheService: summariesStore.cacheService)
+            DetailView(
+                summary: summary,
+                allSummaries: summariesStore.summaries,
+                cacheService: summariesStore.cacheService
+            )
         }
         .navigationDestination(for: String.self) { value in
             if value == "settings" {
@@ -94,7 +98,7 @@ struct HomeViewContent: View {
                 HStack(spacing: 14) {
                     if summariesStore.isOffline {
                         Image(systemName: "icloud.slash")
-                            .foregroundColor(.orange)
+                            .foregroundColor(Color.tertiaryAccent)
                     }
 
                     Button {
@@ -105,11 +109,13 @@ struct HomeViewContent: View {
                         if !isSearchActive { searchText = "" }
                     } label: {
                         Image(systemName: isSearchActive ? "xmark" : "magnifyingglass")
+                            .foregroundColor(Color.onSurfaceVariant)
                     }
                     .accessibilityLabel(isSearchActive ? "Close search" : "Search")
 
                     NavigationLink(value: "settings") {
                         Image(systemName: "gearshape")
+                            .foregroundColor(Color.onSurfaceVariant)
                     }
                     .accessibilityLabel("Settings")
                 }
@@ -131,43 +137,77 @@ struct HomeViewContent: View {
     private var summaryList: some View {
         List(filteredSummaries) { summary in
             NavigationLink(value: summary) {
-                SummaryCardView(summary: summary)
+                SummaryCardView(summary: summary, isRead: isArticleRead(summary.url))
             }
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color.surface)
+    }
+
+    private func isArticleRead(_ url: String) -> Bool {
+        UserDefaults.standard.string(forKey: FeedbackKeys.selection(url)) != nil ||
+        UserDefaults.standard.string(forKey: FeedbackKeys.summary(url)) != nil
     }
 }
 
 // MARK: - Summary Card
 struct SummaryCardView: View {
     let summary: Summary
+    var isRead: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
+            // Metadata row
             HStack(spacing: 6) {
                 Text(summary.displayDate, format: .dateTime.month(.abbreviated).day())
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceVariant)
 
                 if summary.isBeta {
                     BetaBadge()
                 }
+
+                Text(summary.source)
+                    .font(.caption2)
+                    .foregroundColor(Color.onSurfaceVariant)
+
+                Spacer()
+
+                if isRead {
+                    HStack(spacing: 3) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(.green)
+                        Text("READ")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.green)
+                    }
+                }
             }
 
+            // Title
             Text(summary.title)
-                .font(.body)
-                .fontWeight(.semibold)
+                .font(.headline)
+                .fontDesign(.serif)
                 .lineLimit(2)
+                .opacity(isRead ? 0.6 : 1.0)
 
+            // Snippet
             if let snippet = summary.cleanSnippet {
                 Text(snippet)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(.subheadline)
+                    .foregroundColor(Color.onSurfaceVariant)
                     .lineLimit(2)
             }
-
         }
-        .padding(.vertical, 2)
+        .padding(DesignTokens.cardPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(isRead ? Color.containerLow.opacity(0.6) : Color.container)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
     }
 }
 
@@ -176,10 +216,10 @@ struct BetaBadge: View {
     var body: some View {
         Text("Beta")
             .font(.system(size: 9, weight: .medium))
-            .foregroundColor(.orange)
+            .foregroundColor(Color.tertiaryAccent)
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
-            .background(Color.orange.opacity(0.12))
+            .background(Color.tertiaryAccent.opacity(0.12))
             .clipShape(Capsule())
     }
 }

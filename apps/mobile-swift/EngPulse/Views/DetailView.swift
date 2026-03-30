@@ -1,7 +1,119 @@
 import SwiftUI
 
+// MARK: - Feedback Keys (centralized)
+
+enum FeedbackKeys {
+    static func selection(_ url: String) -> String { "feedback_selection_\(url)" }
+    static func summary(_ url: String) -> String { "feedback_summary_\(url)" }
+}
+
+// MARK: - FeedbackWidget
+
+struct FeedbackWidget: View {
+    let summaryUrl: String
+    let promptVersion: String?
+    @State private var selectionFeedback: String
+    @State private var summaryFeedback: String
+
+    init(summaryUrl: String, promptVersion: String?) {
+        self.summaryUrl = summaryUrl
+        self.promptVersion = promptVersion
+        _selectionFeedback = State(initialValue: UserDefaults.standard.string(forKey: FeedbackKeys.selection(summaryUrl)) ?? "")
+        _summaryFeedback = State(initialValue: UserDefaults.standard.string(forKey: FeedbackKeys.summary(summaryUrl)) ?? "")
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            feedbackRow(label: "Article Pick", current: selectionFeedback) { type in rate(aspect: "selection", type: type) }
+            feedbackRow(label: "Summary Quality", current: summaryFeedback) { type in rate(aspect: "summary", type: type) }
+        }
+        .padding(DesignTokens.cardPadding)
+        .background(Color.container)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
+    }
+
+    @ViewBuilder
+    private func feedbackRow(label: String, current: String, onRate: @escaping (String) -> Void) -> some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .foregroundColor(.onSurface)
+            Spacer()
+            HStack(spacing: 12) {
+                Button { onRate("up") } label: {
+                    Image(systemName: current == "up" ? "hand.thumbsup.fill" : "hand.thumbsup")
+                        .font(.title3)
+                        .foregroundColor(current == "up" ? .green : .onSurfaceVariant)
+                }
+                Button { onRate("down") } label: {
+                    Image(systemName: current == "down" ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                        .font(.title3)
+                        .foregroundColor(current == "down" ? .red : .onSurfaceVariant)
+                }
+            }
+        }
+    }
+
+    private func rate(aspect: String, type: String) {
+        let current = aspect == "selection" ? selectionFeedback : summaryFeedback
+        let newValue = current == type ? "" : type
+        if aspect == "selection" { selectionFeedback = newValue }
+        else { summaryFeedback = newValue }
+        let key = aspect == "selection" ? FeedbackKeys.selection(summaryUrl) : FeedbackKeys.summary(summaryUrl)
+        UserDefaults.standard.set(newValue, forKey: key)
+        let val = newValue.isEmpty ? "clear" : newValue
+        Task {
+            await FeedbackService.shared.submitFeedback(
+                summaryURL: summaryUrl,
+                selectionFeedback: aspect == "selection" ? val : nil,
+                summaryFeedback: aspect == "summary" ? val : nil,
+                promptVersion: promptVersion
+            )
+        }
+    }
+}
+
+// MARK: - ArticleNavigation
+
+struct ArticleNavigation: View {
+    let allSummaries: [Summary]
+    let currentIndex: Int
+
+    var body: some View {
+        if allSummaries.count > 1 {
+            HStack {
+                if currentIndex > 0 {
+                    NavigationLink(value: allSummaries[currentIndex - 1]) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left").font(.caption)
+                            Text(allSummaries[currentIndex - 1].title).font(.caption).lineLimit(1)
+                        }
+                        .foregroundColor(.onSurfaceVariant)
+                    }
+                }
+                Spacer()
+                if currentIndex < allSummaries.count - 1 {
+                    NavigationLink(value: allSummaries[currentIndex + 1]) {
+                        HStack(spacing: 4) {
+                            Text(allSummaries[currentIndex + 1].title).font(.caption).lineLimit(1)
+                            Image(systemName: "chevron.right").font(.caption)
+                        }
+                        .foregroundColor(.onSurfaceVariant)
+                    }
+                }
+            }
+            .padding(DesignTokens.cardPadding)
+        }
+    }
+}
+
+// MARK: - DetailView
+
 struct DetailView: View {
     let summary: Summary
+    let allSummaries: [Summary]
+    let currentIndex: Int
     let cacheService: CacheService?
 
     @EnvironmentObject private var ttsService: TTSService
@@ -10,14 +122,12 @@ struct DetailView: View {
     @State private var isLoadingContent = false
     @State private var loadingError: String?
     @State private var showInfo = false
-    @State private var selectionFeedback: String = ""
-    @State private var summaryFeedback: String = ""
 
-    init(summary: Summary, cacheService: CacheService? = nil) {
+    init(summary: Summary, allSummaries: [Summary] = [], cacheService: CacheService? = nil) {
         self.summary = summary
+        self.allSummaries = allSummaries
+        self.currentIndex = allSummaries.firstIndex(of: summary) ?? 0
         self.cacheService = cacheService
-        _selectionFeedback = State(initialValue: UserDefaults.standard.string(forKey: Self.feedbackKey("selection", summary.url)) ?? "")
-        _summaryFeedback = State(initialValue: UserDefaults.standard.string(forKey: Self.feedbackKey("summary", summary.url)) ?? "")
     }
 
     // MARK: - TTS State
@@ -37,6 +147,9 @@ struct DetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                // Metadata badges
+                metadataBadges
+
                 if isLoadingContent {
                     loadingSection
                 } else if let error = loadingError {
@@ -44,10 +157,20 @@ struct DetailView: View {
                 } else if let content = fullContent {
                     fullContentSection(content)
                 }
+
+                if fullContent != nil || loadingError != nil {
+                    FeedbackWidget(summaryUrl: summary.url, promptVersion: summary.promptVersion)
+                        .padding(.top, DesignTokens.sectionSpacing)
+
+                    ArticleNavigation(allSummaries: allSummaries, currentIndex: currentIndex)
+                        .padding(.top, 12)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.top, 4)
         }
+        .background(Color.surface)
+        .scrollContentBackground(.hidden)
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 0) {
                 if let error = ttsService.errorMessage {
@@ -63,8 +186,12 @@ struct DetailView: View {
                         isPaused: isPaused,
                         isLoading: isLoadingTTS,
                         title: summary.title,
+                        currentTime: ttsService.currentTimeFormatted,
+                        duration: ttsService.durationFormatted,
                         onToggle: { toggleTTS() },
-                        onStop: { ttsService.stop() }
+                        onStop: { ttsService.stop() },
+                        onSkipBack: { ttsService.skipBackward() },
+                        onSkipForward: { ttsService.skipForward() }
                     )
                 }
             }
@@ -75,6 +202,32 @@ struct DetailView: View {
         .task {
             await loadFullContent()
         }
+    }
+
+    // MARK: - Metadata Badges
+
+    private var metadataBadges: some View {
+        HStack(spacing: 8) {
+            if let model = summary.model {
+                Label(model, systemImage: "sparkles")
+                    .font(.caption2).fontWeight(.medium)
+                    .foregroundColor(.accentColor)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(Color.accentColor.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+            Text(summary.source)
+                .font(.caption2).foregroundColor(.onSurfaceVariant)
+            if let score = summary.evalScore {
+                Label(String(format: "%.0f%%", score * 100), systemImage: "chart.bar.fill")
+                    .font(.caption2).fontWeight(.medium)
+                    .foregroundColor(.tertiaryAccent)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(Color.tertiaryAccent.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+        }
+        .padding(.top, 4)
     }
 
     // MARK: - Content Loading
@@ -217,32 +370,6 @@ struct DetailView: View {
         .accessibilityElement(children: .combine)
     }
 
-    // MARK: - Aspect Feedback
-
-    private static func feedbackKey(_ aspect: String, _ url: String) -> String {
-        "feedback_\(aspect)_\(url)"
-    }
-
-    private func rateAspect(aspect: String, type: String) {
-        let current = aspect == "selection" ? selectionFeedback : summaryFeedback
-        let newValue = current == type ? "" : type
-
-        if aspect == "selection" { selectionFeedback = newValue }
-        else { summaryFeedback = newValue }
-        UserDefaults.standard.set(newValue, forKey: Self.feedbackKey(aspect, summary.url))
-
-        // Send "clear" when toggling off so server removes the field
-        let val = newValue.isEmpty ? "clear" : newValue
-        Task {
-            await FeedbackService.shared.submitFeedback(
-                summaryURL: summary.url,
-                selectionFeedback: aspect == "selection" ? val : nil,
-                summaryFeedback: aspect == "summary" ? val : nil,
-                promptVersion: summary.promptVersion
-            )
-        }
-    }
-
     // MARK: - Toolbar
 
     @ToolbarContentBuilder
@@ -264,34 +391,6 @@ struct DetailView: View {
                     .accessibilityLabel(isLoadingTTS ? "Generating audio" : (isPlaying ? "Pause audio" : (isPaused ? "Resume audio" : "Listen to summary")))
                 }
 
-                Menu {
-                    Section("Article Pick") {
-                        Button { rateAspect(aspect: "selection", type: "up") } label: {
-                            Label(selectionFeedback == "up" ? "Liked (tap to clear)" : "Good pick",
-                                  systemImage: selectionFeedback == "up" ? "hand.thumbsup.fill" : "hand.thumbsup")
-                        }
-                        Button { rateAspect(aspect: "selection", type: "down") } label: {
-                            Label(selectionFeedback == "down" ? "Disliked (tap to clear)" : "Not interesting",
-                                  systemImage: selectionFeedback == "down" ? "hand.thumbsdown.fill" : "hand.thumbsdown")
-                        }
-                    }
-                    Section("Summary Quality") {
-                        Button { rateAspect(aspect: "summary", type: "up") } label: {
-                            Label(summaryFeedback == "up" ? "Liked (tap to clear)" : "Well written",
-                                  systemImage: summaryFeedback == "up" ? "hand.thumbsup.fill" : "hand.thumbsup")
-                        }
-                        Button { rateAspect(aspect: "summary", type: "down") } label: {
-                            Label(summaryFeedback == "down" ? "Disliked (tap to clear)" : "Could be better",
-                                  systemImage: summaryFeedback == "down" ? "hand.thumbsdown.fill" : "hand.thumbsdown")
-                        }
-                    }
-                } label: {
-                    let hasAny = !selectionFeedback.isEmpty || !summaryFeedback.isEmpty
-                    Image(systemName: hasAny ? "hand.thumbsup.circle.fill" : "hand.thumbsup.circle")
-                        .foregroundColor(hasAny ? .green : .secondary)
-                }
-                .accessibilityLabel("Rate this article")
-
                 Button { showInfo = true } label: {
                     Image(systemName: "info.circle")
                 }
@@ -310,7 +409,7 @@ struct DetailView: View {
 
 #Preview {
     NavigationStack {
-        DetailView(summary: .preview)
+        DetailView(summary: .preview, allSummaries: Summary.previewList)
     }
     .environmentObject(TTSService())
 }
