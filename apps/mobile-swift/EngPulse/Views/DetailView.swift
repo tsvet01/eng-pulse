@@ -1,5 +1,12 @@
 import SwiftUI
 
+// MARK: - Feedback Keys (centralized)
+
+enum FeedbackKeys {
+    static func selection(_ url: String) -> String { "feedback_selection_\(url)" }
+    static func summary(_ url: String) -> String { "feedback_summary_\(url)" }
+}
+
 // MARK: - FeedbackWidget
 
 struct FeedbackWidget: View {
@@ -11,8 +18,8 @@ struct FeedbackWidget: View {
     init(summaryUrl: String, promptVersion: String?) {
         self.summaryUrl = summaryUrl
         self.promptVersion = promptVersion
-        _selectionFeedback = State(initialValue: UserDefaults.standard.string(forKey: "feedback_selection_\(summaryUrl)") ?? "")
-        _summaryFeedback = State(initialValue: UserDefaults.standard.string(forKey: "feedback_summary_\(summaryUrl)") ?? "")
+        _selectionFeedback = State(initialValue: UserDefaults.standard.string(forKey: FeedbackKeys.selection(summaryUrl)) ?? "")
+        _summaryFeedback = State(initialValue: UserDefaults.standard.string(forKey: FeedbackKeys.summary(summaryUrl)) ?? "")
     }
 
     var body: some View {
@@ -53,7 +60,8 @@ struct FeedbackWidget: View {
         let newValue = current == type ? "" : type
         if aspect == "selection" { selectionFeedback = newValue }
         else { summaryFeedback = newValue }
-        UserDefaults.standard.set(newValue, forKey: "feedback_\(aspect)_\(summaryUrl)")
+        let key = aspect == "selection" ? FeedbackKeys.selection(summaryUrl) : FeedbackKeys.summary(summaryUrl)
+        UserDefaults.standard.set(newValue, forKey: key)
         let val = newValue.isEmpty ? "clear" : newValue
         Task {
             await FeedbackService.shared.submitFeedback(
@@ -203,9 +211,9 @@ struct DetailView: View {
             if let model = summary.model {
                 Label(model, systemImage: "sparkles")
                     .font(.caption2).fontWeight(.medium)
-                    .foregroundColor(.cyan)
+                    .foregroundColor(.accentColor)
                     .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(Color.cyan.opacity(0.12))
+                    .background(Color.accentColor.opacity(0.12))
                     .clipShape(Capsule())
             }
             Text(summary.source)

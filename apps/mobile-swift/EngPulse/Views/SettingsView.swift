@@ -38,6 +38,8 @@ struct SettingsView: View {
     @AppStorage("selectedModelFilter") private var selectedFilter: String = ModelFilter.all.rawValue
     @AppStorage("promptVersionFilter") private var promptVersionFilter: String = "production"
     @State private var showClearCacheAlert = false
+    @State private var readCount: Int = 0
+    @State private var cacheSize: String = "—"
 
     var body: some View {
         ScrollView {
@@ -251,12 +253,16 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
+        .task {
+            loadReadCount()
+            loadCacheSize()
+        }
     }
 
     // MARK: - Computed helpers
 
-    private var readCount: Int {
-        UserDefaults.standard.dictionaryRepresentation()
+    private func loadReadCount() {
+        readCount = UserDefaults.standard.dictionaryRepresentation()
             .keys.filter { $0.hasPrefix("feedback_selection_") }
             .count
     }
@@ -273,13 +279,13 @@ struct SettingsView: View {
         pitch < 0.7 ? "Low" : pitch > 1.3 ? "High" : "Normal"
     }
 
-    private var cacheSize: String {
+    private func loadCacheSize() {
         guard let cachesURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
               let enumerator = FileManager.default.enumerator(
                 at: cachesURL,
                 includingPropertiesForKeys: [.fileSizeKey],
                 options: [.skipsHiddenFiles]
-              ) else { return "Unknown" }
+              ) else { cacheSize = "Unknown"; return }
         var totalBytes: Int = 0
         for case let fileURL as URL in enumerator {
             if let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
@@ -287,12 +293,13 @@ struct SettingsView: View {
             }
         }
         let mb = Double(totalBytes) / 1_048_576
-        return String(format: "%.1f MB", mb)
+        cacheSize = String(format: "%.1f MB", mb)
     }
 
     private func clearCache() {
         Task {
             await appState.clearCache()
+            loadCacheSize()
         }
     }
 }

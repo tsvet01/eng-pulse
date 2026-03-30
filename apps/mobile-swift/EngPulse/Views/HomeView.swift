@@ -149,8 +149,8 @@ struct HomeViewContent: View {
     }
 
     private func isArticleRead(_ url: String) -> Bool {
-        UserDefaults.standard.string(forKey: "feedback_selection_\(url)") != nil ||
-        UserDefaults.standard.string(forKey: "feedback_summary_\(url)") != nil
+        UserDefaults.standard.string(forKey: FeedbackKeys.selection(url)) != nil ||
+        UserDefaults.standard.string(forKey: FeedbackKeys.summary(url)) != nil
     }
 }
 
