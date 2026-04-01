@@ -53,15 +53,15 @@ ALLOWED_ATTRS = {'a': ['href']}
 
 def _strip_markdown(text: str) -> str:
     """Strip markdown formatting to produce clean plaintext for notifications."""
+    text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)  # code blocks (before inline code)
     text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)  # headings
     text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # bold
     text = re.sub(r'\*(.+?)\*', r'\1', text)  # italic
     text = re.sub(r'`(.+?)`', r'\1', text)  # inline code
-    text = re.sub(r'```[\s\S]*?```', '', text)  # code blocks
     text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)  # list bullets
     text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)  # numbered lists
+    text = re.sub(r'!\[([^\]]*)\]\([^)]+\)', '', text)  # images (before links)
     text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)  # links
-    text = re.sub(r'!\[([^\]]*)\]\([^)]+\)', '', text)  # images
     text = re.sub(r'^\s*>\s+', '', text, flags=re.MULTILINE)  # blockquotes
     text = re.sub(r'\n{2,}', '\n', text)  # collapse blank lines
     return text.strip()
