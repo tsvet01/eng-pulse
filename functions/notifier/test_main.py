@@ -8,6 +8,7 @@ from main import (
     sanitize_html,
     sanitize_filename,
     should_process_file,
+    _strip_markdown,
     ALLOWED_TAGS,
     ALLOWED_ATTRS,
 )
@@ -137,6 +138,59 @@ class TestFileFiltering:
     def test_just_summaries_folder(self):
         """Test that folder itself is not processed."""
         assert not should_process_file("summaries/")
+
+
+class TestStripMarkdown:
+    """Tests for notification text cleaning."""
+
+    def test_strips_bold(self):
+        assert _strip_markdown("**bold text**") == "bold text"
+
+    def test_strips_italic(self):
+        assert _strip_markdown("*italic*") == "italic"
+
+    def test_strips_inline_code(self):
+        assert _strip_markdown("`@property`") == "@property"
+
+    def test_strips_headings(self):
+        assert _strip_markdown("# Title Here") == "Title Here"
+        assert _strip_markdown("## Subtitle") == "Subtitle"
+
+    def test_strips_bullet_lists(self):
+        assert _strip_markdown("- item one") == "item one"
+        assert _strip_markdown("* item two") == "item two"
+
+    def test_strips_links(self):
+        assert _strip_markdown("[click here](https://example.com)") == "click here"
+
+    def test_strips_images(self):
+        assert _strip_markdown("![alt](https://img.png)") == ""
+
+    def test_strips_blockquotes(self):
+        assert _strip_markdown("> quoted text") == "quoted text"
+
+    def test_strips_code_blocks(self):
+        result = _strip_markdown("```python\nprint('hello')\n```")
+        assert "```" not in result
+        assert "print" not in result
+
+    def test_complex_notification_title(self):
+        """Regression: raw markdown was appearing in push notification titles."""
+        raw = "- **`@property`** — registering computed attributes"
+        result = _strip_markdown(raw)
+        assert "**" not in result
+        assert "`" not in result
+        assert "- " not in result
+        assert "@property" in result
+
+    def test_llm_preamble_not_used_as_title(self):
+        """The title extractor should only pick # headings, not LLM preamble."""
+        content = "Here is a compact, educational summary.\n\n# The Real Title\n\nBody text."
+        # _strip_markdown just cleans text — title extraction is separate
+        # But the cleaned content should not have markdown artifacts
+        result = _strip_markdown(content)
+        assert "#" not in result
+        assert "The Real Title" in result
 
 
 if __name__ == "__main__":
