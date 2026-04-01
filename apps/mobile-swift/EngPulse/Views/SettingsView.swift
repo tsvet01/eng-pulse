@@ -151,6 +151,13 @@ struct SettingsView: View {
                             }
                         }
                         .tint(.accentColor)
+                        .onChange(of: notificationsEnabled) { _, newValue in
+                            if newValue {
+                                NotificationService.shared.subscribeToTopic("daily_briefings")
+                            } else {
+                                NotificationService.shared.unsubscribeFromTopic("daily_briefings")
+                            }
+                        }
                     }
 
                     if notificationsEnabled {
@@ -183,9 +190,6 @@ struct SettingsView: View {
                                 .foregroundColor(.onSurfaceVariant)
                         }
                         Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundColor(.onSurfaceVariant)
                     }
                 }
 
@@ -216,14 +220,6 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                }
-                .alert("Clear Cache?", isPresented: $showClearCacheAlert) {
-                    Button("Cancel", role: .cancel) { }
-                    Button("Clear", role: .destructive) {
-                        clearCache()
-                    }
-                } message: {
-                    Text("This will remove all downloaded articles. You'll need internet to read them again.")
                 }
 
                 // About
@@ -257,6 +253,14 @@ struct SettingsView: View {
             loadReadCount()
             loadCacheSize()
         }
+        .alert("Clear Cache?", isPresented: $showClearCacheAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Clear", role: .destructive) {
+                clearCache()
+            }
+        } message: {
+            Text("This will remove all downloaded articles. You'll need internet to read them again.")
+        }
     }
 
     // MARK: - Computed helpers
@@ -280,12 +284,16 @@ struct SettingsView: View {
     }
 
     private func loadCacheSize() {
-        guard let cachesURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
-              let enumerator = FileManager.default.enumerator(
-                at: cachesURL,
-                includingPropertiesForKeys: [.fileSizeKey],
-                options: [.skipsHiddenFiles]
-              ) else { cacheSize = "Unknown"; return }
+        guard let cachesURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            cacheSize = "Unknown"
+            return
+        }
+        let engPulseCache = cachesURL.appendingPathComponent("EngPulse")
+        guard let enumerator = FileManager.default.enumerator(
+            at: engPulseCache,
+            includingPropertiesForKeys: [.fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else { cacheSize = "0 MB"; return }
         var totalBytes: Int = 0
         for case let fileURL as URL in enumerator {
             if let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {

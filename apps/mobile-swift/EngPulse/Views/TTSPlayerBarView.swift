@@ -14,6 +14,8 @@ struct TTSPlayerBarView: View {
     let onSkipForward: () -> Void
 
     var body: some View {
+        let hasSeek = !currentTime.isEmpty && !duration.isEmpty
+
         VStack(spacing: 8) {
             // Progress bar
             GeometryReader { geometry in
@@ -27,28 +29,32 @@ struct TTSPlayerBarView: View {
             }
             .frame(height: 3)
 
-            // Timestamps
-            HStack {
-                Text(currentTime)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundColor(.onSurfaceVariant)
-                Spacer()
-                Text(duration)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundColor(.onSurfaceVariant)
+            // Timestamps — only shown for Cloud TTS
+            if hasSeek {
+                HStack {
+                    Text(currentTime)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.onSurfaceVariant)
+                    Spacer()
+                    Text(duration)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.onSurfaceVariant)
+                }
             }
 
             // Controls: skip back, play/pause, skip forward
             HStack(spacing: 24) {
                 Spacer()
 
-                Button(action: onSkipBack) {
-                    Image(systemName: "gobackward.15")
-                        .font(.title2)
-                        .foregroundColor(.onSurface)
+                if hasSeek {
+                    Button(action: onSkipBack) {
+                        Image(systemName: "gobackward.15")
+                            .font(.title2)
+                            .foregroundColor(.onSurface)
+                    }
+                    .disabled(isLoading)
+                    .accessibilityLabel("Skip back 15 seconds")
                 }
-                .disabled(isLoading)
-                .accessibilityLabel("Skip back 15 seconds")
 
                 Button(action: onToggle) {
                     if isLoading {
@@ -63,13 +69,15 @@ struct TTSPlayerBarView: View {
                 .disabled(isLoading)
                 .accessibilityLabel(isPlaying ? "Pause" : "Play")
 
-                Button(action: onSkipForward) {
-                    Image(systemName: "goforward.15")
-                        .font(.title2)
-                        .foregroundColor(.onSurface)
+                if hasSeek {
+                    Button(action: onSkipForward) {
+                        Image(systemName: "goforward.15")
+                            .font(.title2)
+                            .foregroundColor(.onSurface)
+                    }
+                    .disabled(isLoading)
+                    .accessibilityLabel("Skip forward 15 seconds")
                 }
-                .disabled(isLoading)
-                .accessibilityLabel("Skip forward 15 seconds")
 
                 Spacer()
             }
