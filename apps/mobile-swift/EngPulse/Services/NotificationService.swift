@@ -103,6 +103,12 @@ class NotificationService: NSObject, ObservableObject {
         print("Would subscribe to topic: \(topic)")
     }
 
+    /// Unsubscribe from a notification topic (requires Firebase)
+    func unsubscribeFromTopic(_ topic: String) {
+        // This would use Firebase Messaging in a real implementation
+        print("Would unsubscribe from topic: \(topic)")
+    }
+
 }
 
 // MARK: - UNUserNotificationCenterDelegate

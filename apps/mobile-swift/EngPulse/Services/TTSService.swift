@@ -233,20 +233,24 @@ class TTSService: ObservableObject {
 
     func skipForward(seconds: TimeInterval = 15) {
         guard state == .playing || state == .paused else { return }
+        guard !isUsingLocalTTS else { return }
         audioPlayer.seek(by: seconds)
     }
 
     func skipBackward(seconds: TimeInterval = 15) {
         guard state == .playing || state == .paused else { return }
+        guard !isUsingLocalTTS else { return }
         audioPlayer.seek(by: -seconds)
     }
 
     var currentTimeFormatted: String {
-        formatTime(audioPlayer.currentTime)
+        guard !isUsingLocalTTS else { return "" }
+        return formatTime(audioPlayer.currentTime)
     }
 
     var durationFormatted: String {
-        formatTime(audioPlayer.duration)
+        guard !isUsingLocalTTS else { return "" }
+        return formatTime(audioPlayer.duration)
     }
 
     private func formatTime(_ seconds: TimeInterval) -> String {

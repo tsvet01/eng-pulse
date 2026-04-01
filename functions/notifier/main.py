@@ -9,6 +9,7 @@ Handles:
 """
 import functions_framework
 import os
+import re
 import smtplib
 import requests
 from email.mime.text import MIMEText
@@ -48,6 +49,22 @@ def get_access_token():
 ALLOWED_TAGS = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li',
                 'strong', 'em', 'a', 'br', 'hr', 'code', 'pre', 'blockquote']
 ALLOWED_ATTRS = {'a': ['href']}
+
+
+def _strip_markdown(text: str) -> str:
+    """Strip markdown formatting to produce clean plaintext for notifications."""
+    text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)  # code blocks (before inline code)
+    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)  # headings
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # bold
+    text = re.sub(r'\*(.+?)\*', r'\1', text)  # italic
+    text = re.sub(r'`(.+?)`', r'\1', text)  # inline code
+    text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)  # list bullets
+    text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)  # numbered lists
+    text = re.sub(r'!\[([^\]]*)\]\([^)]+\)', '', text)  # images (before links)
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)  # links
+    text = re.sub(r'^\s*>\s+', '', text, flags=re.MULTILINE)  # blockquotes
+    text = re.sub(r'\n{2,}', '\n', text)  # collapse blank lines
+    return text.strip()
 
 
 def sanitize_html(content: str) -> str:
@@ -193,21 +210,17 @@ def send_summary_email(cloud_event):
     send_email(file_name, html_content)
 
     # Send FCM push notifications
-    # Extract title from content (first line or heading)
+    # Extract title: first markdown heading only, fallback to default
     title = "Daily Engineering Briefing"
-    lines = content.strip().split('\n')
-    for line in lines:
+    for line in content.strip().split('\n'):
         stripped = line.strip()
         if stripped.startswith('#'):
-            title = stripped.lstrip('#').strip()
-            break
-        elif stripped and not stripped.startswith('*'):
-            title = stripped[:80] + ('...' if len(stripped) > 80 else '')
+            title = _strip_markdown(stripped.lstrip('#').strip())
             break
 
-    # Create snippet for notification body
-    body = content[:150].replace('#', '').replace('*', '').strip()
-    if len(content) > 150:
+    # Create snippet for notification body: strip all markdown, take first 150 chars
+    body = _strip_markdown(content)[:150].strip()
+    if len(_strip_markdown(content)) > 150:
         body += '...'
 
     # Public URL for the summary
