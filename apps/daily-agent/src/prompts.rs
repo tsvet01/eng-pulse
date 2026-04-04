@@ -1,8 +1,10 @@
 /// Prompt configuration for article selection and summarization.
-/// V1 = production (current prompts). V2 = beta (persona-driven, structured).
+/// V1 = production (current prompts). V2 = beta (persona-driven, structured). V3 = beta (persona-driven selection + structured JSON summary).
 pub enum PromptConfig {
     V1,
     V2,
+    #[allow(dead_code)]
+    V3,
 }
 
 impl PromptConfig {
@@ -11,6 +13,7 @@ impl PromptConfig {
         match self {
             Self::V1 => "v1",
             Self::V2 => "v2",
+            Self::V3 => "v3",
         }
     }
 
@@ -19,6 +22,7 @@ impl PromptConfig {
         match self {
             Self::V1 => self.v1_selection_prompt(articles_text),
             Self::V2 => self.v2_selection_prompt(articles_text),
+            Self::V3 => self.v2_selection_prompt(articles_text),
         }
     }
 
@@ -27,6 +31,7 @@ impl PromptConfig {
         match self {
             Self::V1 => self.v1_shortlist_prompt(articles_text),
             Self::V2 => self.v2_shortlist_prompt(articles_text),
+            Self::V3 => self.v2_shortlist_prompt(articles_text),
         }
     }
 
@@ -35,6 +40,7 @@ impl PromptConfig {
         match self {
             Self::V1 => self.v1_final_selection_prompt(candidates_text),
             Self::V2 => self.v2_final_selection_prompt(candidates_text),
+            Self::V3 => self.v2_final_selection_prompt(candidates_text),
         }
     }
 
@@ -43,6 +49,7 @@ impl PromptConfig {
         match self {
             Self::V1 => self.v1_summary_prompt(source, title, content),
             Self::V2 => self.v2_summary_prompt(source, title, content),
+            Self::V3 => self.v3_summary_prompt(source, title, content),
         }
     }
 
@@ -166,6 +173,39 @@ Content: {}"#,
             source, title, content
         )
     }
+
+    fn v3_summary_prompt(&self, source: &str, title: &str, content: &str) -> String {
+        format!(
+            r#"You are writing an insight brief for a senior engineering leader who builds developer platforms at a hedge fund (C++/Rust, low-latency, AI tooling). They'll read this on their phone in 2-3 minutes.
+
+Extract the single most important insight from this article and structure it as JSON.
+
+Output ONLY valid JSON matching this schema:
+{{
+  "key_idea": "One sentence. The distilled insight — the 'so what'. No hedging.",
+  "why_it_matters": "2-3 sentences. Why this matters to someone building low-latency systems and developer platforms.",
+  "what_to_change": "One concrete action to try this week, or null if the article doesn't support one. Never invent advice.",
+  "deep_dive": "Full technical analysis in markdown. 3-5 paragraphs. Include specific numbers, techniques, trade-offs. Be dense — every sentence should teach something.",
+  "meta": {{
+    "confidence": 0.85,
+    "category": "one of: performance-engineering, ai-tooling, platform-engineering, leadership, trading-systems, architecture, general"
+  }}
+}}
+
+Rules:
+- key_idea must be one sentence, direct and opinionated
+- why_it_matters must connect to the reader's specific context
+- deep_dive uses markdown formatting (bold, bullets, code) for scannability
+- Be compact — say it in fewer words, not more
+- No fluff, no filler transitions, no "in conclusion"
+- Ignore promotional content
+
+Article Source: {}
+Title: {}
+Content: {}"#,
+            source, title, content
+        )
+    }
 }
 
 #[cfg(test)]
@@ -201,6 +241,29 @@ mod tests {
         assert!(prompt.contains("bold lead phrases and bullets"));
         assert!(prompt.contains("don't invent action items"));
         assert!(prompt.contains("Be compact"));
+        assert!(prompt.contains("Article Source: HN"));
+    }
+
+    #[test]
+    fn test_v3_version_string() {
+        assert_eq!(PromptConfig::V3.version(), "v3");
+    }
+
+    #[test]
+    fn test_v3_selection_uses_v2_persona() {
+        let prompt = PromptConfig::V3.selection_prompt("0. [HN] Test Article");
+        assert!(prompt.contains("hedge fund"));
+        assert!(prompt.contains("0. [HN] Test Article"));
+    }
+
+    #[test]
+    fn test_v3_summary_prompt_requests_json() {
+        let prompt = PromptConfig::V3.summary_prompt("HN", "Title", "Content");
+        assert!(prompt.contains("key_idea"));
+        assert!(prompt.contains("why_it_matters"));
+        assert!(prompt.contains("what_to_change"));
+        assert!(prompt.contains("deep_dive"));
+        assert!(prompt.contains("Output ONLY valid JSON"));
         assert!(prompt.contains("Article Source: HN"));
     }
 }
