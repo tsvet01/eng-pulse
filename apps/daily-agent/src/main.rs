@@ -47,6 +47,7 @@ use llm_client::{
     DEFAULT_BUCKET, LlmProvider, LlmOptions, get_api_key_env_var,
 };
 
+use futures::future::join_all;
 use crate::manifest::{ManifestEntry, gcs_public_url, gcs_object_path, SUMMARY_SNIPPET_CHARS};
 use crate::eval::{run_eval_pass, apply_eval_scores, log_calibration_agreement};
 use crate::feedback::{load_recent_feedback, build_calibration_context, build_selection_context};
@@ -465,17 +466,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let summary_prompt = prod_config.summary_prompt(&best_article.source, &best_article.title, &truncated_text);
 
-    // --- Stage 2: Prod (v1) ---
+    // --- Stage 2: Prod (v1) — parallel LLM calls ---
 
-    for (provider, api_key) in &enabled_providers {
-        info!(provider = %provider.as_str(), "Generating summary");
+    info!("Generating summaries in parallel across {} provider(s)", enabled_providers.len());
 
-        match call_llm_with_retry(&http_client, *provider, api_key, summary_prompt.clone()).await {
+    let summary_futures: Vec<_> = enabled_providers.iter().map(|(provider, api_key)| {
+        let client = http_client.clone();
+        let key = api_key.clone();
+        let prompt = summary_prompt.clone();
+        let p = *provider;
+        async move {
+            let result = call_llm_with_retry(&client, p, &key, prompt).await;
+            (p, result)
+        }
+    }).collect();
+
+    let llm_results = join_all(summary_futures).await;
+
+    // GCS uploads happen sequentially after all LLM calls complete
+    for (provider, result) in llm_results {
+        match result {
             Ok(summary) => {
                 info!(provider = %provider.as_str(), "Summary generated successfully");
                 debug!(provider = %provider.as_str(), summary_length = summary.len(), "Summary details");
 
-                // Create snippet BEFORE modifying summary
+                // Create snippet BEFORE converting summary to bytes
                 let summary_snippet: String = summary.chars().take(SUMMARY_SNIPPET_CHARS).collect();
 
                 // Upload Summary to GCS (provider-specific path)
@@ -517,7 +532,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
             }
             Err(e) => {
-                error!(provider = %provider.as_str(), error = %e, "Failed to generate summary");
+                warn!(provider = %provider.as_str(), error = %e, "Summary generation failed");
             }
         }
     }
