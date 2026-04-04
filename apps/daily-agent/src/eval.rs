@@ -19,6 +19,24 @@ pub(crate) fn score_total(score: &serde_json::Value) -> f64 {
     total / EVAL_MAX_TOTAL
 }
 
+pub(crate) const V3_SCORE_KEYS: &[(&str, f64)] = &[
+    ("key_idea_clarity", 0.30),
+    ("why_it_matters_relevance", 0.25),
+    ("deep_dive_depth", 0.35),
+    ("action_quality", 0.10),
+];
+
+pub(crate) fn v3_score_total(score: &serde_json::Value) -> f64 {
+    let weighted_sum: f64 = V3_SCORE_KEYS
+        .iter()
+        .map(|&(key, weight)| {
+            let val = score.get(key).and_then(|v| v.as_f64()).unwrap_or(3.0);
+            val * weight
+        })
+        .sum();
+    weighted_sum / 5.0 // Normalize to 0.0-1.0 (max score per criterion is 5)
+}
+
 /// Eval report stored in GCS at eval/{date}.json
 /// Currently parsed dynamically via serde_json::Value; typed structs retained for schema documentation.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -106,14 +124,16 @@ pub(crate) async fn run_eval_pass(
 pub(crate) fn apply_eval_scores(json: &serde_json::Value, entries: &mut [ManifestEntry]) {
     if let Some(scores) = json.get("scores").and_then(|s| s.as_array()) {
         for score in scores {
-            let summary_id = score.get("summary_id").and_then(|s| s.as_str()).unwrap_or("");
-            let total = score_total(score);
-            let reasoning = score.get("reasoning").and_then(|s| s.as_str()).unwrap_or("").to_string();
-
-            info!(summary_id = %summary_id, total = %total, reasoning = %reasoning, "Eval score");
-
-            for entry in entries.iter_mut() {
-                if entry.summary_id() == summary_id {
+            if let Some(summary_id) = score.get("summary_id").and_then(|s| s.as_str()) {
+                if let Some(entry) = entries.iter_mut().find(|e| e.summary_id() == summary_id) {
+                    // Use V3 scoring for insight-brief entries
+                    let total = if entry.format.as_deref() == Some("insight-brief-v3") {
+                        v3_score_total(score)
+                    } else {
+                        score_total(score)
+                    };
+                    let reasoning = score.get("reasoning").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                    info!(summary_id = %summary_id, total = %total, reasoning = %reasoning, "Eval score");
                     entry.eval_score = Some(total);
                 }
             }
@@ -256,6 +276,28 @@ mod tests {
         let mut entries = vec![make_entry("summaries/gemini/2026-03-20.md", Some("gemini-3.1-pro-preview"), None)];
         apply_eval_scores(&json, &mut entries);
         assert!(entries[0].eval_score.is_none());
+    }
+
+    #[test]
+    fn test_v3_score_total_perfect() {
+        let score = serde_json::json!({
+            "key_idea_clarity": 5,
+            "why_it_matters_relevance": 5,
+            "deep_dive_depth": 5,
+            "action_quality": 5
+        });
+        let total = v3_score_total(&score);
+        assert!((total - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_v3_score_total_defaults_missing() {
+        let score = serde_json::json!({
+            "key_idea_clarity": 5
+        });
+        let total = v3_score_total(&score);
+        // 5*0.30 + 3*0.25 + 3*0.35 + 3*0.10 = 1.50 + 0.75 + 1.05 + 0.30 = 3.60 / 5 = 0.72
+        assert!((total - 0.72).abs() < 0.001);
     }
 
     #[test]

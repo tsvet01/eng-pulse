@@ -76,6 +76,25 @@ fn build_recent_picks_context(manifest: &[ManifestEntry], max_days: usize) -> Op
     Some(context)
 }
 
+#[allow(dead_code)]
+fn build_v3_eval_prompt(summaries_text: &str, calibration_context: Option<&str>) -> String {
+    let calibration = calibration_context.unwrap_or("");
+    format!(
+        r#"{}You are evaluating Insight Brief summaries for a senior engineering leader (C++/Rust, hedge fund, low-latency systems).
+
+Score each summary on these criteria (1-5 scale):
+- key_idea_clarity: Is the key insight distilled into one clear, non-hedging sentence?
+- why_it_matters_relevance: Does it connect to the reader's specific context?
+- deep_dive_depth: Is the technical analysis substantive, with evidence and nuance?
+- action_quality: If present, is the action concrete and genuinely useful? (Score 3 if no action item.)
+
+{}
+
+Reply with JSON: {{"scores": [{{"summary_id": "id", "key_idea_clarity": N, "why_it_matters_relevance": N, "deep_dive_depth": N, "action_quality": N, "reasoning": "brief explanation"}}]}}"#,
+        calibration, summaries_text
+    )
+}
+
 /// Get list of enabled LLM providers based on available API keys.
 /// Claude is first for article selection, others follow for summary generation.
 fn get_enabled_providers() -> Vec<(LlmProvider, String)> {
