@@ -3,7 +3,6 @@
 pub enum PromptConfig {
     V1,
     V2,
-    #[allow(dead_code)]
     V3,
 }
 
@@ -54,7 +53,6 @@ impl PromptConfig {
     }
 
     /// Build shortlist prompt with optional selection feedback and recent picks context.
-    #[allow(dead_code)]
     pub fn shortlist_prompt_with_context(
         &self,
         articles_text: &str,
@@ -73,7 +71,6 @@ impl PromptConfig {
     }
 
     /// Build final selection prompt with optional context.
-    #[allow(dead_code)]
     pub fn final_selection_prompt_with_context(
         &self,
         candidates_text: &str,

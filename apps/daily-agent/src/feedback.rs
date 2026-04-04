@@ -184,7 +184,6 @@ pub(crate) async fn build_calibration_context(
 }
 
 /// Build a selection context string from recent feedback for the article selector.
-#[allow(dead_code)]
 pub(crate) fn build_selection_context(
     feedback: &[FeedbackEntry],
     manifest: &[ManifestEntry],
