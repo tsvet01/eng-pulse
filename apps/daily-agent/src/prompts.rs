@@ -53,6 +53,44 @@ impl PromptConfig {
         }
     }
 
+    /// Build shortlist prompt with optional selection feedback and recent picks context.
+    #[allow(dead_code)]
+    pub fn shortlist_prompt_with_context(
+        &self,
+        articles_text: &str,
+        selection_context: Option<&str>,
+        recent_picks: Option<&str>,
+    ) -> String {
+        let base = self.shortlist_prompt(articles_text);
+        let mut prompt = base;
+        if let Some(ctx) = selection_context {
+            prompt = format!("{}\n\n{}", ctx, prompt);
+        }
+        if let Some(picks) = recent_picks {
+            prompt = format!("{}\n\n{}", picks, prompt);
+        }
+        prompt
+    }
+
+    /// Build final selection prompt with optional context.
+    #[allow(dead_code)]
+    pub fn final_selection_prompt_with_context(
+        &self,
+        candidates_text: &str,
+        selection_context: Option<&str>,
+        recent_picks: Option<&str>,
+    ) -> String {
+        let base = self.final_selection_prompt(candidates_text);
+        let mut prompt = base;
+        if let Some(ctx) = selection_context {
+            prompt = format!("{}\n\n{}", ctx, prompt);
+        }
+        if let Some(picks) = recent_picks {
+            prompt = format!("{}\n\n{}", picks, prompt);
+        }
+        prompt
+    }
+
     fn v1_selection_prompt(&self, articles_text: &str) -> String {
         format!(
             "You are an expert Software Engineering Editor. Review the following list of article headlines collected today. Select the SINGLE most valuable, educational, and impactful article for a senior software engineer to read. Consider technical depth, novelty, and broad relevance.\n\n{}\n\nReply ONLY with the integer index number of the chosen article (e.g., '3'). Do not add any explanation.",
@@ -265,5 +303,23 @@ mod tests {
         assert!(prompt.contains("deep_dive"));
         assert!(prompt.contains("Output ONLY valid JSON"));
         assert!(prompt.contains("Article Source: HN"));
+    }
+
+    #[test]
+    fn test_shortlist_with_context_includes_feedback() {
+        let prompt = PromptConfig::V3.shortlist_prompt_with_context(
+            "0. [HN] Test",
+            Some("Recent reader feedback:\n- Liked: \"Rust Perf\"\n"),
+            None,
+        );
+        assert!(prompt.contains("Liked: \"Rust Perf\""));
+        assert!(prompt.contains("0. [HN] Test"));
+    }
+
+    #[test]
+    fn test_shortlist_with_context_none_is_base() {
+        let base = PromptConfig::V3.shortlist_prompt("0. [HN] Test");
+        let with_ctx = PromptConfig::V3.shortlist_prompt_with_context("0. [HN] Test", None, None);
+        assert_eq!(base, with_ctx);
     }
 }
