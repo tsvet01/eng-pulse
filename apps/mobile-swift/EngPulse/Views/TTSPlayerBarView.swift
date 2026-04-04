@@ -8,10 +8,12 @@ struct TTSPlayerBarView: View {
     let title: String
     let currentTime: String
     let duration: String
+    let currentSpeed: Double
     let onToggle: () -> Void
     let onStop: () -> Void
     let onSkipBack: () -> Void
     let onSkipForward: () -> Void
+    let onSpeedChange: (Double) -> Void
 
     var body: some View {
         let hasSeek = !currentTime.isEmpty && !duration.isEmpty
@@ -46,15 +48,13 @@ struct TTSPlayerBarView: View {
             HStack(spacing: 24) {
                 Spacer()
 
-                if hasSeek {
-                    Button(action: onSkipBack) {
-                        Image(systemName: "gobackward.15")
-                            .font(.title2)
-                            .foregroundColor(.onSurface)
-                    }
-                    .disabled(isLoading)
-                    .accessibilityLabel("Skip back 15 seconds")
+                Button(action: onSkipBack) {
+                    Image(systemName: "gobackward.15")
+                        .font(.title2)
+                        .foregroundColor(.onSurface)
                 }
+                .disabled(isLoading)
+                .accessibilityLabel("Skip back 15 seconds")
 
                 Button(action: onToggle) {
                     if isLoading {
@@ -69,17 +69,33 @@ struct TTSPlayerBarView: View {
                 .disabled(isLoading)
                 .accessibilityLabel(isPlaying ? "Pause" : "Play")
 
-                if hasSeek {
-                    Button(action: onSkipForward) {
-                        Image(systemName: "goforward.15")
-                            .font(.title2)
-                            .foregroundColor(.onSurface)
-                    }
-                    .disabled(isLoading)
-                    .accessibilityLabel("Skip forward 15 seconds")
+                Button(action: onSkipForward) {
+                    Image(systemName: "goforward.15")
+                        .font(.title2)
+                        .foregroundColor(.onSurface)
                 }
+                .disabled(isLoading)
+                .accessibilityLabel("Skip forward 15 seconds")
 
                 Spacer()
+            }
+
+            // Speed pills row
+            HStack(spacing: 8) {
+                ForEach([0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
+                    Button {
+                        onSpeedChange(rate)
+                    } label: {
+                        Text(rate == 1.0 ? "1x" : String(format: "%.2gx", rate))
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundColor(currentSpeed == rate ? .accentColor : .onSurfaceVariant)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(currentSpeed == rate ? Color.accentColor.opacity(0.2) : Color.containerHigh)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
 
             // Title + stop

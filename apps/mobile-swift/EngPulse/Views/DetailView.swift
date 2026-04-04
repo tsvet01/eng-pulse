@@ -191,10 +191,14 @@ struct DetailView: View {
                         title: summary.title,
                         currentTime: ttsService.currentTimeFormatted,
                         duration: ttsService.durationFormatted,
+                        currentSpeed: ttsService.speechRate,
                         onToggle: { toggleTTS() },
                         onStop: { ttsService.stop() },
                         onSkipBack: { ttsService.skipBackward() },
-                        onSkipForward: { ttsService.skipForward() }
+                        onSkipForward: { ttsService.skipForward() },
+                        onSpeedChange: { rate in
+                            ttsService.speechRate = rate
+                        }
                     )
                 }
             }
