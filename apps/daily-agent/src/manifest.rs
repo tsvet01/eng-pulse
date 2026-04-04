@@ -32,6 +32,9 @@ pub(crate) struct ManifestEntry {
     /// Quality score from LLM judge (0.0-1.0)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) eval_score: Option<f64>,
+    /// Article format identifier (e.g. "insight-brief-v3" for V3; null for legacy markdown)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) format: Option<String>,
 }
 
 impl ManifestEntry {
@@ -58,6 +61,7 @@ mod tests {
             selected_by: None,
             prompt_version: prompt_version.map(|s| s.to_string()),
             eval_score: None,
+            format: None,
         }
     }
 

@@ -183,6 +183,7 @@ mod tests {
             selected_by: None,
             prompt_version: prompt_version.map(|s| s.to_string()),
             eval_score: None,
+            format: None,
         }
     }
 

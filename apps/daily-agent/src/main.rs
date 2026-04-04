@@ -168,6 +168,7 @@ async fn backfill_beta(
                             selected_by: None,
                             prompt_version: Some(beta_config.version().to_string()),
                             eval_score: None,
+                            format: None,
                         });
 
                         info!(date = %date, "Beta summary backfilled");
@@ -457,6 +458,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             selected_by: Some(selection_provider.model_name().to_string()),
                             prompt_version: None,
                             eval_score: None,
+                            format: None,
                         });
                     }
                     Err(e) => {
@@ -518,6 +520,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                     selected_by: Some(selection_provider.model_name().to_string()),
                                     prompt_version: Some(beta_config.version().to_string()),
                                     eval_score: None,
+                                    format: None,
                                 });
                                 info!("Beta summary of prod article uploaded");
                             }
@@ -567,6 +570,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                         selected_by: Some(format!("{} ({})", LlmProvider::Claude.model_name(), beta_config.version())),
                                         prompt_version: Some(beta_config.version().to_string()),
                                         eval_score: None,
+                                        format: None,
                                     });
                                     info!("Beta summary of beta article uploaded");
                                 }
