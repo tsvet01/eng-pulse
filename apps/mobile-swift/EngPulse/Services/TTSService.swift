@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 import SwiftUI
 import Combine
+import MediaPlayer
 
 // MARK: - TTS State
 enum TTSState {
@@ -23,6 +24,7 @@ class TTSService: ObservableObject {
     @Published var state: TTSState = .stopped
     @Published var progress: Double = 0.0
     @Published var currentArticleUrl: String?
+    @Published var currentArticleTitle: String?
     @Published var errorMessage: String?
 
     // Settings
@@ -54,6 +56,13 @@ class TTSService: ObservableObject {
         if isUsingLocalTTS {
             setupLocalTTSObservers()
         }
+
+        NowPlayingService.shared.configure(
+            onPlay: { [weak self] in self?.resume() },
+            onPause: { [weak self] in self?.pause() },
+            onSkipForward: { [weak self] in self?.skipForward() },
+            onSkipBackward: { [weak self] in self?.skipBackward() }
+        )
     }
 
     private func setupAudioPlayerObservers() {
@@ -63,6 +72,10 @@ class TTSService: ObservableObject {
             .sink { [weak self] isPlaying in
                 guard let self = self else { return }
                 if self.state == .playing && !isPlaying {
+                    // Playback finished naturally — clear any saved position
+                    if let url = self.currentArticleUrl {
+                        self.clearSavedPosition(for: url)
+                    }
                     self.state = .stopped
                     self.currentArticleUrl = nil
                 } else if self.state == .paused && isPlaying {
@@ -121,7 +134,9 @@ class TTSService: ObservableObject {
                 }.value
                 self.currentText = cleanedText
                 localTTS.speak(text: cleanedText, rate: self.speechRate, pitch: self.pitch)
-                self.state = .playing
+                if localTTS.isPlaying {
+                    self.state = .playing
+                }
             }
         } else {
             guard cloudTTS != nil else {
@@ -137,12 +152,15 @@ class TTSService: ObservableObject {
     private func performSpeak(_ text: String) async {
         guard let cloudTTS = cloudTTS else { return }
 
+        let expectedUrl = currentArticleUrl
         state = .loading
 
         // Clean text off main actor
         let cleanedText = await Task.detached(priority: .userInitiated) {
             TextCleaner.cleanForSpeech(text)
         }.value
+
+        guard currentArticleUrl == expectedUrl, state == .loading else { return }
         currentText = cleanedText
 
         do {
@@ -153,20 +171,33 @@ class TTSService: ObservableObject {
             )
 
             let cacheKey = await cacheService.generateAudioCacheKey(text: cleanedText, configKey: config.cacheKey)
+            guard currentArticleUrl == expectedUrl, state == .loading else { return }
             currentCacheKey = cacheKey
 
             if let cachedURL = await cacheService.getCachedAudioURL(for: cacheKey) {
+                guard currentArticleUrl == expectedUrl, state == .loading else { return }
                 try audioPlayer.play(from: cachedURL)
+                if let savedPosition = getSavedPosition(for: expectedUrl ?? "") {
+                    audioPlayer.seek(by: savedPosition)
+                    clearSavedPosition(for: expectedUrl ?? "")
+                }
                 state = .playing
                 return
             }
 
             let audioData = try await cloudTTS.synthesize(text: cleanedText, config: config)
+            guard currentArticleUrl == expectedUrl, state == .loading else { return }
 
             try await cacheService.cacheAudio(audioData, for: cacheKey)
+            guard currentArticleUrl == expectedUrl, state == .loading else { return }
 
             if let audioURL = await cacheService.getCachedAudioURL(for: cacheKey) {
+                guard currentArticleUrl == expectedUrl, state == .loading else { return }
                 try audioPlayer.play(from: audioURL)
+                if let savedPosition = getSavedPosition(for: expectedUrl ?? "") {
+                    audioPlayer.seek(by: savedPosition)
+                    clearSavedPosition(for: expectedUrl ?? "")
+                }
                 state = .playing
 
                 Task.detached(priority: .background) { [cacheService] in
@@ -177,14 +208,17 @@ class TTSService: ObservableObject {
             }
 
         } catch {
-            errorMessage = error.localizedDescription
-            state = .stopped
+            if currentArticleUrl == expectedUrl {
+                errorMessage = error.localizedDescription
+                state = .stopped
+            }
             print("TTS error: \(error)")
         }
     }
 
     func pause() {
         guard state == .playing else { return }
+        savePlaybackPosition()
         if isUsingLocalTTS {
             localTTS?.pause()
         } else {
@@ -204,6 +238,7 @@ class TTSService: ObservableObject {
     }
 
     func stop() {
+        savePlaybackPosition()
         if isUsingLocalTTS {
             localTTS?.stop()
         } else {
@@ -257,5 +292,24 @@ class TTSService: ObservableObject {
         let mins = Int(seconds) / 60
         let secs = Int(seconds) % 60
         return String(format: "%02d:%02d", mins, secs)
+    }
+
+    // MARK: - Resume Position
+
+    private func savePlaybackPosition() {
+        guard let url = currentArticleUrl else { return }
+        let position = audioPlayer.currentTime
+        if position > 0 {
+            UserDefaults.standard.set(position, forKey: "tts_position_\(url)")
+        }
+    }
+
+    func getSavedPosition(for articleUrl: String) -> TimeInterval? {
+        let pos = UserDefaults.standard.double(forKey: "tts_position_\(articleUrl)")
+        return pos > 0 ? pos : nil
+    }
+
+    func clearSavedPosition(for articleUrl: String) {
+        UserDefaults.standard.removeObject(forKey: "tts_position_\(articleUrl)")
     }
 }

@@ -124,6 +124,7 @@ struct DetailView: View {
     @State private var showInfo = false
     @State private var loadTask: Task<Void, Never>?
     @State private var insightBrief: InsightBrief?
+    @State private var savedPosition: TimeInterval?
 
     init(summary: Summary, allSummaries: [Summary] = [], cacheService: CacheService? = nil) {
         self.summary = summary
@@ -203,6 +204,7 @@ struct DetailView: View {
         .sheet(isPresented: $showInfo) { infoSheet }
         .task {
             loadTask = Task { await loadFullContent() }
+            savedPosition = ttsService.getSavedPosition(for: summary.url)
             await loadTask?.value
         }
     }
@@ -291,6 +293,12 @@ struct DetailView: View {
     private func toggleTTS() {
         guard let content = fullContent else { return }
         ttsService.togglePlayPause(content, articleUrl: summary.url)
+    }
+
+    private func formatTime(_ seconds: TimeInterval) -> String {
+        let mins = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        return String(format: "%d:%02d", mins, secs)
     }
 
     // MARK: - Sections
@@ -396,6 +404,18 @@ struct DetailView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigationBarTrailing) {
             HStack(spacing: 12) {
+                if let pos = savedPosition, ttsService.state == .stopped || ttsService.currentArticleUrl != summary.url {
+                    Button {
+                        toggleTTS()
+                        savedPosition = nil
+                    } label: {
+                        Text("Resume \(formatTime(pos))")
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                            .foregroundColor(.accentColor)
+                    }
+                }
+
                 if fullContent != nil {
                     Button {
                         toggleTTS()
