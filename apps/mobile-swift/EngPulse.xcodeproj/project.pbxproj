@@ -35,6 +35,7 @@
 		E1000002 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000001 /* Theme.swift */; };
 		F1000001 /* InsightBrief.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2000001 /* InsightBrief.swift */; };
 		F1000002 /* InsightBriefView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2000002 /* InsightBriefView.swift */; };
+		S1000001 /* SkeletonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = S2000001 /* SkeletonView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -80,6 +81,7 @@
 		E1000001 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		F2000001 /* InsightBrief.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightBrief.swift; sourceTree = "<group>"; };
 		F2000002 /* InsightBriefView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightBriefView.swift; sourceTree = "<group>"; };
+		S2000001 /* SkeletonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkeletonView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -147,6 +149,7 @@
 				C2000002 /* TTSPlayerBarView.swift */,
 				C2000004 /* TTSErrorBanner.swift */,
 				F2000002 /* InsightBriefView.swift */,
+				S2000001 /* SkeletonView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -312,6 +315,7 @@
 				E1000002 /* Theme.swift in Sources */,
 				F1000001 /* InsightBrief.swift in Sources */,
 				F1000002 /* InsightBriefView.swift in Sources */,
+				S1000001 /* SkeletonView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

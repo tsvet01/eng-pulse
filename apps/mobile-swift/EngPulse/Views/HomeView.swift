@@ -62,7 +62,7 @@ struct HomeViewContent: View {
     var body: some View {
         ZStack {
             if summariesStore.isLoading && summariesStore.summaries.isEmpty {
-                LoadingView()
+                SkeletonFeedView()
             } else if let error = summariesStore.errorMessage, summariesStore.summaries.isEmpty {
                 ErrorView(message: error) {
                     Task { await summariesStore.refreshSummaries() }
@@ -93,6 +93,7 @@ struct HomeViewContent: View {
             ToolbarItem(placement: .principal) {
                 Text("Eng Pulse")
                     .font(.headline)
+                    .fontDesign(.serif)
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 14) {
@@ -124,11 +125,18 @@ struct HomeViewContent: View {
         .safeAreaInset(edge: .top) {
             if isSearchActive {
                 TextField("Search summaries", text: $searchText)
-                    .textFieldStyle(.roundedBorder)
                     .focused($searchFocused)
+                    .font(.subheadline)
+                    .padding(12)
+                    .background(Color.containerLow)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: DesignTokens.cardRadius)
+                            .stroke(searchFocused ? Color.accentColor.opacity(0.4) : Color.outlineVariant.opacity(0.2), lineWidth: 1)
+                    )
                     .padding(.horizontal)
                     .padding(.bottom, 8)
-                    .background(.bar)
+                    .background(Color.surface)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
@@ -232,7 +240,7 @@ struct LoadingView: View {
                 .scaleEffect(1.5)
                 .accessibilityLabel("Loading")
             Text("Loading summaries...")
-                .foregroundColor(.secondary)
+                .foregroundColor(.onSurfaceVariant)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Loading summaries, please wait")
@@ -256,7 +264,7 @@ struct ErrorView: View {
 
             Text(message)
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundColor(.onSurfaceVariant)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
 
@@ -274,7 +282,7 @@ struct EmptyStateView: View {
         VStack(spacing: 16) {
             Image(systemName: "newspaper")
                 .font(.system(size: 48))
-                .foregroundColor(.secondary)
+                .foregroundColor(.onSurfaceVariant)
                 .accessibilityHidden(true)
 
             Text("No summaries yet")
@@ -282,7 +290,7 @@ struct EmptyStateView: View {
 
             Text("Check back later for the latest engineering insights.")
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundColor(.onSurfaceVariant)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
         }
