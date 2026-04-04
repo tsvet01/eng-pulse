@@ -49,7 +49,7 @@ use llm_client::{
 
 use crate::manifest::{ManifestEntry, gcs_public_url, gcs_object_path, SUMMARY_SNIPPET_CHARS};
 use crate::eval::{run_eval_pass, apply_eval_scores, log_calibration_agreement};
-use crate::feedback::{load_recent_feedback, build_calibration_context};
+use crate::feedback::{load_recent_feedback, build_calibration_context, build_selection_context};
 
 // --- Configuration Constants ---
 const HTTP_TIMEOUT_SECS: u64 = 60;
@@ -57,6 +57,24 @@ const MAX_ARTICLE_CHARS: usize = 50_000;
 /// Minimum extracted content length to attempt summarization.
 /// Pages below this threshold are likely JS-rendered SPAs or paywalled.
 const MIN_ARTICLE_CHARS: usize = 200;
+
+fn build_recent_picks_context(manifest: &[ManifestEntry], max_days: usize) -> Option<String> {
+    let recent: Vec<&ManifestEntry> = manifest.iter()
+        .filter(|e| e.prompt_version.is_none()) // Only production picks
+        .take(max_days)
+        .collect();
+
+    if recent.is_empty() {
+        return None;
+    }
+
+    let mut context = String::from("Recent selections (avoid repetition):\n");
+    for entry in &recent {
+        context.push_str(&format!("- {}: \"{}\"\n", entry.date, entry.title));
+    }
+    context.push_str("Prefer a different topic domain today.\n");
+    Some(context)
+}
 
 /// Get list of enabled LLM providers based on available API keys.
 /// Claude is first for article selection, others follow for summary generation.
@@ -326,6 +344,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     manifest.retain(|e| e.date != today);
     let mut new_manifest_entries: Vec<ManifestEntry> = Vec::new();
 
+    // --- Load user feedback early (needed for selection context) ---
+    let recent_feedback = load_recent_feedback(&gcs_client, &bucket_name).await;
+    let selection_context = build_selection_context(&recent_feedback, &manifest);
+    let recent_picks = build_recent_picks_context(&manifest, 5);
+
     // 3. Two-phase selection: shortlist by headlines, then pick by content
     info!(provider = %selection_provider.as_str(), "Phase 1: Shortlisting top candidates from headlines");
 
@@ -338,7 +361,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let selection_opts = LlmOptions { temperature: Some(0.3), ..Default::default() };
 
     // Phase 1: Shortlist top 5 from headlines
-    let shortlist_prompt = prod_config.shortlist_prompt(&articles_text);
+    let shortlist_prompt = prod_config.shortlist_prompt_with_context(
+        &articles_text,
+        selection_context.as_deref(),
+        recent_picks.as_deref(),
+    );
     let shortlist_response = call_llm(&http_client, selection_provider, &selection_key, shortlist_prompt, &selection_opts).await?;
     let mut shortlist = parse_shortlist_indices(&shortlist_response, all_articles.len());
 
@@ -377,7 +404,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             ));
         }
 
-        let final_prompt = prod_config.final_selection_prompt(&candidates_text);
+        let final_prompt = prod_config.final_selection_prompt_with_context(
+            &candidates_text,
+            selection_context.as_deref(),
+            recent_picks.as_deref(),
+        );
         let final_response = call_llm(&http_client, selection_provider, &selection_key, final_prompt, &selection_opts).await?;
         let picked = parse_selection_index(&final_response).unwrap_or(shortlist[0]);
 
@@ -590,9 +621,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!("ANTHROPIC_API_KEY not set, skipping beta pipeline");
     }
 
-    // --- Load user feedback for calibration ---
-    let feedback = load_recent_feedback(&gcs_client, &bucket_name).await;
-    let calibration_context = build_calibration_context(&feedback, &gcs_client, &bucket_name, &manifest).await;
+    // --- Build calibration context from already-loaded feedback ---
+    let calibration_context = build_calibration_context(&recent_feedback, &gcs_client, &bucket_name, &manifest).await;
 
     // --- Stage 4: Eval (dual pass with calibration) ---
     // Use Gemini as judge to avoid self-preference bias (Claude judging Claude summaries)
@@ -660,7 +690,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 ).await {
                     // Calibrated scores override uncalibrated
                     apply_eval_scores(&cal_json, &mut new_manifest_entries);
-                    log_calibration_agreement(&feedback, &cal_json, &new_manifest_entries);
+                    log_calibration_agreement(&recent_feedback, &cal_json, &new_manifest_entries);
                 }
             }
         }
