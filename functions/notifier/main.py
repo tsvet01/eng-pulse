@@ -8,6 +8,7 @@ Handles:
 4. APNs push notifications to iOS Swift app
 """
 import functions_framework
+import json
 import os
 import re
 import smtplib
@@ -78,14 +79,52 @@ def sanitize_html(content: str) -> str:
     )
 
 
+def render_insight_brief_html(content: str) -> str:
+    """Render V3 Insight Brief JSON as styled HTML for email."""
+    try:
+        brief = json.loads(content)
+    except json.JSONDecodeError:
+        return sanitize_html(content)
+
+    if "key_idea" not in brief or "deep_dive" not in brief:
+        return sanitize_html(content)
+
+    parts = []
+    parts.append('<div style="background:#f0f1f7;padding:16px;border-radius:12px;margin-bottom:16px">')
+    parts.append('<p style="color:#5c607a;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px 0"><strong>KEY IDEA</strong></p>')
+    parts.append(f'<p style="font-size:18px;font-weight:600;margin:0;color:#1a1c2e">{brief["key_idea"]}</p>')
+    parts.append('</div>')
+
+    parts.append('<div style="margin-bottom:16px">')
+    parts.append('<p style="color:#5c607a;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px 0"><strong>WHY IT MATTERS</strong></p>')
+    parts.append(f'<p style="margin:0;color:#333">{brief["why_it_matters"]}</p>')
+    parts.append('</div>')
+
+    if brief.get("what_to_change"):
+        parts.append('<div style="background:#fff3e0;padding:16px;border-radius:12px;margin-bottom:16px;border-left:4px solid #d97721">')
+        parts.append('<p style="color:#d97721;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px 0"><strong>WHAT TO CHANGE</strong></p>')
+        parts.append(f'<p style="margin:0;color:#333">{brief["what_to_change"]}</p>')
+        parts.append('</div>')
+
+    deep_dive_html = sanitize_html(brief["deep_dive"])
+    parts.append('<div style="margin-top:16px">')
+    parts.append('<p style="color:#5c607a;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px 0"><strong>DEEP DIVE</strong></p>')
+    parts.append(deep_dive_html)
+    parts.append('</div>')
+
+    return '\n'.join(parts)
+
+
 def sanitize_filename(filename: str) -> str:
     """Sanitize filename for email subject (allow only safe chars)."""
     return ''.join(c for c in filename if c.isalnum() or c in '-_. ')
 
 
 def should_process_file(file_name: str) -> bool:
-    """Check if file should be processed (summaries/*.md only)."""
-    return file_name.startswith("summaries/") and file_name.endswith(".md")
+    """Check if file should be processed (summaries/*.md and summaries/*.json)."""
+    return file_name.startswith("summaries/") and (
+        file_name.endswith(".md") or file_name.endswith(".json")
+    )
 
 
 def send_fcm_notification_http(token: str, title: str, body: str, article_url: str, access_token: str) -> tuple[bool, str]:
@@ -203,20 +242,29 @@ def send_summary_email(cloud_event):
     blob = bucket.blob(file_name)
     content = blob.download_as_text()
 
-    # Parse Markdown to HTML and sanitize to prevent XSS
-    html_content = sanitize_html(content)
+    # Determine rendering based on file type
+    object_name = file_name
+    if object_name.endswith('.json'):
+        html_content = render_insight_brief_html(content)
+        safe_filename = sanitize_filename(object_name.split('/')[-1].replace('.json', ''))
+        try:
+            brief_data = json.loads(content)
+            title = brief_data.get("key_idea", safe_filename)[:80]
+        except json.JSONDecodeError:
+            title = safe_filename
+    else:
+        # Parse Markdown to HTML and sanitize to prevent XSS
+        html_content = sanitize_html(content)
+        # Extract title: first markdown heading only, fallback to default
+        title = "Daily Engineering Briefing"
+        for line in content.strip().split('\n'):
+            stripped = line.strip()
+            if stripped.startswith('#'):
+                title = _strip_markdown(stripped.lstrip('#').strip())
+                break
 
     # Send Email
     send_email(file_name, html_content)
-
-    # Send FCM push notifications
-    # Extract title: first markdown heading only, fallback to default
-    title = "Daily Engineering Briefing"
-    for line in content.strip().split('\n'):
-        stripped = line.strip()
-        if stripped.startswith('#'):
-            title = _strip_markdown(stripped.lstrip('#').strip())
-            break
 
     # Create snippet for notification body: strip all markdown, take first 150 chars
     body = _strip_markdown(content)[:150].strip()
