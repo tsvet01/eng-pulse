@@ -121,15 +121,15 @@ class AppState: ObservableObject {
 
     func loadSummaries() async {
         errorMessage = nil
+        isOffline = false
 
-        // Phase 1: Show cached data instantly (no spinner)
+        // Always show cached data immediately — never wait for network
         if summaries.isEmpty,
            let cached = try? await cacheService.getCachedSummaries(), !cached.isEmpty {
             summaries = cached
-            isOffline = true
         }
 
-        // Phase 2: Fetch fresh data from network
+        // Refresh in background — never set isLoading if we already have data
         if summaries.isEmpty { isLoading = true }
 
         do {
@@ -141,6 +141,8 @@ class AppState: ObservableObject {
         } catch {
             if summaries.isEmpty {
                 errorMessage = error.localizedDescription
+            } else {
+                isOffline = true
             }
         }
 
