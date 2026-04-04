@@ -292,7 +292,7 @@ struct DetailView: View {
 
     private func toggleTTS() {
         guard let content = fullContent else { return }
-        ttsService.togglePlayPause(content, articleUrl: summary.url)
+        ttsService.togglePlayPause(content, articleUrl: summary.url, articleTitle: summary.title)
     }
 
     private func formatTime(_ seconds: TimeInterval) -> String {

@@ -87,7 +87,17 @@ class TTSService: ObservableObject {
         audioPlayer.$progress
             .receive(on: RunLoop.main)
             .sink { [weak self] progress in
-                self?.progress = progress
+                guard let self = self else { return }
+                self.progress = progress
+                if self.state == .playing {
+                    NowPlayingService.shared.updateNowPlaying(
+                        title: self.currentArticleTitle ?? "Eng Pulse",
+                        progress: progress,
+                        duration: self.audioPlayer.duration,
+                        currentTime: self.audioPlayer.currentTime,
+                        isPlaying: true
+                    )
+                }
             }
             .store(in: &cancellables)
     }
@@ -119,10 +129,11 @@ class TTSService: ObservableObject {
     // MARK: - Public Methods
 
     /// Start speaking text, stopping any current playback first
-    func startSpeaking(_ text: String, articleUrl: String? = nil) {
+    func startSpeaking(_ text: String, articleUrl: String? = nil, articleTitle: String? = nil) {
         stop()
 
         currentArticleUrl = articleUrl
+        currentArticleTitle = articleTitle
         errorMessage = nil
 
         if isUsingLocalTTS, let localTTS = localTTS {
@@ -225,6 +236,13 @@ class TTSService: ObservableObject {
             audioPlayer.pause()
         }
         state = .paused
+        NowPlayingService.shared.updateNowPlaying(
+            title: currentArticleTitle ?? "Eng Pulse",
+            progress: progress,
+            duration: audioPlayer.duration,
+            currentTime: audioPlayer.currentTime,
+            isPlaying: false
+        )
     }
 
     func resume() {
@@ -247,18 +265,20 @@ class TTSService: ObservableObject {
         state = .stopped
         progress = 0.0
         currentArticleUrl = nil
+        currentArticleTitle = nil
         currentText = nil
         currentCacheKey = nil
         errorMessage = nil
+        NowPlayingService.shared.clearNowPlaying()
     }
 
-    func togglePlayPause(_ text: String, articleUrl: String? = nil) {
+    func togglePlayPause(_ text: String, articleUrl: String? = nil, articleTitle: String? = nil) {
         if state == .playing && currentArticleUrl == articleUrl {
             pause()
         } else if state == .paused && currentArticleUrl == articleUrl {
             resume()
         } else {
-            startSpeaking(text, articleUrl: articleUrl)
+            startSpeaking(text, articleUrl: articleUrl, articleTitle: articleTitle)
         }
     }
 
