@@ -62,7 +62,7 @@ struct FeedbackWidget: View {
         else { summaryFeedback = newValue }
         let key = aspect == "selection" ? FeedbackKeys.selection(summaryUrl) : FeedbackKeys.summary(summaryUrl)
         UserDefaults.standard.set(newValue, forKey: key)
-        let val = newValue.isEmpty ? "clear" : newValue
+        let val: String? = newValue.isEmpty ? nil : newValue
         Task {
             await FeedbackService.shared.submitFeedback(
                 summaryURL: summaryUrl,
@@ -122,6 +122,8 @@ struct DetailView: View {
     @State private var isLoadingContent = false
     @State private var loadingError: String?
     @State private var showInfo = false
+    @State private var loadTask: Task<Void, Never>?
+    @State private var insightBrief: InsightBrief?
 
     init(summary: Summary, allSummaries: [Summary] = [], cacheService: CacheService? = nil) {
         self.summary = summary
@@ -200,7 +202,8 @@ struct DetailView: View {
         .toolbar { toolbarContent }
         .sheet(isPresented: $showInfo) { infoSheet }
         .task {
-            await loadFullContent()
+            loadTask = Task { await loadFullContent() }
+            await loadTask?.value
         }
     }
 
@@ -239,6 +242,13 @@ struct DetailView: View {
         if let cacheService = cacheService,
            let cached = await cacheService.getCachedContent(for: summary.url) {
             fullContent = cached
+            if summary.isInsightBrief,
+               let jsonData = cached.data(using: .utf8),
+               let brief = try? JSONDecoder().decode(InsightBrief.self, from: jsonData) {
+                insightBrief = brief
+            }
+            isLoadingContent = false
+            return
         }
 
         // Phase 2: Fetch fresh from network
@@ -256,6 +266,11 @@ struct DetailView: View {
             let (data, _) = try await URLSession.shared.data(for: request)
             if let content = String(data: data, encoding: .utf8) {
                 fullContent = content
+                if summary.isInsightBrief,
+                   let jsonData = content.data(using: .utf8),
+                   let brief = try? JSONDecoder().decode(InsightBrief.self, from: jsonData) {
+                    insightBrief = brief
+                }
                 if let cacheService = cacheService {
                     try? await cacheService.cacheContent(content, for: summary.url)
                 }
@@ -281,8 +296,14 @@ struct DetailView: View {
     // MARK: - Sections
 
     private func fullContentSection(_ content: String) -> some View {
-        MarkdownContentView(content: content)
-            .padding(.top, 4)
+        Group {
+            if let brief = insightBrief {
+                InsightBriefView(brief: brief)
+            } else {
+                MarkdownContentView(content: content)
+                    .padding(.top, 4)
+            }
+        }
     }
 
     private var infoSheet: some View {
@@ -303,7 +324,7 @@ struct DetailView: View {
                             systemImage: "star.fill"
                         )
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.onSurfaceVariant)
                     }
                 }
 
@@ -335,7 +356,7 @@ struct DetailView: View {
                 .accessibilityLabel("Loading")
             Text("Loading full summary...")
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundColor(.onSurfaceVariant)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 32)
@@ -353,12 +374,11 @@ struct DetailView: View {
                 .fontWeight(.medium)
             Text("Check your internet connection and try again.")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(.onSurfaceVariant)
                 .multilineTextAlignment(.center)
             Button {
-                Task {
-                    await loadFullContent()
-                }
+                loadTask?.cancel()
+                loadTask = Task { await loadFullContent() }
             } label: {
                 Label("Try Again", systemImage: "arrow.clockwise")
             }
