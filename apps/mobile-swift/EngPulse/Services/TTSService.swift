@@ -18,7 +18,6 @@ class TTSService: ObservableObject {
     private var cloudTTS: CloudTTSService?
     private var localTTS: LocalTTSService?
     private(set) var isUsingLocalTTS: Bool = false
-    private var isTransitioning = false
     private let cacheService: CacheService
     private let audioPlayer: AudioPlayerService
 
@@ -71,16 +70,17 @@ class TTSService: ObservableObject {
         audioPlayer.$isPlaying
             .receive(on: RunLoop.main)
             .sink { [weak self] isPlaying in
-                guard let self = self, !self.isTransitioning else { return }
-                if self.state == .playing && !isPlaying {
-                    // Playback finished naturally — clear any saved position
+                guard let self = self else { return }
+                if isPlaying {
+                    self.state = .playing
+                } else if self.state == .playing {
+                    // Playback ended — keep URL so bar stays visible
                     if let url = self.currentArticleUrl {
                         self.clearSavedPosition(for: url)
                     }
                     self.state = .stopped
-                    self.currentArticleUrl = nil
-                } else if self.state == .paused && isPlaying {
-                    self.state = .playing
+                    self.progress = 0
+                    NowPlayingService.shared.clearNowPlaying()
                 }
             }
             .store(in: &cancellables)
@@ -109,11 +109,14 @@ class TTSService: ObservableObject {
         localTTS.$isPlaying
             .receive(on: RunLoop.main)
             .sink { [weak self] isPlaying in
-                guard let self = self, !self.isTransitioning else { return }
-                if self.state == .playing && !isPlaying {
-                    self.stop()
-                } else if isPlaying && (self.state == .paused || self.state == .loading) {
+                guard let self = self else { return }
+                if isPlaying {
                     self.state = .playing
+                } else if self.state == .playing {
+                    // Playback ended — update state but keep URL so bar stays visible
+                    self.state = .stopped
+                    self.progress = 0
+                    NowPlayingService.shared.clearNowPlaying()
                 }
             }
             .store(in: &cancellables)
@@ -130,12 +133,9 @@ class TTSService: ObservableObject {
 
     /// Start speaking text, stopping any current playback first
     func startSpeaking(_ text: String, articleUrl: String? = nil, articleTitle: String? = nil) {
-        // Guard prevents observers from calling stop() during transition
-        isTransitioning = true
         currentArticleUrl = articleUrl
         currentArticleTitle = articleTitle
         stopPlayback()
-        isTransitioning = false
 
         errorMessage = nil
 
