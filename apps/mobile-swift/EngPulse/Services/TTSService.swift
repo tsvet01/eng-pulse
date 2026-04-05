@@ -18,6 +18,7 @@ class TTSService: ObservableObject {
     private var cloudTTS: CloudTTSService?
     private var localTTS: LocalTTSService?
     private(set) var isUsingLocalTTS: Bool = false
+    private var isTransitioning = false
     private let cacheService: CacheService
     private let audioPlayer: AudioPlayerService
 
@@ -70,7 +71,7 @@ class TTSService: ObservableObject {
         audioPlayer.$isPlaying
             .receive(on: RunLoop.main)
             .sink { [weak self] isPlaying in
-                guard let self = self else { return }
+                guard let self = self, !self.isTransitioning else { return }
                 if self.state == .playing && !isPlaying {
                     // Playback finished naturally — clear any saved position
                     if let url = self.currentArticleUrl {
@@ -108,8 +109,7 @@ class TTSService: ObservableObject {
         localTTS.$isPlaying
             .receive(on: RunLoop.main)
             .sink { [weak self] isPlaying in
-                guard let self = self else { return }
-                // Only react to playback finishing — not during loading/starting
+                guard let self = self, !self.isTransitioning else { return }
                 if self.state == .playing && !isPlaying {
                     self.stop()
                 } else if isPlaying && (self.state == .paused || self.state == .loading) {
@@ -130,10 +130,12 @@ class TTSService: ObservableObject {
 
     /// Start speaking text, stopping any current playback first
     func startSpeaking(_ text: String, articleUrl: String? = nil, articleTitle: String? = nil) {
-        // Set new article before stopping to prevent bar flash during transition
+        // Guard prevents observers from calling stop() during transition
+        isTransitioning = true
         currentArticleUrl = articleUrl
         currentArticleTitle = articleTitle
         stopPlayback()
+        isTransitioning = false
 
         errorMessage = nil
 
