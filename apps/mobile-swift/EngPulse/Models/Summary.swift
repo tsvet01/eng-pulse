@@ -13,6 +13,7 @@ struct Summary: Identifiable, Codable, Equatable, Hashable {
     let selectedBy: String?
     let promptVersion: String?
     let evalScore: Double?
+    let format: String?
 
     enum CodingKeys: String, CodingKey {
         case date, url, title
@@ -22,11 +23,12 @@ struct Summary: Identifiable, Codable, Equatable, Hashable {
         case selectedBy = "selected_by"
         case promptVersion = "prompt_version"
         case evalScore = "eval_score"
+        case format
     }
 
     init(date: String, url: String, title: String, summarySnippet: String? = nil,
          originalUrl: String? = nil, model: String? = nil, selectedBy: String? = nil,
-         promptVersion: String? = nil, evalScore: Double? = nil) {
+         promptVersion: String? = nil, evalScore: Double? = nil, format: String? = nil) {
         self.date = date
         self.url = url
         self.title = title
@@ -36,6 +38,7 @@ struct Summary: Identifiable, Codable, Equatable, Hashable {
         self.selectedBy = selectedBy
         self.promptVersion = promptVersion
         self.evalScore = evalScore
+        self.format = format
     }
 
     // Cached date formatter for performance
@@ -64,6 +67,10 @@ struct Summary: Identifiable, Codable, Equatable, Hashable {
     static let betaVersion = "v2"
 
     var isBeta: Bool { promptVersion == Self.betaVersion }
+
+    var isInsightBrief: Bool {
+        format == "insight-brief-v3"
+    }
 
     /// Snippet with markdown syntax stripped for clean list display.
     var cleanSnippet: String? {

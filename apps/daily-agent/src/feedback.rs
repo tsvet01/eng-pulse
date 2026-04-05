@@ -183,6 +183,38 @@ pub(crate) async fn build_calibration_context(
     Some(context)
 }
 
+/// Build a selection context string from recent feedback for the article selector.
+pub(crate) fn build_selection_context(
+    feedback: &[FeedbackEntry],
+    manifest: &[ManifestEntry],
+) -> Option<String> {
+    let with_selection: Vec<&FeedbackEntry> = feedback.iter()
+        .filter(|f| f.selection_feedback.is_some())
+        .collect();
+
+    if with_selection.is_empty() {
+        return None;
+    }
+
+    let mut context = String::from("Recent reader feedback on past selections:\n");
+
+    for entry in with_selection.iter().take(6) {
+        let title = manifest.iter()
+            .find(|m| m.url == entry.summary_url)
+            .map(|m| m.title.as_str())
+            .unwrap_or("Unknown");
+        let signal = match entry.selection_feedback.as_deref() {
+            Some("up") => "Liked",
+            Some("down") => "Disliked",
+            _ => continue,
+        };
+        context.push_str(&format!("- {}: \"{}\"\n", signal, title));
+    }
+
+    context.push_str("Use this signal to better match today's pick to the reader's taste.\n");
+    Some(context)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,5 +281,43 @@ mod tests {
         let content = "hello world";
         let result = excerpt(content, 200);
         assert_eq!(result, "hello world");
+    }
+
+    #[test]
+    fn test_build_selection_context_with_feedback() {
+        let feedback = vec![
+            FeedbackEntry {
+                summary_url: "https://example.com/a".to_string(),
+                feedback: None,
+                selection_feedback: Some("up".to_string()),
+                summary_feedback: None,
+                prompt_version: None,
+                uid: "u1".to_string(),
+                timestamp: "2026-04-01T00:00:00Z".to_string(),
+            },
+        ];
+        let manifest = vec![
+            ManifestEntry {
+                date: "2026-04-01".to_string(),
+                url: "https://example.com/a".to_string(),
+                title: "Great Article".to_string(),
+                summary_snippet: "...".to_string(),
+                original_url: None,
+                model: None,
+                selected_by: None,
+                prompt_version: None,
+                eval_score: None,
+                format: None,
+            },
+        ];
+        let ctx = build_selection_context(&feedback, &manifest);
+        assert!(ctx.is_some());
+        assert!(ctx.unwrap().contains("Liked: \"Great Article\""));
+    }
+
+    #[test]
+    fn test_build_selection_context_empty() {
+        let ctx = build_selection_context(&[], &[]);
+        assert!(ctx.is_none());
     }
 }

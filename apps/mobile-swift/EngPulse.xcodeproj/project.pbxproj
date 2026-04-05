@@ -33,6 +33,10 @@
 		D1000001 /* LocalTTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000001 /* LocalTTSService.swift */; };
 		D1000002 /* LocalTTSServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000003 /* LocalTTSServiceTests.swift */; };
 		E1000002 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000001 /* Theme.swift */; };
+		F1000001 /* InsightBrief.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2000001 /* InsightBrief.swift */; };
+		F1000002 /* InsightBriefView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2000002 /* InsightBriefView.swift */; };
+		S1000001 /* SkeletonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = S2000001 /* SkeletonView.swift */; };
+		N1000001 /* NowPlayingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = N2000001 /* NowPlayingService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -76,6 +80,10 @@
 		D2000002 /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.xcconfig; sourceTree = "<group>"; };
 		D2000003 /* LocalTTSServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalTTSServiceTests.swift; sourceTree = "<group>"; };
 		E1000001 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		F2000001 /* InsightBrief.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightBrief.swift; sourceTree = "<group>"; };
+		F2000002 /* InsightBriefView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightBriefView.swift; sourceTree = "<group>"; };
+		S2000001 /* SkeletonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkeletonView.swift; sourceTree = "<group>"; };
+		N2000001 /* NowPlayingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -142,6 +150,8 @@
 				A2000005 /* SettingsView.swift */,
 				C2000002 /* TTSPlayerBarView.swift */,
 				C2000004 /* TTSErrorBanner.swift */,
+				F2000002 /* InsightBriefView.swift */,
+				S2000001 /* SkeletonView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -151,6 +161,7 @@
 			children = (
 				A2000006 /* Summary.swift */,
 				A200000E /* TTSConfiguration.swift */,
+				F2000001 /* InsightBrief.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -165,6 +176,7 @@
 				A200000F /* CloudTTSService.swift */,
 				D2000001 /* LocalTTSService.swift */,
 				A200000B /* NotificationService.swift */,
+				N2000001 /* NowPlayingService.swift */,
 				C2000001 /* TextCleaner.swift */,
 				A200000D /* TTSService.swift */,
 			);
@@ -303,7 +315,11 @@
 				C1000002 /* TTSPlayerBarView.swift in Sources */,
 				C1000004 /* TTSErrorBanner.swift in Sources */,
 				D1000001 /* LocalTTSService.swift in Sources */,
+				N1000001 /* NowPlayingService.swift in Sources */,
 				E1000002 /* Theme.swift in Sources */,
+				F1000001 /* InsightBrief.swift in Sources */,
+				F1000002 /* InsightBriefView.swift in Sources */,
+				S1000001 /* SkeletonView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

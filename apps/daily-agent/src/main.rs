@@ -47,9 +47,10 @@ use llm_client::{
     DEFAULT_BUCKET, LlmProvider, LlmOptions, get_api_key_env_var,
 };
 
+use futures::future::join_all;
 use crate::manifest::{ManifestEntry, gcs_public_url, gcs_object_path, SUMMARY_SNIPPET_CHARS};
 use crate::eval::{run_eval_pass, apply_eval_scores, log_calibration_agreement};
-use crate::feedback::{load_recent_feedback, build_calibration_context};
+use crate::feedback::{load_recent_feedback, build_calibration_context, build_selection_context};
 
 // --- Configuration Constants ---
 const HTTP_TIMEOUT_SECS: u64 = 60;
@@ -57,6 +58,43 @@ const MAX_ARTICLE_CHARS: usize = 50_000;
 /// Minimum extracted content length to attempt summarization.
 /// Pages below this threshold are likely JS-rendered SPAs or paywalled.
 const MIN_ARTICLE_CHARS: usize = 200;
+
+fn build_recent_picks_context(manifest: &[ManifestEntry], max_days: usize) -> Option<String> {
+    let recent: Vec<&ManifestEntry> = manifest.iter()
+        .filter(|e| e.prompt_version.is_none()) // Only production picks
+        .take(max_days)
+        .collect();
+
+    if recent.is_empty() {
+        return None;
+    }
+
+    let mut context = String::from("Recent selections (avoid repetition):\n");
+    for entry in &recent {
+        context.push_str(&format!("- {}: \"{}\"\n", entry.date, entry.title));
+    }
+    context.push_str("Prefer a different topic domain today.\n");
+    Some(context)
+}
+
+#[allow(dead_code)]
+fn build_v3_eval_prompt(summaries_text: &str, calibration_context: Option<&str>) -> String {
+    let calibration = calibration_context.unwrap_or("");
+    format!(
+        r#"{}You are evaluating Insight Brief summaries for a senior engineering leader (C++/Rust, hedge fund, low-latency systems).
+
+Score each summary on these criteria (1-5 scale):
+- key_idea_clarity: Is the key insight distilled into one clear, non-hedging sentence?
+- why_it_matters_relevance: Does it connect to the reader's specific context?
+- deep_dive_depth: Is the technical analysis substantive, with evidence and nuance?
+- action_quality: If present, is the action concrete and genuinely useful? (Score 3 if no action item.)
+
+{}
+
+Reply with JSON: {{"scores": [{{"summary_id": "id", "key_idea_clarity": N, "why_it_matters_relevance": N, "deep_dive_depth": N, "action_quality": N, "reasoning": "brief explanation"}}]}}"#,
+        calibration, summaries_text
+    )
+}
 
 /// Get list of enabled LLM providers based on available API keys.
 /// Claude is first for article selection, others follow for summary generation.
@@ -168,6 +206,7 @@ async fn backfill_beta(
                             selected_by: None,
                             prompt_version: Some(beta_config.version().to_string()),
                             eval_score: None,
+                            format: None,
                         });
 
                         info!(date = %date, "Beta summary backfilled");
@@ -325,6 +364,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     manifest.retain(|e| e.date != today);
     let mut new_manifest_entries: Vec<ManifestEntry> = Vec::new();
 
+    // --- Load user feedback early (needed for selection context) ---
+    let recent_feedback = load_recent_feedback(&gcs_client, &bucket_name).await;
+    let selection_context = build_selection_context(&recent_feedback, &manifest);
+    let recent_picks = build_recent_picks_context(&manifest, 5);
+
     // 3. Two-phase selection: shortlist by headlines, then pick by content
     info!(provider = %selection_provider.as_str(), "Phase 1: Shortlisting top candidates from headlines");
 
@@ -337,7 +381,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let selection_opts = LlmOptions { temperature: Some(0.3), ..Default::default() };
 
     // Phase 1: Shortlist top 5 from headlines
-    let shortlist_prompt = prod_config.shortlist_prompt(&articles_text);
+    let shortlist_prompt = prod_config.shortlist_prompt_with_context(
+        &articles_text,
+        selection_context.as_deref(),
+        recent_picks.as_deref(),
+    );
     let shortlist_response = call_llm(&http_client, selection_provider, &selection_key, shortlist_prompt, &selection_opts).await?;
     let mut shortlist = parse_shortlist_indices(&shortlist_response, all_articles.len());
 
@@ -376,7 +424,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             ));
         }
 
-        let final_prompt = prod_config.final_selection_prompt(&candidates_text);
+        let final_prompt = prod_config.final_selection_prompt_with_context(
+            &candidates_text,
+            selection_context.as_deref(),
+            recent_picks.as_deref(),
+        );
         let final_response = call_llm(&http_client, selection_provider, &selection_key, final_prompt, &selection_opts).await?;
         let picked = parse_selection_index(&final_response).unwrap_or(shortlist[0]);
 
@@ -414,17 +466,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let summary_prompt = prod_config.summary_prompt(&best_article.source, &best_article.title, &truncated_text);
 
-    // --- Stage 2: Prod (v1) ---
+    // --- Stage 2: Prod (v1) — parallel LLM calls ---
 
-    for (provider, api_key) in &enabled_providers {
-        info!(provider = %provider.as_str(), "Generating summary");
+    info!("Generating summaries in parallel across {} provider(s)", enabled_providers.len());
 
-        match call_llm_with_retry(&http_client, *provider, api_key, summary_prompt.clone()).await {
+    let summary_futures: Vec<_> = enabled_providers.iter().map(|(provider, api_key)| {
+        let client = http_client.clone();
+        let key = api_key.clone();
+        let prompt = summary_prompt.clone();
+        let p = *provider;
+        async move {
+            let result = call_llm_with_retry(&client, p, &key, prompt).await;
+            (p, result)
+        }
+    }).collect();
+
+    let llm_results = join_all(summary_futures).await;
+
+    // GCS uploads happen sequentially after all LLM calls complete
+    for (provider, result) in llm_results {
+        match result {
             Ok(summary) => {
                 info!(provider = %provider.as_str(), "Summary generated successfully");
                 debug!(provider = %provider.as_str(), summary_length = summary.len(), "Summary details");
 
-                // Create snippet BEFORE modifying summary
+                // Create snippet BEFORE converting summary to bytes
                 let summary_snippet: String = summary.chars().take(SUMMARY_SNIPPET_CHARS).collect();
 
                 // Upload Summary to GCS (provider-specific path)
@@ -457,6 +523,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             selected_by: Some(selection_provider.model_name().to_string()),
                             prompt_version: None,
                             eval_score: None,
+                            format: None,
                         });
                     }
                     Err(e) => {
@@ -465,7 +532,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
             }
             Err(e) => {
-                error!(provider = %provider.as_str(), error = %e, "Failed to generate summary");
+                warn!(provider = %provider.as_str(), error = %e, "Summary generation failed");
             }
         }
     }
@@ -475,120 +542,76 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         return Err("No summaries generated".into());
     }
 
-    // --- Stage 3: Beta (v2) ---
-    // Only runs if Claude API key is available
+    // --- Stage 3: V3 Insight Brief ---
+    info!("=== Stage 3: V3 Insight Brief ===");
+    let v3_config = prompts::PromptConfig::V3;
+
     let claude_entry = enabled_providers.iter().find(|(p, _)| *p == LlmProvider::Claude);
     if let Some((_, claude_key)) = claude_entry {
-        info!("Starting beta pipeline (v2)");
-        let beta_config = prompts::PromptConfig::V2;
+        let v3_prompt = v3_config.summary_prompt(&best_article.source, &best_article.title, &truncated_text);
+        let v3_options = LlmOptions { temperature: Some(0.3), ..Default::default() };
 
-        // Beta selection: pick a different article using persona-driven prompt
-        let beta_selection_prompt = beta_config.selection_prompt(&articles_text);
-        match call_llm(&http_client, LlmProvider::Claude, claude_key, beta_selection_prompt, &selection_opts).await {
-            Ok(beta_selected) => {
-                let beta_index = parse_selection_index(&beta_selected).unwrap_or(0);
-                let beta_safe_index = if beta_index >= all_articles.len() { 0 } else { beta_index };
-                let beta_article = &all_articles[beta_safe_index];
-                info!(title = %beta_article.title, "Beta selected article");
+        match call_llm(&http_client, LlmProvider::Claude, claude_key, v3_prompt, &v3_options).await {
+            Ok(response) => {
+                let json_str = response.trim();
+                // Strip markdown code fences if present
+                // Extract JSON: find first { and last } to handle preamble or code fences
+                let clean_json = if let (Some(start), Some(end)) = (json_str.find('{'), json_str.rfind('}')) {
+                    json_str[start..=end].to_string()
+                } else {
+                    json_str.to_string()
+                };
 
-                // V2 summary of prod article A (guaranteed comparison)
-                let beta_summary_prompt_a = beta_config.summary_prompt(
-                    &best_article.source, &best_article.title, &truncated_text
-                );
-                match call_llm_with_retry(&http_client, LlmProvider::Claude, claude_key, beta_summary_prompt_a).await {
-                    Ok(summary) => {
-                        let summary_snippet: String = summary.chars().take(SUMMARY_SNIPPET_CHARS).collect();
-                        let object_name = format!("summaries/beta/claude/{}.md", today);
-                        let summary_bytes = summary.into_bytes();
+                match serde_json::from_str::<serde_json::Value>(&clean_json) {
+                    Ok(parsed) if parsed.get("key_idea").is_some() && parsed.get("deep_dive").is_some() => {
+                        let object_path = format!("summaries/v3/{}.json", today);
+                        let public_url = gcs_public_url(&bucket_name, &object_path);
 
                         match gcs_client.upload_object(
-                            &UploadObjectRequest { bucket: bucket_name.to_string(), ..Default::default() },
-                            summary_bytes,
-                            &UploadType::Simple(Media::new(object_name.clone()))
+                            &UploadObjectRequest {
+                                bucket: bucket_name.clone(),
+                                ..Default::default()
+                            },
+                            clean_json.as_bytes().to_vec(),
+                            &UploadType::Simple(Media::new(object_path.clone())),
                         ).await {
                             Ok(_) => {
-                                let public_url = gcs_public_url(&bucket_name, &object_name);
+                                let snippet = parsed["key_idea"].as_str().unwrap_or("").to_string();
+                                let snippet_truncated = if snippet.chars().count() > SUMMARY_SNIPPET_CHARS {
+                                    format!("{}...", snippet.chars().take(SUMMARY_SNIPPET_CHARS - 3).collect::<String>())
+                                } else {
+                                    snippet
+                                };
+
                                 new_manifest_entries.push(ManifestEntry {
                                     date: today.clone(),
                                     url: public_url,
                                     title: best_article.title.clone(),
-                                    summary_snippet,
+                                    summary_snippet: snippet_truncated,
                                     original_url: Some(best_article.url.clone()),
                                     model: Some(LlmProvider::Claude.model_name().to_string()),
                                     selected_by: Some(selection_provider.model_name().to_string()),
-                                    prompt_version: Some(beta_config.version().to_string()),
+                                    prompt_version: Some("v3".to_string()),
                                     eval_score: None,
+                                    format: Some("insight-brief-v3".to_string()),
                                 });
-                                info!("Beta summary of prod article uploaded");
+                                info!("V3 Insight Brief uploaded to {}", object_path);
                             }
-                            Err(e) => warn!(error = %e, "Failed to upload beta summary of prod article"),
+                            Err(e) => warn!(error = %e, "Failed to upload V3 Insight Brief"),
                         }
                     }
-                    Err(e) => warn!(error = %e, "Failed to generate beta summary of prod article"),
-                }
-
-                // V2 summary of beta article B (only if different from A)
-                if beta_article.url != best_article.url {
-                    info!(title = %beta_article.title, "Beta article differs from prod, generating summary");
-                    let beta_article_content = match fetch_article_content(&http_client, &beta_article.url).await {
-                        Ok(content) => content,
-                        Err(e) => {
-                            warn!(error = %e, "Skipping beta selection summary");
-                            String::new()
-                        }
-                    };
-                    if beta_article_content.is_empty() {
-                        // Content extraction failed — skip rather than generating noise
-                    } else {
-                    let beta_truncated: String = beta_article_content.chars().take(MAX_ARTICLE_CHARS).collect();
-                    let beta_summary_prompt_b = beta_config.summary_prompt(
-                        &beta_article.source, &beta_article.title, &beta_truncated
-                    );
-                    match call_llm_with_retry(&http_client, LlmProvider::Claude, claude_key, beta_summary_prompt_b).await {
-                        Ok(summary) => {
-                            let summary_snippet: String = summary.chars().take(SUMMARY_SNIPPET_CHARS).collect();
-                            let object_name = format!("summaries/beta/claude/{}-selection.md", today);
-                            let summary_bytes = summary.into_bytes();
-
-                            match gcs_client.upload_object(
-                                &UploadObjectRequest { bucket: bucket_name.to_string(), ..Default::default() },
-                                summary_bytes,
-                                &UploadType::Simple(Media::new(object_name.clone()))
-                            ).await {
-                                Ok(_) => {
-                                    let public_url = gcs_public_url(&bucket_name, &object_name);
-                                    new_manifest_entries.push(ManifestEntry {
-                                        date: today.clone(),
-                                        url: public_url,
-                                        title: beta_article.title.clone(),
-                                        summary_snippet,
-                                        original_url: Some(beta_article.url.clone()),
-                                        model: Some(LlmProvider::Claude.model_name().to_string()),
-                                        selected_by: Some(format!("{} ({})", LlmProvider::Claude.model_name(), beta_config.version())),
-                                        prompt_version: Some(beta_config.version().to_string()),
-                                        eval_score: None,
-                                    });
-                                    info!("Beta summary of beta article uploaded");
-                                }
-                                Err(e) => warn!(error = %e, "Failed to upload beta selection summary"),
-                            }
-                        }
-                        Err(e) => warn!(error = %e, "Failed to generate beta selection summary"),
-                    }
-                    }
-                } else {
-                    info!("Beta selected same article as prod, skipping duplicate summary");
+                    Ok(_) => warn!("V3 response missing required fields, skipping"),
+                    Err(e) => warn!(error = %e, "V3 response is not valid JSON, skipping"),
                 }
             }
-            Err(e) => warn!(error = %e, "Beta selection failed, skipping beta pipeline"),
+            Err(e) => warn!(error = %e, "V3 summary generation failed"),
         }
     } else {
-        info!("ANTHROPIC_API_KEY not set, skipping beta pipeline");
+        info!("Skipping V3: no Claude API key available");
     }
 
-    // --- Load user feedback for calibration ---
-    let feedback = load_recent_feedback(&gcs_client, &bucket_name).await;
-    let calibration_context = build_calibration_context(&feedback, &gcs_client, &bucket_name, &manifest).await;
+    // --- Build calibration context from already-loaded feedback ---
+    let calibration_context = build_calibration_context(&recent_feedback, &gcs_client, &bucket_name, &manifest).await;
 
     // --- Stage 4: Eval (dual pass with calibration) ---
     // Use Gemini as judge to avoid self-preference bias (Claude judging Claude summaries)
@@ -656,7 +679,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 ).await {
                     // Calibrated scores override uncalibrated
                     apply_eval_scores(&cal_json, &mut new_manifest_entries);
-                    log_calibration_agreement(&feedback, &cal_json, &new_manifest_entries);
+                    log_calibration_agreement(&recent_feedback, &cal_json, &new_manifest_entries);
                 }
             }
         }

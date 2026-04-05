@@ -22,4 +22,5 @@ gcloud-storage = { version = "1.3", features = ["auth"] }
 gcloud-auth = "1.3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+futures = "0.3"
 llm-client = { path = "../../libs/llm-client" }

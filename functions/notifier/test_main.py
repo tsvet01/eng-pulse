@@ -3,6 +3,7 @@
 These tests import and test the ACTUAL production functions from main.py
 to ensure tests catch any regressions in production code.
 """
+import json
 import pytest
 from main import (
     sanitize_html,
@@ -122,10 +123,15 @@ class TestFileFiltering:
         assert not should_process_file("config/sources.json")
         assert not should_process_file("other/2024-12-18.md")
 
-    def test_non_markdown_file(self):
-        """Test that non-markdown files are skipped."""
-        assert not should_process_file("summaries/data.json")
+    def test_non_markdown_non_json_file(self):
+        """Test that non-markdown, non-json files are skipped."""
         assert not should_process_file("summaries/image.png")
+        assert not should_process_file("summaries/data.csv")
+
+    def test_v3_json_file_accepted(self):
+        """Test that V3 JSON summary files are processed."""
+        assert should_process_file("summaries/v3/2026-04-01.json")
+        assert should_process_file("summaries/2026-04-01.json")
 
     def test_nested_path(self):
         """Test that nested paths in summaries/ are handled."""
@@ -191,6 +197,42 @@ class TestStripMarkdown:
         result = _strip_markdown(content)
         assert "#" not in result
         assert "The Real Title" in result
+
+
+def test_render_insight_brief_html():
+    from main import render_insight_brief_html
+    content = json.dumps({
+        "key_idea": "Test insight",
+        "why_it_matters": "Because reasons",
+        "what_to_change": "Try this",
+        "deep_dive": "## Details\n\nSome **bold** text.",
+        "meta": {"confidence": 0.9, "category": "general"}
+    })
+    html = render_insight_brief_html(content)
+    assert "KEY IDEA" in html
+    assert "Test insight" in html
+    assert "WHY IT MATTERS" in html
+    assert "WHAT TO CHANGE" in html
+    assert "Details" in html
+
+
+def test_render_insight_brief_html_no_action():
+    from main import render_insight_brief_html
+    content = json.dumps({
+        "key_idea": "Insight",
+        "why_it_matters": "Matters",
+        "what_to_change": None,
+        "deep_dive": "Deep content",
+    })
+    html = render_insight_brief_html(content)
+    assert "KEY IDEA" in html
+    assert "WHAT TO CHANGE" not in html
+
+
+def test_render_insight_brief_html_fallback():
+    from main import render_insight_brief_html
+    html = render_insight_brief_html("# Regular markdown\n\nSome text")
+    assert "Regular markdown" in html
 
 
 if __name__ == "__main__":
