@@ -138,7 +138,7 @@ class TTSService: ObservableObject {
         errorMessage = nil
 
         if isUsingLocalTTS, let localTTS = localTTS {
-            // Clean text off main thread for local TTS
+            state = .loading
             let textToClean = text
             Task {
                 let cleanedText = await Task.detached(priority: .userInitiated) {
@@ -146,9 +146,7 @@ class TTSService: ObservableObject {
                 }.value
                 self.currentText = cleanedText
                 localTTS.speak(text: cleanedText, rate: self.speechRate, pitch: self.pitch)
-                if localTTS.isPlaying {
-                    self.state = .playing
-                }
+                self.state = .playing
             }
         } else {
             guard cloudTTS != nil else {
