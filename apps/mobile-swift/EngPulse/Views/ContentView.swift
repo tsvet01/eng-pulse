@@ -39,11 +39,9 @@ struct ContentView: View {
 
     private func navigateToArticle(url: String) {
         guard !appState.summaries.isEmpty else { return }
+        UserDefaults.standard.removeObject(forKey: "pendingArticleUrl")
         if let summary = appState.summaries.first(where: { $0.url == url }) {
-            UserDefaults.standard.removeObject(forKey: "pendingArticleUrl")
-            DispatchQueue.main.async {
-                navigationPath.append(summary)
-            }
+            navigationPath.append(summary)
         }
     }
 }

@@ -33,8 +33,15 @@ struct EngPulseApp: App {
     }
 
     private func configureAppearance() {
+        let dark = Color.Dark.surface
+        let light = Color.Light.surface
+        let navBg = UIColor { traits in
+            traits.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light)
+        }
         let appearance = UINavigationBarAppearance()
-        appearance.configureWithDefaultBackground()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = navBg
+        appearance.shadowColor = .clear
         UINavigationBar.appearance().standardAppearance = appearance
         UINavigationBar.appearance().scrollEdgeAppearance = appearance
     }

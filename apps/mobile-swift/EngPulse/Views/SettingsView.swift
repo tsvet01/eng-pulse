@@ -72,10 +72,6 @@ struct SettingsView: View {
                         }
                     }
 
-                    Divider()
-                        .background(Color.outlineVariant)
-                        .padding(.vertical, 4)
-
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Prompt Version")
                             .font(.caption)
@@ -117,10 +113,6 @@ struct SettingsView: View {
                             .tint(.accentColor)
                     }
 
-                    Divider()
-                        .background(Color.outlineVariant)
-                        .padding(.vertical, 4)
-
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text("Voice Pitch")
@@ -161,10 +153,6 @@ struct SettingsView: View {
                     }
 
                     if notificationsEnabled {
-                        Divider()
-                            .background(Color.outlineVariant)
-                            .padding(.vertical, 4)
-
                         HStack {
                             Text("Delivery Time")
                                 .font(.subheadline)
@@ -212,10 +200,10 @@ struct SettingsView: View {
                             Text("Clear Cache")
                                 .font(.subheadline)
                                 .fontWeight(.medium)
-                                .foregroundColor(.white)
+                                .foregroundColor(Color.adaptive(dark: Color.Dark.onPrimary, light: .white))
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 8)
-                                .background(Color.red)
+                                .background(Color.tertiaryAccent)
                                 .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
@@ -251,7 +239,7 @@ struct SettingsView: View {
         .navigationBarTitleDisplayMode(.large)
         .task {
             loadReadCount()
-            loadCacheSize()
+            await loadCacheSize()
         }
         .alert("Clear Cache?", isPresented: $showClearCacheAlert) {
             Button("Cancel", role: .cancel) { }
@@ -283,31 +271,33 @@ struct SettingsView: View {
         pitch < 0.7 ? "Low" : pitch > 1.3 ? "High" : "Normal"
     }
 
-    private func loadCacheSize() {
-        guard let cachesURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
-            cacheSize = "Unknown"
-            return
-        }
-        let engPulseCache = cachesURL.appendingPathComponent("EngPulse")
-        guard let enumerator = FileManager.default.enumerator(
-            at: engPulseCache,
-            includingPropertiesForKeys: [.fileSizeKey],
-            options: [.skipsHiddenFiles]
-        ) else { cacheSize = "0 MB"; return }
-        var totalBytes: Int = 0
-        for case let fileURL as URL in enumerator {
-            if let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
-                totalBytes += size
+    private func loadCacheSize() async {
+        let size = await Task.detached(priority: .utility) {
+            guard let cachesURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+                return "Unknown"
             }
-        }
-        let mb = Double(totalBytes) / 1_048_576
-        cacheSize = String(format: "%.1f MB", mb)
+            let engPulseCache = cachesURL.appendingPathComponent("EngPulse")
+            guard let enumerator = FileManager.default.enumerator(
+                at: engPulseCache,
+                includingPropertiesForKeys: [.fileSizeKey],
+                options: [.skipsHiddenFiles]
+            ) else { return "0 MB" }
+            var totalBytes: Int = 0
+            for case let fileURL as URL in enumerator {
+                if let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                    totalBytes += size
+                }
+            }
+            let mb = Double(totalBytes) / 1_048_576
+            return String(format: "%.1f MB", mb)
+        }.value
+        cacheSize = size
     }
 
     private func clearCache() {
         Task {
             await appState.clearCache()
-            loadCacheSize()
+            await loadCacheSize()
         }
     }
 }

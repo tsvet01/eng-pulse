@@ -130,10 +130,11 @@ class TTSService: ObservableObject {
 
     /// Start speaking text, stopping any current playback first
     func startSpeaking(_ text: String, articleUrl: String? = nil, articleTitle: String? = nil) {
-        stop()
-
+        // Set new article before stopping to prevent bar flash during transition
         currentArticleUrl = articleUrl
         currentArticleTitle = articleTitle
+        stopPlayback()
+
         errorMessage = nil
 
         if isUsingLocalTTS, let localTTS = localTTS {
@@ -154,6 +155,7 @@ class TTSService: ObservableObject {
                 errorMessage = "Audio playback is not available. Please check app settings."
                 return
             }
+            state = .loading
             Task {
                 await performSpeak(text)
             }
@@ -255,7 +257,8 @@ class TTSService: ObservableObject {
         state = .playing
     }
 
-    func stop() {
+    /// Stop playback without clearing article identity (used by startSpeaking to avoid bar flash)
+    private func stopPlayback() {
         savePlaybackPosition()
         if isUsingLocalTTS {
             localTTS?.stop()
@@ -264,12 +267,16 @@ class TTSService: ObservableObject {
         }
         state = .stopped
         progress = 0.0
-        currentArticleUrl = nil
-        currentArticleTitle = nil
         currentText = nil
         currentCacheKey = nil
         errorMessage = nil
         NowPlayingService.shared.clearNowPlaying()
+    }
+
+    func stop() {
+        stopPlayback()
+        currentArticleUrl = nil
+        currentArticleTitle = nil
     }
 
     func togglePlayPause(_ text: String, articleUrl: String? = nil, articleTitle: String? = nil) {

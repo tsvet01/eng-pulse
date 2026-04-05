@@ -4,19 +4,25 @@ import SwiftUI
 
 struct ShimmerModifier: ViewModifier {
     @State private var phase: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         content
             .overlay(
-                LinearGradient(
-                    colors: [.clear, Color.onSurface.opacity(0.08), .clear],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-                .offset(x: phase)
-                .mask(content)
+                Group {
+                    if !reduceMotion {
+                        LinearGradient(
+                            colors: [.clear, Color.onSurface.opacity(0.08), .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .offset(x: phase)
+                        .mask(content)
+                    }
+                }
             )
             .onAppear {
+                guard !reduceMotion else { return }
                 withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
                     phase = 800
                 }
@@ -74,5 +80,6 @@ struct SkeletonFeedView: View {
             .padding(.top, 8)
         }
         .background(Color.surface)
+        .accessibilityLabel("Loading articles")
     }
 }

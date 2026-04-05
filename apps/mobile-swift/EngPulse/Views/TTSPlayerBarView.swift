@@ -8,12 +8,10 @@ struct TTSPlayerBarView: View {
     let title: String
     let currentTime: String
     let duration: String
-    let currentSpeed: Double
     let onToggle: () -> Void
     let onStop: () -> Void
     let onSkipBack: () -> Void
     let onSkipForward: () -> Void
-    let onSpeedChange: (Double) -> Void
 
     var body: some View {
         let hasSeek = !currentTime.isEmpty && !duration.isEmpty
@@ -52,6 +50,8 @@ struct TTSPlayerBarView: View {
                     Image(systemName: "gobackward.15")
                         .font(.title2)
                         .foregroundColor(.onSurface)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .disabled(isLoading)
                 .accessibilityLabel("Skip back 15 seconds")
@@ -60,6 +60,7 @@ struct TTSPlayerBarView: View {
                     if isLoading {
                         ProgressView()
                             .scaleEffect(0.9)
+                            .frame(width: 44, height: 44)
                     } else {
                         Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
                             .font(.system(size: 44))
@@ -73,29 +74,13 @@ struct TTSPlayerBarView: View {
                     Image(systemName: "goforward.15")
                         .font(.title2)
                         .foregroundColor(.onSurface)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .disabled(isLoading)
                 .accessibilityLabel("Skip forward 15 seconds")
 
                 Spacer()
-            }
-
-            // Speed pills row
-            HStack(spacing: 8) {
-                ForEach([0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
-                    Button {
-                        onSpeedChange(rate)
-                    } label: {
-                        Text(rate == 1.0 ? "1x" : String(format: "%.2gx", rate))
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .foregroundColor(currentSpeed == rate ? .accentColor : .onSurfaceVariant)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(currentSpeed == rate ? Color.accentColor.opacity(0.2) : Color.containerHigh)
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
             }
 
             // Title + stop
@@ -118,7 +103,7 @@ struct TTSPlayerBarView: View {
         .padding(.vertical, 12)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: .black.opacity(0.3), radius: 16, y: 8)
+        .shadow(color: Color.adaptive(dark: .black.opacity(0.3), light: .black.opacity(0.1)), radius: 16, y: 8)
         .padding(.horizontal, 12)
     }
 }

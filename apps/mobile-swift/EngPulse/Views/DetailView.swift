@@ -191,14 +191,10 @@ struct DetailView: View {
                         title: summary.title,
                         currentTime: ttsService.currentTimeFormatted,
                         duration: ttsService.durationFormatted,
-                        currentSpeed: ttsService.speechRate,
                         onToggle: { toggleTTS() },
                         onStop: { ttsService.stop() },
                         onSkipBack: { ttsService.skipBackward() },
-                        onSkipForward: { ttsService.skipForward() },
-                        onSpeedChange: { rate in
-                            ttsService.speechRate = rate
-                        }
+                        onSkipForward: { ttsService.skipForward() }
                     )
                 }
             }
@@ -315,6 +311,18 @@ struct DetailView: View {
         Group {
             if let brief = insightBrief {
                 InsightBriefView(brief: brief)
+            } else if summary.isInsightBrief {
+                // V3 article but JSON decode failed — show a fallback
+                VStack(spacing: 12) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.largeTitle)
+                        .foregroundColor(.onSurfaceVariant)
+                    Text("Unable to parse this brief")
+                        .font(.subheadline)
+                        .foregroundColor(.onSurfaceVariant)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
             } else {
                 MarkdownContentView(content: content)
                     .padding(.top, 4)
@@ -362,7 +370,7 @@ struct DetailView: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
     }
 
     private var loadingSection: some View {
@@ -412,7 +420,7 @@ struct DetailView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigationBarTrailing) {
             HStack(spacing: 12) {
-                if let pos = savedPosition, ttsService.state == .stopped || ttsService.currentArticleUrl != summary.url {
+                if let pos = savedPosition, (ttsService.state == .stopped || ttsService.currentArticleUrl != summary.url) {
                     Button {
                         toggleTTS()
                         savedPosition = nil
@@ -424,20 +432,18 @@ struct DetailView: View {
                     }
                 }
 
-                if fullContent != nil {
-                    Button {
-                        toggleTTS()
-                    } label: {
-                        if isLoadingTTS {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                        } else {
-                            Image(systemName: isPlaying ? "pause.fill" : (isPaused ? "play.fill" : "speaker.wave.2.fill"))
-                        }
+                Button {
+                    toggleTTS()
+                } label: {
+                    if isLoadingTTS {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: isPlaying ? "pause.fill" : (isPaused ? "play.fill" : "speaker.wave.2.fill"))
                     }
-                    .disabled(isLoadingTTS)
-                    .accessibilityLabel(isLoadingTTS ? "Generating audio" : (isPlaying ? "Pause audio" : (isPaused ? "Resume audio" : "Listen to summary")))
                 }
+                .disabled(fullContent == nil || isLoadingTTS)
+                .accessibilityLabel(isLoadingTTS ? "Generating audio" : (isPlaying ? "Pause audio" : (isPaused ? "Resume audio" : "Listen to summary")))
 
                 Button { showInfo = true } label: {
                     Image(systemName: "info.circle")

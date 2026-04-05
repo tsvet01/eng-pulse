@@ -14,12 +14,17 @@ struct TTSErrorBanner: View {
             Spacer()
             Button(action: onDismiss) {
                 Image(systemName: "xmark.circle.fill")
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.onSurfaceVariant)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .accessibilityLabel("Dismiss error")
         }
-        .padding()
+        .padding(.leading)
+        .padding(.vertical, 8)
         .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 12)
         .accessibilityElement(children: .combine)
     }
 }

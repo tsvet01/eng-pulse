@@ -80,15 +80,15 @@ class AudioPlayerService: NSObject, ObservableObject {
 
     private func startProgressTimer() {
         progressTimer?.invalidate()
-        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self = self,
-                      let player = self.audioPlayer,
-                      player.duration > 0 else { return }
+        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+            guard let self = self,
+                  let player = self.audioPlayer,
+                  player.duration > 0 else { return }
 
-                self.progress = player.currentTime / player.duration
-            }
+            self.progress = player.currentTime / player.duration
         }
+        RunLoop.main.add(timer, forMode: .common)
+        progressTimer = timer
     }
 
     private func stopProgressTimer() {
@@ -96,9 +96,6 @@ class AudioPlayerService: NSObject, ObservableObject {
         progressTimer = nil
     }
 
-    deinit {
-        progressTimer?.invalidate()
-    }
 }
 
 // MARK: - AVAudioPlayerDelegate
