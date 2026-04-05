@@ -182,7 +182,7 @@ struct DetailView: View {
                         onDismiss: { ttsService.stop() }
                     )
                 }
-                if ttsService.state != .stopped && ttsService.currentArticleUrl == summary.url {
+                if ttsService.currentArticleUrl == summary.url {
                     TTSPlayerBarView(
                         progress: ttsService.progress,
                         isPlaying: isPlaying,
