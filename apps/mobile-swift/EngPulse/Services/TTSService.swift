@@ -109,10 +109,10 @@ class TTSService: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] isPlaying in
                 guard let self = self else { return }
+                // Only react to playback finishing — not during loading/starting
                 if self.state == .playing && !isPlaying {
-                    self.state = .stopped
-                    self.currentArticleUrl = nil
-                } else if self.state == .paused && isPlaying {
+                    self.stop()
+                } else if isPlaying && (self.state == .paused || self.state == .loading) {
                     self.state = .playing
                 }
             }
@@ -146,7 +146,7 @@ class TTSService: ObservableObject {
                 }.value
                 self.currentText = cleanedText
                 localTTS.speak(text: cleanedText, rate: self.speechRate, pitch: self.pitch)
-                self.state = .playing
+                // state = .playing is set by the localTTS.$isPlaying observer
             }
         } else {
             guard cloudTTS != nil else {
