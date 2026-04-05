@@ -555,12 +555,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ok(response) => {
                 let json_str = response.trim();
                 // Strip markdown code fences if present
-                let clean_json = if json_str.starts_with("```") {
-                    json_str.lines()
-                        .skip(1)  // skip ```json
-                        .take_while(|line| !line.starts_with("```"))
-                        .collect::<Vec<_>>()
-                        .join("\n")
+                // Extract JSON: find first { and last } to handle preamble or code fences
+                let clean_json = if let (Some(start), Some(end)) = (json_str.find('{'), json_str.rfind('}')) {
+                    json_str[start..=end].to_string()
                 } else {
                     json_str.to_string()
                 };
@@ -580,8 +577,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         ).await {
                             Ok(_) => {
                                 let snippet = parsed["key_idea"].as_str().unwrap_or("").to_string();
-                                let snippet_truncated = if snippet.len() > SUMMARY_SNIPPET_CHARS {
-                                    format!("{}...", &snippet[..SUMMARY_SNIPPET_CHARS - 3])
+                                let snippet_truncated = if snippet.chars().count() > SUMMARY_SNIPPET_CHARS {
+                                    format!("{}...", snippet.chars().take(SUMMARY_SNIPPET_CHARS - 3).collect::<String>())
                                 } else {
                                     snippet
                                 };
@@ -593,7 +590,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                     summary_snippet: snippet_truncated,
                                     original_url: Some(best_article.url.clone()),
                                     model: Some(LlmProvider::Claude.model_name().to_string()),
-                                    selected_by: Some(selection_provider.display_name().to_string()),
+                                    selected_by: Some(selection_provider.model_name().to_string()),
                                     prompt_version: Some("v3".to_string()),
                                     eval_score: None,
                                     format: Some("insight-brief-v3".to_string()),

@@ -211,6 +211,10 @@ struct DetailView: View {
             savedPosition = ttsService.getSavedPosition(for: summary.url)
             await loadTask?.value
         }
+        .onDisappear {
+            loadTask?.cancel()
+            loadTask = nil
+        }
     }
 
     // MARK: - Metadata Badges

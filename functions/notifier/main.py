@@ -92,18 +92,18 @@ def render_insight_brief_html(content: str) -> str:
     parts = []
     parts.append('<div style="background:#f0f1f7;padding:16px;border-radius:12px;margin-bottom:16px">')
     parts.append('<p style="color:#5c607a;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px 0"><strong>KEY IDEA</strong></p>')
-    parts.append(f'<p style="font-size:18px;font-weight:600;margin:0;color:#1a1c2e">{brief["key_idea"]}</p>')
+    parts.append(f'<p style="font-size:18px;font-weight:600;margin:0;color:#1a1c2e">{bleach.clean(brief["key_idea"])}</p>')
     parts.append('</div>')
 
     parts.append('<div style="margin-bottom:16px">')
     parts.append('<p style="color:#5c607a;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px 0"><strong>WHY IT MATTERS</strong></p>')
-    parts.append(f'<p style="margin:0;color:#333">{brief["why_it_matters"]}</p>')
+    parts.append(f'<p style="margin:0;color:#333">{bleach.clean(brief["why_it_matters"])}</p>')
     parts.append('</div>')
 
     if brief.get("what_to_change"):
         parts.append('<div style="background:#fff3e0;padding:16px;border-radius:12px;margin-bottom:16px;border-left:4px solid #d97721">')
         parts.append('<p style="color:#d97721;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px 0"><strong>WHAT TO CHANGE</strong></p>')
-        parts.append(f'<p style="margin:0;color:#333">{brief["what_to_change"]}</p>')
+        parts.append(f'<p style="margin:0;color:#333">{bleach.clean(brief["what_to_change"])}</p>')
         parts.append('</div>')
 
     deep_dive_html = sanitize_html(brief["deep_dive"])
