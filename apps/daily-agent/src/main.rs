@@ -625,8 +625,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         }
 
-        if !eval_summaries.is_empty() {
-            let base_eval_prompt = String::from(
+        // Split summaries into V1 (markdown) and V3 (insight-brief) for separate eval rubrics
+        let (v1_summaries, v3_summaries): (Vec<_>, Vec<_>) = eval_summaries.iter().partition(|(id, _)| {
+            !new_manifest_entries.iter().any(|e| e.summary_id() == *id && e.format.as_deref() == Some("insight-brief-v3"))
+        });
+
+        // Eval V1 summaries with standard rubric
+        if !v1_summaries.is_empty() {
+            let v1_prompt = String::from(
                 "You are evaluating article summaries for quality. Score each summary on these criteria (1-5):\n\n\
                 1. Clarity: How easy is it to scan and understand on a mobile phone?\n\
                 2. Actionability: Does it provide concrete takeaways the reader can act on this week?\n\
@@ -637,28 +643,58 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 For each summary below, return ONLY a JSON object (no markdown fences):\n\
                 {\"scores\": [{\"summary_id\": \"id\", \"clarity\": N, \"actionability\": N, \"information_density\": N, \"faithfulness\": N, \"reasoning\": \"...\"}]}\n\n"
             );
-
-            let mut summaries_section = String::new();
-            for (id, content) in &eval_summaries {
-                summaries_section.push_str(&format!("--- Summary: {} ---\n{}\n\n", id, content));
+            let mut section = String::new();
+            for (id, content) in &v1_summaries {
+                section.push_str(&format!("--- Summary: {} ---\n{}\n\n", id, content));
             }
-
-            // Pass 1: Uncalibrated eval
-            let uncalibrated_prompt = format!("{}{}", base_eval_prompt, summaries_section);
             if let Some(json) = run_eval_pass(
-                &http_client, *eval_provider, eval_key, uncalibrated_prompt, &gcs_client, &bucket_name, &today, "eval"
+                &http_client, *eval_provider, eval_key, format!("{}{}", v1_prompt, section), &gcs_client, &bucket_name, &today, "eval"
             ).await {
                 apply_eval_scores(&json, &mut new_manifest_entries);
             }
+        }
 
-            // Pass 2: Calibrated eval (only if calibration context is available)
+        // Eval V3 summaries with insight-brief rubric
+        if !v3_summaries.is_empty() {
+            let v3_prompt = String::from(
+                "You are evaluating Insight Brief summaries for a senior engineering leader (C++/Rust, hedge fund, low-latency systems).\n\n\
+                Score each summary on these criteria (1-5 scale):\n\
+                1. key_idea_clarity: Is the key insight distilled into one clear, non-hedging sentence?\n\
+                2. why_it_matters_relevance: Does it connect to the reader's specific context?\n\
+                3. deep_dive_depth: Is the technical analysis substantive, with evidence and nuance?\n\
+                4. action_quality: If present, is the action concrete and genuinely useful? (Score 3 if no action item.)\n\n\
+                For each summary below, return ONLY a JSON object (no markdown fences):\n\
+                {\"scores\": [{\"summary_id\": \"id\", \"key_idea_clarity\": N, \"why_it_matters_relevance\": N, \"deep_dive_depth\": N, \"action_quality\": N, \"reasoning\": \"...\"}]}\n\n"
+            );
+            let mut section = String::new();
+            for (id, content) in &v3_summaries {
+                section.push_str(&format!("--- Summary: {} ---\n{}\n\n", id, content));
+            }
+            if let Some(json) = run_eval_pass(
+                &http_client, *eval_provider, eval_key, format!("{}{}", v3_prompt, section), &gcs_client, &bucket_name, &today, "eval-v3"
+            ).await {
+                apply_eval_scores(&json, &mut new_manifest_entries);
+            }
+        }
+
+        // Calibrated eval pass (V1 only — calibration feedback is based on V1 format)
+        if !v1_summaries.is_empty() {
             if let Some(ref cal_context) = calibration_context {
                 info!("Running calibrated eval pass");
-                let calibrated_prompt = format!("{}{}\n{}", base_eval_prompt, cal_context, summaries_section);
+                let v1_prompt = String::from(
+                    "You are evaluating article summaries for quality. Score each summary on these criteria (1-5):\n\n\
+                    1. Clarity\n2. Actionability\n3. Information density\n4. Faithfulness\n\n\
+                    The reader is a senior engineering leader. They have 2-3 minutes on their phone.\n\
+                    Return ONLY JSON: {\"scores\": [{\"summary_id\": \"id\", \"clarity\": N, \"actionability\": N, \"information_density\": N, \"faithfulness\": N, \"reasoning\": \"...\"}]}\n\n"
+                );
+                let mut section = String::new();
+                for (id, content) in &v1_summaries {
+                    section.push_str(&format!("--- Summary: {} ---\n{}\n\n", id, content));
+                }
+                let calibrated_prompt = format!("{}{}\n{}", v1_prompt, cal_context, section);
                 if let Some(cal_json) = run_eval_pass(
                     &http_client, *eval_provider, eval_key, calibrated_prompt, &gcs_client, &bucket_name, &today, "eval-calibrated"
                 ).await {
-                    // Calibrated scores override uncalibrated
                     apply_eval_scores(&cal_json, &mut new_manifest_entries);
                     log_calibration_agreement(&recent_feedback, &cal_json, &new_manifest_entries);
                 }

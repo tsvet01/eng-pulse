@@ -64,9 +64,7 @@ struct Summary: Identifiable, Codable, Equatable, Hashable {
             .components(separatedBy: ".").first?.capitalized ?? host
     }
 
-    static let betaVersion = "v2"
-
-    var isBeta: Bool { promptVersion == Self.betaVersion }
+    var isBeta: Bool { promptVersion != nil }
 
     var isInsightBrief: Bool {
         format == "insight-brief-v3"
