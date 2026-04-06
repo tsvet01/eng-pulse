@@ -27,17 +27,22 @@ class NowPlayingService {
         center.skipBackwardCommand.addTarget { _ in onSkipBackward(); return .success }
     }
 
-    func updateNowPlaying(title: String, progress: Double, duration: TimeInterval, currentTime: TimeInterval, isPlaying: Bool) {
-        var info = [String: Any]()
-        info[MPMediaItemPropertyTitle] = title
-        info[MPMediaItemPropertyArtist] = "Eng Pulse"
-        info[MPMediaItemPropertyPlaybackDuration] = duration
-        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
-        info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    private var nowPlayingInfo = [String: Any]()
+
+    func setTrack(title: String, duration: TimeInterval) {
+        nowPlayingInfo[MPMediaItemPropertyTitle] = title
+        nowPlayingInfo[MPMediaItemPropertyArtist] = "Eng Pulse"
+        nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = duration
+    }
+
+    func updateProgress(currentTime: TimeInterval, isPlaying: Bool) {
+        nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
     }
 
     func clearNowPlaying() {
+        nowPlayingInfo.removeAll()
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 }

@@ -241,19 +241,22 @@ struct DetailView: View {
 
     // MARK: - Content Loading
 
+    private func setContent(_ content: String) {
+        fullContent = content
+        if summary.isInsightBrief,
+           let data = content.data(using: .utf8),
+           let brief = try? JSONDecoder().decode(InsightBrief.self, from: data) {
+            insightBrief = brief
+        }
+    }
+
     private func loadFullContent() async {
         loadingError = nil
 
         // Phase 1: Show cached content instantly
         if let cacheService = cacheService,
            let cached = await cacheService.getCachedContent(for: summary.url) {
-            fullContent = cached
-            if summary.isInsightBrief,
-               let jsonData = cached.data(using: .utf8),
-               let brief = try? JSONDecoder().decode(InsightBrief.self, from: jsonData) {
-                insightBrief = brief
-            }
-            isLoadingContent = false
+            setContent(cached)
             return
         }
 
@@ -271,12 +274,7 @@ struct DetailView: View {
             request.timeoutInterval = 30
             let (data, _) = try await URLSession.shared.data(for: request)
             if let content = String(data: data, encoding: .utf8) {
-                fullContent = content
-                if summary.isInsightBrief,
-                   let jsonData = content.data(using: .utf8),
-                   let brief = try? JSONDecoder().decode(InsightBrief.self, from: jsonData) {
-                    insightBrief = brief
-                }
+                setContent(content)
                 if let cacheService = cacheService {
                     try? await cacheService.cacheContent(content, for: summary.url)
                 }
@@ -297,12 +295,6 @@ struct DetailView: View {
     private func toggleTTS() {
         guard let content = fullContent else { return }
         ttsService.togglePlayPause(content, articleUrl: summary.url, articleTitle: summary.title)
-    }
-
-    private func formatTime(_ seconds: TimeInterval) -> String {
-        let mins = Int(seconds) / 60
-        let secs = Int(seconds) % 60
-        return String(format: "%d:%02d", mins, secs)
     }
 
     // MARK: - Sections
@@ -425,7 +417,7 @@ struct DetailView: View {
                         toggleTTS()
                         savedPosition = nil
                     } label: {
-                        Text("Resume \(formatTime(pos))")
+                        Text("Resume \(pos.mmss)")
                             .font(.caption2)
                             .fontWeight(.medium)
                             .foregroundColor(.accentColor)

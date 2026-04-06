@@ -81,3 +81,13 @@ enum DesignTokens {
     static let cardPadding: CGFloat = 16
     static let sectionSpacing: CGFloat = 24
 }
+
+// MARK: - Time formatting
+extension TimeInterval {
+    /// Format as "M:SS" (e.g. "1:30", "12:05")
+    var mmss: String {
+        let mins = Int(self) / 60
+        let secs = Int(self) % 60
+        return String(format: "%d:%02d", mins, secs)
+    }
+}

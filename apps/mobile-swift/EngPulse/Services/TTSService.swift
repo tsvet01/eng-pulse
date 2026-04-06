@@ -65,36 +65,32 @@ class TTSService: ObservableObject {
         )
     }
 
+    private func handlePlaybackStateChange(_ isPlaying: Bool, clearPosition: Bool) {
+        if isPlaying {
+            state = .playing
+        } else if state == .playing {
+            if clearPosition, let url = currentArticleUrl { clearSavedPosition(for: url) }
+            state = .stopped
+            progress = 0
+            NowPlayingService.shared.clearNowPlaying()
+        }
+    }
+
     private func setupAudioPlayerObservers() {
-        // Forward audio player state
         audioPlayer.$isPlaying
+            .removeDuplicates()
             .receive(on: RunLoop.main)
-            .sink { [weak self] isPlaying in
-                guard let self = self else { return }
-                if isPlaying {
-                    self.state = .playing
-                } else if self.state == .playing {
-                    // Playback ended — keep URL so bar stays visible
-                    if let url = self.currentArticleUrl {
-                        self.clearSavedPosition(for: url)
-                    }
-                    self.state = .stopped
-                    self.progress = 0
-                    NowPlayingService.shared.clearNowPlaying()
-                }
-            }
+            .sink { [weak self] in self?.handlePlaybackStateChange($0, clearPosition: true) }
             .store(in: &cancellables)
 
         audioPlayer.$progress
             .receive(on: RunLoop.main)
-            .sink { [weak self] progress in
+            .sink { [weak self] newProgress in
                 guard let self = self else { return }
-                self.progress = progress
+                guard abs(self.progress - newProgress) > 0.001 else { return }
+                self.progress = newProgress
                 if self.state == .playing {
-                    NowPlayingService.shared.updateNowPlaying(
-                        title: self.currentArticleTitle ?? "Eng Pulse",
-                        progress: progress,
-                        duration: self.audioPlayer.duration,
+                    NowPlayingService.shared.updateProgress(
                         currentTime: self.audioPlayer.currentTime,
                         isPlaying: true
                     )
@@ -107,24 +103,16 @@ class TTSService: ObservableObject {
         guard let localTTS = localTTS else { return }
 
         localTTS.$isPlaying
+            .removeDuplicates()
             .receive(on: RunLoop.main)
-            .sink { [weak self] isPlaying in
-                guard let self = self else { return }
-                if isPlaying {
-                    self.state = .playing
-                } else if self.state == .playing {
-                    // Playback ended — update state but keep URL so bar stays visible
-                    self.state = .stopped
-                    self.progress = 0
-                    NowPlayingService.shared.clearNowPlaying()
-                }
-            }
+            .sink { [weak self] in self?.handlePlaybackStateChange($0, clearPosition: false) }
             .store(in: &cancellables)
 
         localTTS.$progress
             .receive(on: RunLoop.main)
-            .sink { [weak self] progress in
-                self?.progress = progress
+            .sink { [weak self] newProgress in
+                guard let self = self, abs(self.progress - newProgress) > 0.001 else { return }
+                self.progress = newProgress
             }
             .store(in: &cancellables)
     }
@@ -138,6 +126,7 @@ class TTSService: ObservableObject {
         stopPlayback()
 
         errorMessage = nil
+        NowPlayingService.shared.setTrack(title: articleTitle ?? "Eng Pulse", duration: 0)
 
         if isUsingLocalTTS, let localTTS = localTTS {
             state = .loading
@@ -166,7 +155,6 @@ class TTSService: ObservableObject {
         guard let cloudTTS = cloudTTS else { return }
 
         let expectedUrl = currentArticleUrl
-        state = .loading
 
         // Clean text off main actor
         let cleanedText = await Task.detached(priority: .userInitiated) {
@@ -238,13 +226,7 @@ class TTSService: ObservableObject {
             audioPlayer.pause()
         }
         state = .paused
-        NowPlayingService.shared.updateNowPlaying(
-            title: currentArticleTitle ?? "Eng Pulse",
-            progress: progress,
-            duration: audioPlayer.duration,
-            currentTime: audioPlayer.currentTime,
-            isPlaying: false
-        )
+        NowPlayingService.shared.updateProgress(currentTime: audioPlayer.currentTime, isPlaying: false)
     }
 
     func resume() {
@@ -274,6 +256,7 @@ class TTSService: ObservableObject {
     }
 
     func stop() {
+        if let url = currentArticleUrl { clearSavedPosition(for: url) }
         stopPlayback()
         currentArticleUrl = nil
         currentArticleTitle = nil
@@ -316,9 +299,7 @@ class TTSService: ObservableObject {
     }
 
     private func formatTime(_ seconds: TimeInterval) -> String {
-        let mins = Int(seconds) / 60
-        let secs = Int(seconds) % 60
-        return String(format: "%02d:%02d", mins, secs)
+        seconds.mmss
     }
 
     // MARK: - Resume Position

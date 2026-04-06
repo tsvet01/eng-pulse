@@ -1,3 +1,15 @@
+/// Prepend optional context blocks to a base prompt.
+fn inject_context(base: String, selection_context: Option<&str>, recent_picks: Option<&str>) -> String {
+    let mut prompt = base;
+    if let Some(ctx) = selection_context {
+        prompt = format!("{}\n\n{}", ctx, prompt);
+    }
+    if let Some(picks) = recent_picks {
+        prompt = format!("{}\n\n{}", picks, prompt);
+    }
+    prompt
+}
+
 /// Prompt configuration for article selection and summarization.
 /// V1 = production (current prompts). V2 = beta (persona-driven, structured). V3 = beta (persona-driven selection + structured JSON summary).
 pub enum PromptConfig {
@@ -59,15 +71,7 @@ impl PromptConfig {
         selection_context: Option<&str>,
         recent_picks: Option<&str>,
     ) -> String {
-        let base = self.shortlist_prompt(articles_text);
-        let mut prompt = base;
-        if let Some(ctx) = selection_context {
-            prompt = format!("{}\n\n{}", ctx, prompt);
-        }
-        if let Some(picks) = recent_picks {
-            prompt = format!("{}\n\n{}", picks, prompt);
-        }
-        prompt
+        inject_context(self.shortlist_prompt(articles_text), selection_context, recent_picks)
     }
 
     /// Build final selection prompt with optional context.
@@ -77,15 +81,7 @@ impl PromptConfig {
         selection_context: Option<&str>,
         recent_picks: Option<&str>,
     ) -> String {
-        let base = self.final_selection_prompt(candidates_text);
-        let mut prompt = base;
-        if let Some(ctx) = selection_context {
-            prompt = format!("{}\n\n{}", ctx, prompt);
-        }
-        if let Some(picks) = recent_picks {
-            prompt = format!("{}\n\n{}", picks, prompt);
-        }
-        prompt
+        inject_context(self.final_selection_prompt(candidates_text), selection_context, recent_picks)
     }
 
     fn v1_selection_prompt(&self, articles_text: &str) -> String {

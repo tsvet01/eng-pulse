@@ -96,6 +96,9 @@ class AudioPlayerService: NSObject, ObservableObject {
         progressTimer = nil
     }
 
+    deinit {
+        progressTimer?.invalidate()
+    }
 }
 
 // MARK: - AVAudioPlayerDelegate

@@ -9,7 +9,6 @@ class LocalTTSService: NSObject, ObservableObject {
     private let synthesizer = AVSpeechSynthesizer()
     private var currentTextLength: Int = 0
     private var sessionConfigured = false
-    private var generation: Int = 0
 
     @Published var isPlaying: Bool = false
     @Published var progress: Double = 0.0
@@ -38,7 +37,6 @@ class LocalTTSService: NSObject, ObservableObject {
 
     func speak(text: String, rate: Double, pitch: Double) {
         synthesizer.stopSpeaking(at: .immediate)
-        generation += 1  // Invalidate pending delegate callbacks from previous speech
         ensureAudioSession()
 
         let utterance = AVSpeechUtterance(string: text)
