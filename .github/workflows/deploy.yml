@@ -28,7 +28,7 @@ jobs:
     # Only deploy if CI passed (or manual trigger)
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Google Auth
       uses: google-github-actions/auth@v3
@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: deploy-agents
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Google Auth
       uses: google-github-actions/auth@v3
@@ -127,7 +127,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: deploy-agents
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Google Auth
       uses: google-github-actions/auth@v3
@@ -157,7 +157,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: deploy-agents
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Google Auth
       uses: google-github-actions/auth@v3
@@ -204,7 +204,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: deploy-agents
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Google Auth
       uses: google-github-actions/auth@v3
