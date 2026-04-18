@@ -19,6 +19,7 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 checkPendingArticle()
+                Task { await appState.refreshSummaries() }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .didReceiveArticleNotification)) { notification in

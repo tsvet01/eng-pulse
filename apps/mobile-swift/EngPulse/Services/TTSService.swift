@@ -121,9 +121,11 @@ class TTSService: ObservableObject {
 
     /// Start speaking text, stopping any current playback first
     func startSpeaking(_ text: String, articleUrl: String? = nil, articleTitle: String? = nil) {
+        // Stop first so the previous article's playback position is saved under its own URL,
+        // not the new article's URL.
+        stopPlayback()
         currentArticleUrl = articleUrl
         currentArticleTitle = articleTitle
-        stopPlayback()
 
         errorMessage = nil
         NowPlayingService.shared.setTrack(title: articleTitle ?? "Eng Pulse", duration: 0)
