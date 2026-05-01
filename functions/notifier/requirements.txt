@@ -4,7 +4,7 @@ google-cloud-firestore==2.26.0
 google-cloud-secret-manager==2.21.0
 google-auth==2.49.1
 requests==2.33.1
-markdown==3.5.2
+markdown==3.10.2
 bleach==6.3.0
 PyJWT==2.12.1
 cryptography==46.0.6
