@@ -18,6 +18,11 @@ env/
 .vscode/
 *.swp
 
+# Tool artifacts
+.superpowers/
+.serena/
+.claude/local/
+
 # Secrets & Local Config (IMPORTANT)
 .env
 *.env
