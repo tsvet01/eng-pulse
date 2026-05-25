@@ -17,7 +17,7 @@ pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.1-pro-preview";
 pub const DEFAULT_OPENAI_MODEL: &str = "gpt-5.2-2025-12-11";
 
 /// Default Claude model to use
-pub const DEFAULT_CLAUDE_MODEL: &str = "claude-opus-4-6";
+pub const DEFAULT_CLAUDE_MODEL: &str = "claude-opus-4-7";
 
 // Re-export for backwards compatibility
 pub const DEFAULT_MODEL: &str = DEFAULT_GEMINI_MODEL;
@@ -794,7 +794,7 @@ mod tests {
     #[test]
     fn test_claude_request_serialization() {
         let request = ClaudeRequest {
-            model: "claude-opus-4-6".to_string(),
+            model: "claude-opus-4-7".to_string(),
             max_tokens: 4096,
             system: None,
             messages: vec![ClaudeMessage {
@@ -805,7 +805,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&request).unwrap();
-        assert!(json.contains("claude-opus-4-6"));
+        assert!(json.contains("claude-opus-4-7"));
         assert!(json.contains("Hello, Claude!"));
         assert!(json.contains("4096"));
         assert!(json.contains("max_tokens"));

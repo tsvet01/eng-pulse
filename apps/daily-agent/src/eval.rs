@@ -259,7 +259,7 @@ mod tests {
         });
         let mut entries = vec![
             make_entry("summaries/gemini/2026-03-20.md", Some("gemini-3.1-pro-preview"), None),
-            make_entry("summaries/claude/2026-03-20.md", Some("claude-opus-4-6"), None),
+            make_entry("summaries/claude/2026-03-20.md", Some("claude-opus-4-7"), None),
         ];
 
         apply_eval_scores(&json, &mut entries);
