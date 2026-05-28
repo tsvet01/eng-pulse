@@ -180,6 +180,7 @@ pub async fn call_gemini_with_retry(
 fn is_transient_error(err: &str) -> bool {
     let transient_patterns = [
         "timeout",
+        "timed out",
         "connection",
         "rate limit",
         "408",  // Request Timeout
@@ -194,6 +195,30 @@ fn is_transient_error(err: &str) -> bool {
 
     let err_lower = err.to_lowercase();
     transient_patterns.iter().any(|p| err_lower.contains(p))
+}
+
+/// Decide whether a boxed error is transient (worth retrying).
+///
+/// reqwest errors are the tricky case: a timeout or connection failure
+/// stringifies via `Display` only as "error sending request for url (...)",
+/// with no transient keyword — the real cause lives in the source chain. So we
+/// (1) check the typed reqwest error directly, and (2) fall back to scanning the
+/// full source chain, not just the top-level message.
+fn is_transient_boxed(err: &(dyn std::error::Error + Send + Sync + 'static)) -> bool {
+    if let Some(re) = err.downcast_ref::<reqwest::Error>() {
+        if re.is_timeout() || re.is_connect() {
+            return true;
+        }
+    }
+
+    let mut message = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        message.push_str("; ");
+        message.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    is_transient_error(&message)
 }
 
 async fn call_gemini(client: &reqwest::Client, api_key: &str, text: String, options: &LlmOptions) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -501,7 +526,7 @@ pub async fn call_llm(
                 Ok(response) => Ok(response),
                 Err(e) => {
                     let err_str = e.to_string();
-                    if is_transient_error(&err_str) {
+                    if is_transient_boxed(e.as_ref()) {
                         warn!(error = %err_str, provider = %provider_name, "Transient error, retrying");
                         Err(backoff::Error::transient(e))
                     } else {
@@ -577,6 +602,49 @@ mod tests {
         assert!(!is_transient_error("HTTP 401 Unauthorized"));
         assert!(!is_transient_error("HTTP 403 Forbidden"));
         assert!(!is_transient_error("HTTP 404 Not Found"));
+    }
+
+    // An error whose own Display omits any transient keyword, but whose cause
+    // (in the source chain) is the real signal — mirrors reqwest's shape, where
+    // a timeout stringifies only as "error sending request for url (...)".
+    #[derive(Debug)]
+    struct WrappedRequestError {
+        cause: Box<dyn std::error::Error + Send + Sync>,
+    }
+    impl std::fmt::Display for WrappedRequestError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "error sending request for url (https://example.com)")
+        }
+    }
+    impl std::error::Error for WrappedRequestError {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(self.cause.as_ref())
+        }
+    }
+
+    #[test]
+    fn test_transient_detected_via_source_chain() {
+        // Regression: a reqwest-shaped timeout error is NOT transient by its
+        // top-level message alone (this is the bug that killed the explorer job).
+        assert!(!is_transient_error("error sending request for url (https://example.com)"));
+        // Walking the source chain must surface the real cause and retry.
+        let err: Box<dyn std::error::Error + Send + Sync> = Box::new(WrappedRequestError {
+            cause: "operation timed out".into(),
+        });
+        assert!(is_transient_boxed(err.as_ref()));
+    }
+
+    #[tokio::test]
+    async fn test_reqwest_connection_error_is_transient() {
+        // A real reqwest connection failure (refused on a closed local port) must
+        // be classified transient so the retry loop engages.
+        let err = reqwest::Client::new()
+            .get("http://127.0.0.1:1/")
+            .send()
+            .await
+            .unwrap_err();
+        let boxed: Box<dyn std::error::Error + Send + Sync> = Box::new(err);
+        assert!(is_transient_boxed(boxed.as_ref()));
     }
 
     #[test]
