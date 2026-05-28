@@ -57,6 +57,17 @@ void main() {
         expect(LlmModel.fromId('claude'), LlmModel.claude);
       });
 
+      test('maps any vendor-prefixed id to its model so new versions are recognized', () {
+        expect(LlmModel.fromId('claude-opus-4-8'), LlmModel.claude);
+        expect(LlmModel.fromId('claude-opus-4-9'), LlmModel.claude);
+        expect(LlmModel.fromId('gemini-4.0-pro'), LlmModel.gemini);
+      });
+
+      test('maps model-family-prefixed ids whose family differs from vendor name', () {
+        // OpenAI's vendor is "openai" but its model ids are "gpt-*".
+        expect(LlmModel.fromId('gpt-6'), LlmModel.openai);
+      });
+
       test('returns gemini as default for null', () {
         expect(LlmModel.fromId(null), LlmModel.gemini);
       });

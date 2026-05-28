@@ -44,7 +44,7 @@ class Summary {
 enum LlmModel {
   gemini('gemini-3.1-pro-preview', 'Gemini'),
   openai('gpt-5.2-2025-12-11', 'OpenAI'),
-  claude('claude-opus-4-6', 'Claude');
+  claude('claude-opus-4-8', 'Claude');
 
   final String id;
   final String displayName;
@@ -65,16 +65,26 @@ enum LlmModel {
   static LlmModel fromId(String? id) {
     if (id == null) return LlmModel.gemini;
 
-    // Match by exact model ID or vendor name (backwards compat)
+    // Match by exact model ID, vendor name, or vendor prefix (backwards compat)
     return LlmModel.values.firstWhere(
-      (m) => m.id == id || m.vendor == id,
+      (m) => m.matchesId(id),
       orElse: () => LlmModel.gemini,
     );
   }
 
-  /// Check if this model matches a given model string (by ID or vendor)
+  /// Check if this model matches a given model string.
+  ///
+  /// Matches by exact ID, vendor name, vendor prefix (e.g. `claude-opus-4-8`
+  /// matches the `claude` vendor), or model-family prefix taken from the
+  /// canonical ID (e.g. `gpt-6` matches OpenAI, whose vendor name is `openai`
+  /// but whose IDs are `gpt-*`). This lets new model versions be recognized
+  /// without a client update.
   bool matchesId(String? modelStr) {
     if (modelStr == null) return false;
-    return modelStr == id || modelStr == vendor;
+    final family = id.split('-').first;
+    return modelStr == id ||
+        modelStr == vendor ||
+        modelStr.startsWith('$vendor-') ||
+        modelStr.startsWith('$family-');
   }
 }
