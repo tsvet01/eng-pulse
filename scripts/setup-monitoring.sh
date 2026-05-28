@@ -256,8 +256,63 @@ EOF
         echo "Missing summary alert already exists"
     fi
 
+    # Alert: Agent Fatal Error (log-based, includes the error message)
+    #
+    # The metric-based "Job Failed" alerts above tell you THAT a job failed but
+    # not WHY. This log-based alert matches the fatal "Error: ..." line the agents
+    # print on crash and embeds the actual error text in the notification (e.g.
+    # "Claude API returned 400 ... temperature is deprecated"), so triage doesn't
+    # require opening Cloud Logging.
+    echo "Creating agent fatal-error (detailed) alert..."
+    cat > /tmp/agent-error-alert.json << 'EOF'
+{
+  "displayName": "Agent Fatal Error (with details)",
+  "documentation": {
+    "content": "Agent **${log.extracted_label.job_name}** logged a fatal error:\n\n    ${log.extracted_label.error_detail}\n\nThe daily/explorer run most likely failed. Open Cloud Logging for the full stack and surrounding context:\nhttps://console.cloud.google.com/logs/query?project=__PROJECT_ID__",
+    "mimeType": "text/markdown"
+  },
+  "conditions": [
+    {
+      "displayName": "Agent logged a fatal error",
+      "conditionMatchedLog": {
+        "filter": "resource.type=\"cloud_run_job\" AND (resource.labels.job_name=\"se-daily-agent-job\" OR resource.labels.job_name=\"se-explorer-agent-job\") AND textPayload:\"Error:\"",
+        "labelExtractors": {
+          "error_detail": "EXTRACT(textPayload)",
+          "job_name": "EXTRACT(resource.labels.job_name)"
+        }
+      }
+    }
+  ],
+  "combiner": "OR",
+  "enabled": true,
+  "alertStrategy": {
+    "notificationRateLimit": {
+      "period": "300s"
+    },
+    "autoClose": "604800s"
+  }
+}
+EOF
+
+    # Quoted heredoc preserves the ${log.extracted_label.*} Monitoring template
+    # vars verbatim; expand only our own project-id placeholder.
+    sed -i.bak "s|__PROJECT_ID__|$PROJECT_ID|g" /tmp/agent-error-alert.json && rm -f /tmp/agent-error-alert.json.bak
+
+    EXISTING_ALERT=$(gcloud alpha monitoring policies list \
+        --filter="displayName='Agent Fatal Error (with details)'" \
+        --format="value(name)" 2>/dev/null | head -1 || true)
+
+    if [ -z "$EXISTING_ALERT" ]; then
+        gcloud alpha monitoring policies create \
+            --policy-from-file=/tmp/agent-error-alert.json \
+            $CHANNELS_FLAG 2>/dev/null || echo "Note: Alert creation requires additional permissions"
+    else
+        echo "Agent fatal-error alert already exists"
+    fi
+
     rm -f /tmp/daily-agent-alert.json /tmp/explorer-agent-alert.json \
-          /tmp/notifier-alert.json /tmp/missing-summary-alert.json
+          /tmp/notifier-alert.json /tmp/missing-summary-alert.json \
+          /tmp/agent-error-alert.json
 }
 
 # ============================================

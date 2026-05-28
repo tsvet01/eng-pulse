@@ -15,7 +15,7 @@ use std::time::Duration as StdDuration;
 use llm_client::{call_llm_with_retry, init_logging, SourceConfig, SourceType, extract_domain, DEFAULT_BUCKET, LlmProvider};
 
 // --- Configuration Constants ---
-const HTTP_TIMEOUT_SECS: u64 = 30;
+const HTTP_TIMEOUT_SECS: u64 = 60;
 const FRESHNESS_DAYS: i64 = 90;
 const MAX_FEED_DISCOVERY_ATTEMPTS: usize = 2;
 
@@ -24,9 +24,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     dotenvy::dotenv().ok();
     init_logging();
 
-    let api_key = std::env::var("GEMINI_API_KEY").map_err(|_| {
-        error!("GEMINI_API_KEY environment variable not set");
-        "GEMINI_API_KEY environment variable not set"
+    let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
+        error!("ANTHROPIC_API_KEY environment variable not set");
+        "ANTHROPIC_API_KEY environment variable not set"
     })?;
     let bucket_name = std::env::var("GCS_BUCKET").unwrap_or_else(|_| DEFAULT_BUCKET.to_string());
 
@@ -108,10 +108,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Err(e) => error!(error = %e, "Error downloading user_candidates.json"),
     }
 
-    // 4. Discover new sources via Gemini (always runs, complements user candidates)
+    // 4. Discover new sources via Opus (always runs, complements user candidates)
     {
-        info!("Asking Gemini for new recommendations (Explorer mode)");
-        let existing_names_for_gemini: HashSet<String> = all_sources.iter().map(|s| s.name.clone()).collect();
+        info!("Asking Opus for new recommendations (Explorer mode)");
+        let existing_names: HashSet<String> = all_sources.iter().map(|s| s.name.clone()).collect();
         let json_example = r#"[{"name": "Netflix TechBlog", "url": "https://netflixtechblog.com/feed"}]"#;
         let prompt = format!(
             r#"You are discovering technical blogs for a senior engineering leader at a hedge fund who works on developer platforms, low-latency systems (C++/Rust), and AI tooling.
@@ -128,12 +128,12 @@ Avoid: news aggregators, product marketing blogs, beginner tutorial sites.
 
 Return ONLY a valid JSON array: {}
 Do not wrap in markdown fences."#,
-            existing_names_for_gemini, json_example
+            existing_names, json_example
         );
 
-        let response_text = call_llm_with_retry(&http_client, LlmProvider::Gemini, &api_key, prompt).await?;
+        let response_text = call_llm_with_retry(&http_client, LlmProvider::Claude, &api_key, prompt).await?;
 
-        let clean_json = clean_gemini_json(&response_text);
+        let clean_json = clean_llm_json(&response_text);
 
         #[derive(Deserialize)]
         struct Recommendation {
@@ -144,17 +144,17 @@ Do not wrap in markdown fences."#,
         let recommendations: Vec<Recommendation> = match serde_json::from_str(clean_json) {
             Ok(recs) => recs,
             Err(e) => {
-                warn!(error = %e, raw_response = %clean_json, "Failed to parse Gemini JSON");
+                warn!(error = %e, raw_response = %clean_json, "Failed to parse Opus JSON");
                 Vec::new()
             }
         };
 
-        info!(count = recommendations.len(), "Gemini recommended new sources");
+        info!(count = recommendations.len(), "Opus recommended new sources");
 
         for rec in recommendations {
             let temp_source = SourceConfig { name: rec.name.clone(), source_type: SourceType::Rss, url: rec.url.clone() };
             if !all_sources.contains(&temp_source) {
-                info!(name = %rec.name, url = %rec.url, "Investigating Gemini recommendation");
+                info!(name = %rec.name, url = %rec.url, "Investigating recommendation");
                 match discover_and_validate_feed(&http_client, &api_key, &rec.url, &rec.name).await {
                     Ok(Some(validated_source)) => {
                         if !all_sources.contains(&validated_source) {
@@ -169,10 +169,10 @@ Do not wrap in markdown fences."#,
                         }
                     },
                     Ok(None) => debug!(name = %rec.name, "Invalid or irrelevant, skipping"),
-                    Err(e) => warn!(name = %rec.name, error = %e, "Error processing Gemini recommendation"),
+                    Err(e) => warn!(name = %rec.name, error = %e, "Error processing recommendation"),
                 }
             } else {
-                debug!(name = %rec.name, "Gemini recommendation already exists, skipping");
+                debug!(name = %rec.name, "Recommendation already exists, skipping");
             }
         }
     }
@@ -273,7 +273,7 @@ async fn discover_and_validate_feed(client: &reqwest::Client, api_key: &str, url
 
         if is_feed_content_type
             && (is_rss || is_atom)
-            && is_relevant_with_gemini(client, api_key, name, &final_url_str, &text).await?
+            && is_relevant_with_llm(client, api_key, name, &final_url_str, &text).await?
         {
             let feed_type = if is_atom { SourceType::Atom } else { SourceType::Rss };
             return Ok(Some(SourceConfig { name: name.to_string(), source_type: feed_type, url: final_url_str }));
@@ -299,7 +299,7 @@ async fn discover_and_validate_feed(client: &reqwest::Client, api_key: &str, url
                         } else {
                             SourceType::Rss
                         };
-                        if is_relevant_with_gemini(client, api_key, name, &resolved_url_str, &sample).await.unwrap_or(false) {
+                        if is_relevant_with_llm(client, api_key, name, &resolved_url_str, &sample).await.unwrap_or(false) {
                             return Ok(Some(SourceConfig { name: name.to_string(), source_type: feed_type, url: resolved_url_str }));
                         }
                     }
@@ -335,7 +335,7 @@ async fn discover_and_validate_feed(client: &reqwest::Client, api_key: &str, url
                     let is_atom = atom_syndication::Feed::read_from(feed_text.as_bytes()).is_ok();
                     if is_rss || is_atom {
                         let sample: String = feed_text.chars().take(2000).collect();
-                        if is_relevant_with_gemini(client, api_key, name, &candidate_url_str, &sample).await.unwrap_or(false) {
+                        if is_relevant_with_llm(client, api_key, name, &candidate_url_str, &sample).await.unwrap_or(false) {
                             let feed_type = if is_atom { SourceType::Atom } else { SourceType::Rss };
                             return Ok(Some(SourceConfig { name: name.to_string(), source_type: feed_type, url: candidate_url_str }));
                         }
@@ -380,7 +380,7 @@ async fn fetch_latest_pub_date(client: &reqwest::Client, feed_url: &str) -> Resu
 }
 
 #[instrument(skip(client, api_key, content_sample), fields(source_name = %name))]
-async fn is_relevant_with_gemini(client: &reqwest::Client, api_key: &str, name: &str, url: &str, content_sample: &str) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+async fn is_relevant_with_llm(client: &reqwest::Client, api_key: &str, name: &str, url: &str, content_sample: &str) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
     let content_context = if content_sample.is_empty() {
         "No content sample available — judge by name and URL only.".to_string()
     } else {
@@ -391,12 +391,12 @@ async fn is_relevant_with_gemini(client: &reqwest::Client, api_key: &str, name: 
         name, url, content_context
     );
 
-    let response = call_llm_with_retry(client, LlmProvider::Gemini, api_key, prompt).await?;
+    let response = call_llm_with_retry(client, LlmProvider::Claude, api_key, prompt).await?;
     Ok(response.trim().to_lowercase().starts_with("yes"))
 }
 
-/// Clean Gemini JSON response by removing markdown code fences
-fn clean_gemini_json(response: &str) -> &str {
+/// Clean an LLM JSON response by removing markdown code fences
+fn clean_llm_json(response: &str) -> &str {
     response.trim()
         .trim_start_matches("```json")
         .trim_start_matches("```")
@@ -410,27 +410,27 @@ mod tests {
     use chrono::Datelike;
 
     #[test]
-    fn test_clean_gemini_json_with_fences() {
+    fn test_clean_llm_json_with_fences() {
         let input = r#"```json
 [{"name": "Test", "url": "https://example.com"}]
 ```"#;
         let expected = r#"[{"name": "Test", "url": "https://example.com"}]"#;
-        assert_eq!(clean_gemini_json(input), expected);
+        assert_eq!(clean_llm_json(input), expected);
     }
 
     #[test]
-    fn test_clean_gemini_json_plain() {
+    fn test_clean_llm_json_plain() {
         let input = r#"[{"name": "Test", "url": "https://example.com"}]"#;
-        assert_eq!(clean_gemini_json(input), input);
+        assert_eq!(clean_llm_json(input), input);
     }
 
     #[test]
-    fn test_clean_gemini_json_with_extra_whitespace() {
+    fn test_clean_llm_json_with_extra_whitespace() {
         let input = r#"  ```json
 [{"name": "Test"}]
 ```  "#;
         let expected = r#"[{"name": "Test"}]"#;
-        assert_eq!(clean_gemini_json(input), expected);
+        assert_eq!(clean_llm_json(input), expected);
     }
 
     #[test]
@@ -490,28 +490,28 @@ mod tests {
     }
 
     #[test]
-    fn test_clean_gemini_json_empty_string() {
-        assert_eq!(clean_gemini_json(""), "");
+    fn test_clean_llm_json_empty_string() {
+        assert_eq!(clean_llm_json(""), "");
     }
 
     #[test]
-    fn test_clean_gemini_json_only_fences() {
-        assert_eq!(clean_gemini_json("```json\n```"), "");
+    fn test_clean_llm_json_only_fences() {
+        assert_eq!(clean_llm_json("```json\n```"), "");
     }
 
     #[test]
-    fn test_clean_gemini_json_generic_code_fence() {
+    fn test_clean_llm_json_generic_code_fence() {
         let input = "```\n{\"key\": \"value\"}\n```";
-        assert_eq!(clean_gemini_json(input), "{\"key\": \"value\"}");
+        assert_eq!(clean_llm_json(input), "{\"key\": \"value\"}");
     }
 
     #[test]
-    fn test_clean_gemini_json_nested_content() {
+    fn test_clean_llm_json_nested_content() {
         let input = r#"```json
 {"sources": [{"name": "Blog", "url": "https://example.com"}]}
 ```"#;
         let expected = r#"{"sources": [{"name": "Blog", "url": "https://example.com"}]}"#;
-        assert_eq!(clean_gemini_json(input), expected);
+        assert_eq!(clean_llm_json(input), expected);
     }
 
     #[test]
