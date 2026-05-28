@@ -17,7 +17,7 @@ pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.1-pro-preview";
 pub const DEFAULT_OPENAI_MODEL: &str = "gpt-5.2-2025-12-11";
 
 /// Default Claude model to use
-pub const DEFAULT_CLAUDE_MODEL: &str = "claude-opus-4-7";
+pub const DEFAULT_CLAUDE_MODEL: &str = "claude-opus-4-8";
 
 // Re-export for backwards compatibility
 pub const DEFAULT_MODEL: &str = DEFAULT_GEMINI_MODEL;
@@ -364,8 +364,6 @@ struct ClaudeRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<String>,
     messages: Vec<ClaudeMessage>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    temperature: Option<f32>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -393,14 +391,14 @@ pub async fn call_claude_with_retry(
     call_llm_with_retry(client, LlmProvider::Claude, api_key, prompt).await
 }
 
-async fn call_claude(client: &reqwest::Client, api_key: &str, text: String, options: &LlmOptions) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let model = std::env::var("CLAUDE_MODEL").unwrap_or_else(|_| DEFAULT_CLAUDE_MODEL.to_string());
-
-    // Allow overriding base URL for testing
-    let base_url = std::env::var("CLAUDE_BASE_URL")
-        .unwrap_or_else(|_| "https://api.anthropic.com/v1".to_string());
-
-    let request = ClaudeRequest {
+/// Build a Claude API request body.
+///
+/// `temperature` is intentionally NOT included: Opus 4.7+ deprecated the
+/// parameter and the API returns a 400 invalid_request_error if it is sent.
+/// `LlmOptions.temperature` is retained only for providers that still accept it
+/// (Gemini).
+fn build_claude_request(model: String, text: String, options: &LlmOptions) -> ClaudeRequest {
+    ClaudeRequest {
         model,
         max_tokens: 4096,
         system: options.system.clone(),
@@ -408,8 +406,17 @@ async fn call_claude(client: &reqwest::Client, api_key: &str, text: String, opti
             role: "user".to_string(),
             content: text,
         }],
-        temperature: options.temperature,
-    };
+    }
+}
+
+async fn call_claude(client: &reqwest::Client, api_key: &str, text: String, options: &LlmOptions) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let model = std::env::var("CLAUDE_MODEL").unwrap_or_else(|_| DEFAULT_CLAUDE_MODEL.to_string());
+
+    // Allow overriding base URL for testing
+    let base_url = std::env::var("CLAUDE_BASE_URL")
+        .unwrap_or_else(|_| "https://api.anthropic.com/v1".to_string());
+
+    let request = build_claude_request(model, text, options);
 
     debug!("Sending request to Claude API");
 
@@ -794,24 +801,34 @@ mod tests {
     #[test]
     fn test_claude_request_serialization() {
         let request = ClaudeRequest {
-            model: "claude-opus-4-7".to_string(),
+            model: "claude-opus-4-8".to_string(),
             max_tokens: 4096,
             system: None,
             messages: vec![ClaudeMessage {
                 role: "user".to_string(),
                 content: "Hello, Claude!".to_string(),
             }],
-            temperature: None,
         };
 
         let json = serde_json::to_string(&request).unwrap();
-        assert!(json.contains("claude-opus-4-7"));
+        assert!(json.contains("claude-opus-4-8"));
         assert!(json.contains("Hello, Claude!"));
         assert!(json.contains("4096"));
         assert!(json.contains("max_tokens"));
         // system and temperature should be omitted when None
         assert!(!json.contains("system"));
         assert!(!json.contains("temperature"));
+    }
+
+    #[test]
+    fn test_claude_request_never_sends_temperature() {
+        // Regression: Opus 4.7+ deprecated `temperature` and rejects it with a
+        // 400 invalid_request_error. It must NEVER be serialized for Claude, even
+        // when a caller sets one (e.g. eval passes Some(0.3)).
+        let options = LlmOptions { temperature: Some(0.3), system: None };
+        let request = build_claude_request("claude-opus-4-8".to_string(), "Hi".to_string(), &options);
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(!json.contains("temperature"), "temperature must not be sent to Claude, got: {json}");
     }
 
     #[test]

@@ -73,19 +73,19 @@ mod tests {
 
     #[test]
     fn test_summary_id_v1_claude() {
-        let entry = make_entry("summaries/claude/2026-03-20.md", Some("claude-opus-4-7"), None);
+        let entry = make_entry("summaries/claude/2026-03-20.md", Some("claude-opus-4-8"), None);
         assert_eq!(entry.summary_id(), "v1-claude");
     }
 
     #[test]
     fn test_summary_id_v2_beta() {
-        let entry = make_entry("summaries/beta/claude/2026-03-20.md", Some("claude-opus-4-7"), Some("v2"));
+        let entry = make_entry("summaries/beta/claude/2026-03-20.md", Some("claude-opus-4-8"), Some("v2"));
         assert_eq!(entry.summary_id(), "v2-claude");
     }
 
     #[test]
     fn test_summary_id_v2_selection() {
-        let entry = make_entry("summaries/beta/claude/2026-03-20-selection.md", Some("claude-opus-4-7"), Some("v2"));
+        let entry = make_entry("summaries/beta/claude/2026-03-20-selection.md", Some("claude-opus-4-8"), Some("v2"));
         assert_eq!(entry.summary_id(), "v2-claude-selection");
     }
 
