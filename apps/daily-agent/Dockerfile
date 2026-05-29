@@ -59,4 +59,6 @@ COPY --from=builder /app/apps/daily-agent/target/release/se-daily-agent /usr/loc
 # Switch to non-root user
 USER appuser
 
-CMD ["se-daily-agent"]
+# ENTRYPOINT (not CMD) so `gcloud run jobs execute --args=...` appends to the
+# binary invocation (e.g. --smoke, --date) instead of replacing the command.
+ENTRYPOINT ["se-daily-agent"]
