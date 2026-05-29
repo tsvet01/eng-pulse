@@ -66,6 +66,19 @@ jobs:
           --set-secrets GEMINI_API_KEY=gemini-api-key:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest \
           --task-timeout 5m
 
+    # Smoke test: run one real LLM call per provider against the just-deployed
+    # image. Catches API/model contract breakage (e.g. a deprecated parameter or
+    # bad model id) NOW, instead of silently on the next 06:00 UTC run. --wait
+    # makes a failed execution fail the deploy. The agent's --smoke mode does no
+    # GCS or notification side effects.
+    - name: Smoke test Daily Agent (real LLM call per provider)
+      run: |
+        gcloud run jobs execute se-daily-agent-job \
+          --region ${{ env.REGION }} \
+          --project ${{ env.PROJECT_ID }} \
+          --args=--smoke \
+          --wait
+
     # --- Explorer Agent ---
     - name: Build & Push Explorer Agent (Cloud Build)
       run: |

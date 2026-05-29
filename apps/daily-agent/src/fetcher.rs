@@ -19,8 +19,42 @@ pub struct Article {
     pub title: String,
     pub url: String,
     pub source: String,
-    #[allow(dead_code)] // Reserved for future filtering by date
+    /// Populated for every article; the publish-date filtering is applied at
+    /// fetch time (see `FetchWindow`), so the stored value itself is currently
+    /// unread outside this module.
+    #[allow(dead_code)]
     pub published_at: DateTime<Utc>,
+}
+
+/// Time window used to filter fetched articles by their publish date.
+///
+/// Normal daily runs keep articles from the last 24 hours (no upper bound).
+/// Backfill runs (`--date`) restrict to a single UTC calendar day, so an article
+/// is matched only if it was *actually* published that day — never fabricated
+/// from whatever the feed currently holds.
+#[derive(Debug, Clone, Copy)]
+pub struct FetchWindow {
+    pub start: DateTime<Utc>,
+    /// Exclusive upper bound. `None` means "everything since `start`".
+    pub end: Option<DateTime<Utc>>,
+}
+
+impl FetchWindow {
+    /// Articles published within the last 24 hours (default daily behavior).
+    pub fn last_24h() -> Self {
+        FetchWindow { start: Utc::now() - Duration::hours(24), end: None }
+    }
+
+    /// A single UTC calendar day `[date 00:00, date+1 00:00)` — used for backfill.
+    pub fn day(date: chrono::NaiveDate) -> Self {
+        let start = date.and_hms_opt(0, 0, 0).expect("valid midnight").and_utc();
+        FetchWindow { start, end: Some(start + Duration::hours(24)) }
+    }
+
+    /// True if `ts` falls within this window.
+    pub fn contains(&self, ts: DateTime<Utc>) -> bool {
+        ts >= self.start && self.end.is_none_or(|end| ts < end)
+    }
 }
 
 // Hacker News Item Struct
@@ -41,11 +75,11 @@ pub fn create_http_client() -> Result<reqwest::Client, Box<dyn Error + Send + Sy
         .map_err(|e| e.into())
 }
 
-pub async fn fetch_from_source(source: &SourceConfig, client: &reqwest::Client) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
+pub async fn fetch_from_source(source: &SourceConfig, client: &reqwest::Client, window: FetchWindow) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
     match source.source_type {
-        SourceType::Rss => fetch_rss(source, client).await,
-        SourceType::Atom => fetch_atom(source, client).await,
-        SourceType::HackerNews => fetch_hackernews(source, client).await,
+        SourceType::Rss => fetch_rss(source, client, window).await,
+        SourceType::Atom => fetch_atom(source, client, window).await,
+        SourceType::HackerNews => fetch_hackernews(source, client, window).await,
     }
 }
 
@@ -69,12 +103,11 @@ fn parse_rss_date(date_str: &str) -> Option<DateTime<Utc>> {
     None
 }
 
-async fn fetch_rss(source: &SourceConfig, client: &reqwest::Client) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
+async fn fetch_rss(source: &SourceConfig, client: &reqwest::Client, window: FetchWindow) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
     let content = client.get(&source.url).send().await?.bytes().await?;
     let channel = Channel::read_from(&content[..])?;
 
     let mut articles = Vec::new();
-    let yesterday = Utc::now() - Duration::hours(24);
     let mut skipped_dates = 0;
 
     for item in channel.items().iter().take(MAX_ITEMS_PER_SOURCE) {
@@ -88,8 +121,7 @@ async fn fetch_rss(source: &SourceConfig, client: &reqwest::Client) -> Result<Ve
                 }
             };
 
-            // Use >= to include articles from exactly 24 hours ago
-            if parsed_date >= yesterday {
+            if window.contains(parsed_date) {
                 articles.push(Article {
                     title: title.to_string(),
                     url: link.to_string(),
@@ -108,12 +140,11 @@ async fn fetch_rss(source: &SourceConfig, client: &reqwest::Client) -> Result<Ve
     Ok(articles)
 }
 
-async fn fetch_atom(source: &SourceConfig, client: &reqwest::Client) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
+async fn fetch_atom(source: &SourceConfig, client: &reqwest::Client, window: FetchWindow) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
     let content = client.get(&source.url).send().await?.text().await?;
     let feed = content.parse::<AtomFeed>()?;
 
     let mut articles = Vec::new();
-    let yesterday = Utc::now() - Duration::hours(24);
     let mut skipped_dates = 0;
 
     for entry in feed.entries().iter().take(MAX_ITEMS_PER_SOURCE) {
@@ -135,7 +166,7 @@ async fn fetch_atom(source: &SourceConfig, client: &reqwest::Client) -> Result<V
                 }
             };
 
-            if parsed_date >= yesterday {
+            if window.contains(parsed_date) {
                 articles.push(Article {
                     title: title.to_string(),
                     url: link.to_string(),
@@ -154,11 +185,10 @@ async fn fetch_atom(source: &SourceConfig, client: &reqwest::Client) -> Result<V
     Ok(articles)
 }
 
-async fn fetch_hackernews(source: &SourceConfig, client: &reqwest::Client) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
+async fn fetch_hackernews(source: &SourceConfig, client: &reqwest::Client, window: FetchWindow) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
     let top_ids: Vec<u32> = client.get(&source.url).send().await?.json().await?;
 
     let mut articles = Vec::new();
-    let yesterday = Utc::now() - Duration::hours(24);
     let mut skipped_timestamps = 0;
 
     // Fetch top stories using the shared client
@@ -190,8 +220,8 @@ async fn fetch_hackernews(source: &SourceConfig, client: &reqwest::Client) -> Re
                 }
             };
 
-            // Apply same 24h freshness filter as RSS (>= to include boundary)
-            if published_at >= yesterday {
+            // Apply the same publish-date window as RSS/Atom
+            if window.contains(published_at) {
                 articles.push(Article {
                     title,
                     url,
@@ -233,6 +263,27 @@ mod tests {
     fn test_create_http_client() {
         let client = create_http_client();
         assert!(client.is_ok(), "HTTP client should be created successfully");
+    }
+
+    #[test]
+    fn test_fetch_window_last_24h_has_no_upper_bound() {
+        let w = FetchWindow::last_24h();
+        assert!(w.end.is_none(), "daily window should have no upper bound");
+        assert!(w.contains(Utc::now()));
+        assert!(!w.contains(Utc::now() - Duration::hours(25)));
+    }
+
+    #[test]
+    fn test_fetch_window_day_is_single_utc_calendar_day() {
+        let d = chrono::NaiveDate::from_ymd_opt(2026, 5, 26).unwrap();
+        let w = FetchWindow::day(d);
+        // Start and end of the target day are included.
+        assert!(w.contains(d.and_hms_opt(0, 0, 0).unwrap().and_utc()));
+        assert!(w.contains(d.and_hms_opt(23, 59, 59).unwrap().and_utc()));
+        // The next day is excluded (upper bound is exclusive).
+        assert!(!w.contains((d + Duration::days(1)).and_hms_opt(0, 0, 0).unwrap().and_utc()));
+        // The previous day is excluded.
+        assert!(!w.contains((d - Duration::days(1)).and_hms_opt(12, 0, 0).unwrap().and_utc()));
     }
 
     #[test]
@@ -364,7 +415,7 @@ mod tests {
         };
 
         let client = create_http_client().unwrap();
-        let articles = fetch_from_source(&source, &client).await.unwrap();
+        let articles = fetch_from_source(&source, &client, FetchWindow::last_24h()).await.unwrap();
 
         assert_eq!(articles.len(), 1);
         assert_eq!(articles[0].title, "Mock Article");

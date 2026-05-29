@@ -30,6 +30,34 @@ fn parse_shortlist_indices(response: &str, max_index: usize) -> Vec<usize> {
         .collect()
 }
 
+/// Operational mode selected from CLI arguments.
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum RunMode {
+    /// Normal nightly run: summarize the last 24h, write to today's date.
+    Normal,
+    /// Deploy gate: one real LLM call per provider, no side effects.
+    Smoke,
+    /// Backfill a single past day from articles actually published then.
+    Backfill(chrono::NaiveDate),
+}
+
+/// Parse the operational mode from CLI args.
+///
+/// `--smoke` takes precedence (a deploy smoke check must never trigger a real
+/// backfill). `--date YYYY-MM-DD` selects backfill for that single UTC day.
+fn parse_run_mode(args: &[String]) -> Result<RunMode, String> {
+    if args.iter().any(|a| a == "--smoke") {
+        return Ok(RunMode::Smoke);
+    }
+    if let Some(pos) = args.iter().position(|a| a == "--date") {
+        let value = args.get(pos + 1).ok_or("--date requires a YYYY-MM-DD argument")?;
+        let date = chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+            .map_err(|e| format!("invalid --date '{}': {}", value, e))?;
+        return Ok(RunMode::Backfill(date));
+    }
+    Ok(RunMode::Normal)
+}
+
 /// Content snippet length for two-phase selection
 const SELECTION_SNIPPET_CHARS: usize = 1000;
 use readability::extractor;
@@ -79,6 +107,34 @@ fn build_recent_picks_context(manifest: &[ManifestEntry], max_days: usize) -> Op
 
 /// Get list of enabled LLM providers based on available API keys.
 /// Claude is first for article selection, others follow for summary generation.
+/// Minimal end-to-end check used as a post-deploy gate: make one real LLM call
+/// per enabled provider and fail if any provider rejects the request. Catches
+/// API/model contract breakage (a deprecated parameter, a bad model id, an auth
+/// problem) at deploy time instead of on the next nightly run. No GCS or
+/// notification side effects.
+async fn run_smoke(
+    http_client: &reqwest::Client,
+    providers: &[(LlmProvider, String)],
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut failures = Vec::new();
+    for (provider, key) in providers {
+        let prompt = "Reply with the single word: OK".to_string();
+        match call_llm(http_client, *provider, key, prompt, &LlmOptions::default()).await {
+            Ok(resp) => info!(provider = %provider.as_str(), reply = %resp.trim(), "Smoke check passed"),
+            Err(e) => {
+                error!(provider = %provider.as_str(), error = %e, "Smoke check FAILED");
+                failures.push(format!("{}: {}", provider.as_str(), e));
+            }
+        }
+    }
+    if failures.is_empty() {
+        info!("Smoke test passed for all providers");
+        Ok(())
+    } else {
+        Err(format!("Smoke test failed: {}", failures.join("; ")).into())
+    }
+}
+
 fn get_enabled_providers() -> Vec<(LlmProvider, String)> {
     let providers = [LlmProvider::Claude, LlmProvider::Gemini];
     let mut enabled = Vec::new();
@@ -238,6 +294,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
         .build()?;
 
+    // Resolve operational mode from CLI args. Smoke mode exits before any GCS
+    // work so it can run as a lightweight post-deploy gate.
+    let run_mode = parse_run_mode(&std::env::args().collect::<Vec<_>>())
+        .map_err(|e| { error!(error = %e, "Invalid arguments"); e })?;
+    if run_mode == RunMode::Smoke {
+        info!("Running in smoke-test mode (no GCS/notification side effects)");
+        return run_smoke(&http_client, &enabled_providers).await;
+    }
+
     // Initialize GCS Client
     let config = ClientConfig::default().with_auth().await?;
     let gcs_client = Client::new(config);
@@ -251,6 +316,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .ok_or("BACKFILL_BETA_DAYS requires ANTHROPIC_API_KEY")?;
         return backfill_beta(days, &http_client, &gcs_client, &bucket_name, claude_key).await;
     }
+
+    // Resolve the run date and the publish-date window for fetching. Backfill
+    // restricts to a single past UTC day so only articles actually published
+    // then are summarized; the normal run keeps the last 24h.
+    let is_backfill = matches!(run_mode, RunMode::Backfill(_));
+    let (today, fetch_window) = match run_mode {
+        RunMode::Backfill(date) => {
+            info!(date = %date, "Backfill mode: regenerating brief from articles published that day");
+            (date.format("%Y-%m-%d").to_string(), fetcher::FetchWindow::day(date))
+        }
+        _ => (Utc::now().format("%Y-%m-%d").to_string(), fetcher::FetchWindow::last_24h()),
+    };
 
     // Use first provider for article selection (Claude preferred)
     let (selection_provider, selection_key) = enabled_providers.first().unwrap().clone();
@@ -275,7 +352,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut all_articles: Vec<Article> = Vec::new();
     for source in sources {
         debug!(source = %source.name, "Fetching from source");
-        match fetcher::fetch_from_source(&source, &fetch_client).await {
+        match fetcher::fetch_from_source(&source, &fetch_client, fetch_window).await {
             Ok(mut articles) => {
                 info!(source = %source.name, count = articles.len(), "Found articles");
                 all_articles.append(&mut articles);
@@ -292,8 +369,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!(total_articles = all_articles.len(), "Total articles collected");
 
     // --- Manifest: download once, all stages append, single upload at the end ---
-    let today = Utc::now().format("%Y-%m-%d").to_string();
-
     let mut manifest: Vec<ManifestEntry> = match gcs_client.download_object(
         &GetObjectRequest {
             bucket: bucket_name.to_string(),
@@ -317,14 +392,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     };
 
-    // Cross-day dedup: collect URLs selected in the last 7 days
-    let recent_urls: std::collections::HashSet<String> = manifest.iter()
-        .filter(|e| e.date >= Utc::now().checked_sub_signed(chrono::Duration::days(7))
-            .map(|d| d.format("%Y-%m-%d").to_string())
-            .unwrap_or_default())
-        .filter(|e| e.prompt_version.is_none()) // only dedup against v1 (prod) picks
-        .filter_map(|e| e.original_url.clone())
-        .collect();
+    // Cross-day dedup: collect URLs selected in the last 7 days. Skipped when
+    // backfilling — a past day should be rebuilt on its own merits, not filtered
+    // against picks from days that chronologically came after it.
+    let recent_urls: std::collections::HashSet<String> = if is_backfill {
+        std::collections::HashSet::new()
+    } else {
+        manifest.iter()
+            .filter(|e| e.date >= Utc::now().checked_sub_signed(chrono::Duration::days(7))
+                .map(|d| d.format("%Y-%m-%d").to_string())
+                .unwrap_or_default())
+            .filter(|e| e.prompt_version.is_none()) // only dedup against v1 (prod) picks
+            .filter_map(|e| e.original_url.clone())
+            .collect()
+    };
 
     let pre_dedup_count = all_articles.len();
     all_articles.retain(|a| !recent_urls.contains(&a.url));
@@ -708,6 +789,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     for entry in new_manifest_entries.into_iter().rev() {
         manifest.insert(0, entry);
     }
+    // Keep the manifest newest-first by date regardless of insertion order. This
+    // matters for backfill (--date), where a past day's entries would otherwise
+    // be prepended ahead of newer ones. Stable sort preserves intra-date order.
+    manifest.sort_by(|a, b| b.date.cmp(&a.date));
     let manifest_json = serde_json::to_vec_pretty(&manifest)?;
     gcs_client.upload_object(
         &UploadObjectRequest {
@@ -750,6 +835,46 @@ async fn fetch_article_content(client: &reqwest::Client, url: &str) -> Result<St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn args(items: &[&str]) -> Vec<String> {
+        std::iter::once("daily-agent")
+            .chain(items.iter().copied())
+            .map(String::from)
+            .collect()
+    }
+
+    #[test]
+    fn test_parse_run_mode_normal() {
+        assert_eq!(parse_run_mode(&args(&[])), Ok(RunMode::Normal));
+    }
+
+    #[test]
+    fn test_parse_run_mode_smoke() {
+        assert_eq!(parse_run_mode(&args(&["--smoke"])), Ok(RunMode::Smoke));
+    }
+
+    #[test]
+    fn test_parse_run_mode_smoke_takes_precedence_over_date() {
+        // A deploy smoke check must never accidentally run a real backfill.
+        assert_eq!(parse_run_mode(&args(&["--date", "2026-05-26", "--smoke"])), Ok(RunMode::Smoke));
+    }
+
+    #[test]
+    fn test_parse_run_mode_backfill() {
+        let d = chrono::NaiveDate::from_ymd_opt(2026, 5, 26).unwrap();
+        assert_eq!(parse_run_mode(&args(&["--date", "2026-05-26"])), Ok(RunMode::Backfill(d)));
+    }
+
+    #[test]
+    fn test_parse_run_mode_date_missing_value() {
+        assert!(parse_run_mode(&args(&["--date"])).is_err());
+    }
+
+    #[test]
+    fn test_parse_run_mode_date_invalid() {
+        assert!(parse_run_mode(&args(&["--date", "not-a-date"])).is_err());
+        assert!(parse_run_mode(&args(&["--date", "2026-13-45"])).is_err());
+    }
 
     #[test]
     fn test_parse_selection_index_simple() {
