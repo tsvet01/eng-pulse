@@ -151,10 +151,14 @@ jobs:
     - name: Run Swift tests
       run: |
         cd apps/mobile-swift
+        # Pick an iPhone simulator that exists on this runner image instead of
+        # hard-coding a model name that disappears when the image updates.
+        DEVICE=$(xcrun simctl list devices available | grep -Eo 'iPhone [^(]+' | head -1 | xargs)
+        echo "Using simulator: ${DEVICE:?no iPhone simulator available}"
         xcodebuild test \
           -scheme EngPulse \
           -sdk iphonesimulator \
-          -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+          -destination "platform=iOS Simulator,name=$DEVICE,OS=latest" \
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO
 
