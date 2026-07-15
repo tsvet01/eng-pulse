@@ -121,9 +121,11 @@ class TTSService: ObservableObject {
 
     /// Start speaking text, stopping any current playback first
     func startSpeaking(_ text: String, articleUrl: String? = nil, articleTitle: String? = nil) {
+        // Stop while currentArticleUrl still points at the previous article, so its
+        // resume position is saved under its own URL — not the new article's.
+        stopPlayback()
         currentArticleUrl = articleUrl
         currentArticleTitle = articleTitle
-        stopPlayback()
 
         errorMessage = nil
         NowPlayingService.shared.setTrack(title: articleTitle ?? "Eng Pulse", duration: 0)
@@ -178,10 +180,7 @@ class TTSService: ObservableObject {
             if let cachedURL = await cacheService.getCachedAudioURL(for: cacheKey) {
                 guard currentArticleUrl == expectedUrl, state == .loading else { return }
                 try audioPlayer.play(from: cachedURL)
-                if let savedPosition = getSavedPosition(for: expectedUrl ?? "") {
-                    audioPlayer.seek(by: savedPosition)
-                    clearSavedPosition(for: expectedUrl ?? "")
-                }
+                restoreSavedPosition(for: expectedUrl)
                 state = .playing
                 return
             }
@@ -195,10 +194,7 @@ class TTSService: ObservableObject {
             if let audioURL = await cacheService.getCachedAudioURL(for: cacheKey) {
                 guard currentArticleUrl == expectedUrl, state == .loading else { return }
                 try audioPlayer.play(from: audioURL)
-                if let savedPosition = getSavedPosition(for: expectedUrl ?? "") {
-                    audioPlayer.seek(by: savedPosition)
-                    clearSavedPosition(for: expectedUrl ?? "")
-                }
+                restoreSavedPosition(for: expectedUrl)
                 state = .playing
 
                 Task.detached(priority: .background) { [cacheService] in
@@ -214,6 +210,17 @@ class TTSService: ObservableObject {
                 state = .stopped
             }
             print("TTS error: \(error)")
+        }
+    }
+
+    /// Seek to a previously saved resume position, if one exists and is sane.
+    /// A position at or past the end of the audio would make playback finish
+    /// instantly, so it is discarded instead of applied.
+    private func restoreSavedPosition(for articleUrl: String?) {
+        guard let articleUrl, let savedPosition = getSavedPosition(for: articleUrl) else { return }
+        clearSavedPosition(for: articleUrl)
+        if savedPosition < audioPlayer.duration - 1 {
+            audioPlayer.seek(by: savedPosition)
         }
     }
 
@@ -269,6 +276,16 @@ class TTSService: ObservableObject {
             resume()
         } else {
             startSpeaking(text, articleUrl: articleUrl, articleTitle: articleTitle)
+        }
+    }
+
+    /// Pause or resume whatever is currently playing, regardless of article.
+    /// Used by the player bar when it's shown on a different article's screen.
+    func togglePauseResume() {
+        switch state {
+        case .playing: pause()
+        case .paused: resume()
+        case .loading, .stopped: break
         }
     }
 

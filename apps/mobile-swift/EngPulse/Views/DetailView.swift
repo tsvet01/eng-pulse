@@ -182,16 +182,24 @@ struct DetailView: View {
                         onDismiss: { ttsService.stop() }
                     )
                 }
-                if ttsService.currentArticleUrl == summary.url {
+                if let playingUrl = ttsService.currentArticleUrl,
+                   playingUrl == summary.url || ttsService.state != .stopped {
+                    let isThisArticle = playingUrl == summary.url
                     TTSPlayerBarView(
                         progress: ttsService.progress,
-                        isPlaying: isPlaying,
-                        isPaused: isPaused,
-                        isLoading: isLoadingTTS,
-                        title: summary.title,
+                        isPlaying: ttsService.state == .playing,
+                        isPaused: ttsService.state == .paused,
+                        isLoading: ttsService.state == .loading,
+                        title: isThisArticle ? summary.title : (ttsService.currentArticleTitle ?? "Now Playing"),
                         currentTime: ttsService.currentTimeFormatted,
                         duration: ttsService.durationFormatted,
-                        onToggle: { toggleTTS() },
+                        onToggle: {
+                            if isThisArticle {
+                                toggleTTS()
+                            } else {
+                                ttsService.togglePauseResume()
+                            }
+                        },
                         onStop: { ttsService.stop() },
                         onSkipBack: { ttsService.skipBackward() },
                         onSkipForward: { ttsService.skipForward() }
