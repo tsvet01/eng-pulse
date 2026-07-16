@@ -294,7 +294,8 @@ struct DetailView: View {
 
     private func toggleTTS() {
         guard let content = fullContent else { return }
-        ttsService.togglePlayPause(content, articleUrl: summary.url, articleTitle: summary.title)
+        let speechText = SpeechTextBuilder.speechText(for: summary, content: content)
+        ttsService.togglePlayPause(speechText, articleUrl: summary.url, articleTitle: summary.title)
     }
 
     // MARK: - Sections

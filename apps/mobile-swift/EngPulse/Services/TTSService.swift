@@ -27,6 +27,11 @@ class TTSService: ObservableObject {
     @Published var currentArticleTitle: String?
     @Published var errorMessage: String?
 
+    // Playlist queue (used by CarPlay and "Play All")
+    @Published private(set) var queue: [Summary] = []
+    @Published private(set) var queueIndex: Int = 0
+    private var queueLoadTask: Task<Void, Never>?
+
     // Settings
     @AppStorage("ttsSpeechRate") var speechRate: Double = 0.55
     @AppStorage("ttsPitch") var pitch: Double = 1.0
@@ -61,7 +66,9 @@ class TTSService: ObservableObject {
             onPlay: { [weak self] in self?.resume() },
             onPause: { [weak self] in self?.pause() },
             onSkipForward: { [weak self] in self?.skipForward() },
-            onSkipBackward: { [weak self] in self?.skipBackward() }
+            onSkipBackward: { [weak self] in self?.skipBackward() },
+            onNextTrack: { [weak self] in self?.playNext() },
+            onPreviousTrack: { [weak self] in self?.playPrevious() }
         )
     }
 
@@ -69,9 +76,16 @@ class TTSService: ObservableObject {
         if isPlaying {
             state = .playing
         } else if state == .playing {
+            // Reaching here with state still .playing means playback ended on
+            // its own (pause/stop set their state synchronously first).
             if clearPosition, let url = currentArticleUrl { clearSavedPosition(for: url) }
+            if hasNextInQueue {
+                playNext()
+                return
+            }
             state = .stopped
             progress = 0
+            clearQueue()
             NowPlayingService.shared.clearNowPlaying()
         }
     }
@@ -121,9 +135,12 @@ class TTSService: ObservableObject {
 
     /// Start speaking text, stopping any current playback first
     func startSpeaking(_ text: String, articleUrl: String? = nil, articleTitle: String? = nil) {
+        // Save the previous article's position before switching identity,
+        // so it isn't recorded under the new article's key.
+        savePlaybackPosition()
         currentArticleUrl = articleUrl
         currentArticleTitle = articleTitle
-        stopPlayback()
+        stopPlayback(savingPosition: false)
 
         errorMessage = nil
         NowPlayingService.shared.setTrack(title: articleTitle ?? "Eng Pulse", duration: 0)
@@ -183,6 +200,7 @@ class TTSService: ObservableObject {
                     clearSavedPosition(for: expectedUrl ?? "")
                 }
                 state = .playing
+                publishNowPlayingTrack()
                 return
             }
 
@@ -200,6 +218,7 @@ class TTSService: ObservableObject {
                     clearSavedPosition(for: expectedUrl ?? "")
                 }
                 state = .playing
+                publishNowPlayingTrack()
 
                 Task.detached(priority: .background) { [cacheService] in
                     await cacheService.cleanupOldAudio()
@@ -240,8 +259,8 @@ class TTSService: ObservableObject {
     }
 
     /// Stop playback without clearing article identity (used by startSpeaking to avoid bar flash)
-    private func stopPlayback() {
-        savePlaybackPosition()
+    private func stopPlayback(savingPosition: Bool = true) {
+        if savingPosition { savePlaybackPosition() }
         if isUsingLocalTTS {
             localTTS?.stop()
         } else {
@@ -260,6 +279,7 @@ class TTSService: ObservableObject {
         stopPlayback()
         currentArticleUrl = nil
         currentArticleTitle = nil
+        clearQueue()
     }
 
     func togglePlayPause(_ text: String, articleUrl: String? = nil, articleTitle: String? = nil) {
@@ -268,12 +288,103 @@ class TTSService: ObservableObject {
         } else if state == .paused && currentArticleUrl == articleUrl {
             resume()
         } else {
+            // Playing a single article directly abandons any playlist
+            clearQueue()
             startSpeaking(text, articleUrl: articleUrl, articleTitle: articleTitle)
+        }
+    }
+
+    // MARK: - Playlist Queue
+
+    var hasNextInQueue: Bool { queueIndex + 1 < queue.count }
+    var hasPreviousInQueue: Bool { !queue.isEmpty && queueIndex > 0 }
+
+    /// Play a list of articles as a playlist, starting at the given index.
+    /// Content is fetched per article (cache first) and playback auto-advances
+    /// when an article finishes.
+    func playQueue(_ summaries: [Summary], startingAt index: Int = 0) {
+        guard !summaries.isEmpty, summaries.indices.contains(index) else { return }
+        queue = summaries
+        queueIndex = index
+        playCurrentQueueItem()
+    }
+
+    func playNext() {
+        guard hasNextInQueue else { return }
+        queueIndex += 1
+        playCurrentQueueItem()
+    }
+
+    func playPrevious() {
+        guard hasPreviousInQueue else { return }
+        queueIndex -= 1
+        playCurrentQueueItem()
+    }
+
+    private func clearQueue() {
+        queueLoadTask?.cancel()
+        queueLoadTask = nil
+        queue = []
+        queueIndex = 0
+        updateQueueCommands()
+    }
+
+    private func updateQueueCommands() {
+        NowPlayingService.shared.updateQueueNavigation(
+            hasNext: hasNextInQueue,
+            hasPrevious: hasPreviousInQueue
+        )
+    }
+
+    private func playCurrentQueueItem() {
+        let summary = queue[queueIndex]
+        updateQueueCommands()
+        queueLoadTask?.cancel()
+
+        // Stop first (saving the previous article's position), then take on
+        // the new article's identity so UIs show it as loading.
+        stopPlayback()
+        currentArticleUrl = summary.url
+        currentArticleTitle = summary.title
+        state = .loading
+        NowPlayingService.shared.setTrack(title: summary.title, duration: 0)
+        NowPlayingService.shared.updateProgress(currentTime: 0, isPlaying: false)
+
+        queueLoadTask = Task { [weak self] in
+            guard let self = self else { return }
+            do {
+                let content = try await ArticleContentLoader.load(summary, cacheService: self.cacheService)
+                guard !Task.isCancelled, self.currentArticleUrl == summary.url else { return }
+                let text = SpeechTextBuilder.speechText(for: summary, content: content)
+                self.startSpeaking(text, articleUrl: summary.url, articleTitle: summary.title)
+            } catch {
+                guard !Task.isCancelled, self.currentArticleUrl == summary.url else { return }
+                if self.hasNextInQueue {
+                    // Skip unplayable articles instead of stalling the playlist
+                    self.playNext()
+                } else {
+                    self.errorMessage = error.localizedDescription
+                    self.state = .stopped
+                }
+            }
         }
     }
 
     func isPlayingArticle(_ url: String) -> Bool {
         (state == .playing || state == .loading) && currentArticleUrl == url
+    }
+
+    /// Push the real title/duration to the now-playing info once audio is loaded,
+    /// so lock screen and CarPlay show an accurate progress bar.
+    private func publishNowPlayingTrack() {
+        NowPlayingService.shared.setTrack(
+            title: currentArticleTitle ?? "Eng Pulse",
+            duration: audioPlayer.duration
+        )
+        NowPlayingService.shared.updateProgress(
+            currentTime: audioPlayer.currentTime,
+            isPlaying: true
+        )
     }
 
     func skipForward(seconds: TimeInterval = 15) {

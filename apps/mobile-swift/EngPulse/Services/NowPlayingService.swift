@@ -5,7 +5,8 @@ class NowPlayingService {
     static let shared = NowPlayingService()
 
     func configure(onPlay: @escaping () -> Void, onPause: @escaping () -> Void,
-                   onSkipForward: @escaping () -> Void, onSkipBackward: @escaping () -> Void) {
+                   onSkipForward: @escaping () -> Void, onSkipBackward: @escaping () -> Void,
+                   onNextTrack: @escaping () -> Void, onPreviousTrack: @escaping () -> Void) {
         let center = MPRemoteCommandCenter.shared()
 
         center.playCommand.removeTarget(nil)
@@ -25,6 +26,22 @@ class NowPlayingService {
         center.skipBackwardCommand.isEnabled = true
         center.skipBackwardCommand.preferredIntervals = [15]
         center.skipBackwardCommand.addTarget { _ in onSkipBackward(); return .success }
+
+        // Playlist navigation — disabled until a queue with neighbors exists
+        center.nextTrackCommand.removeTarget(nil)
+        center.nextTrackCommand.isEnabled = false
+        center.nextTrackCommand.addTarget { _ in onNextTrack(); return .success }
+
+        center.previousTrackCommand.removeTarget(nil)
+        center.previousTrackCommand.isEnabled = false
+        center.previousTrackCommand.addTarget { _ in onPreviousTrack(); return .success }
+    }
+
+    /// Enable/disable next/previous track commands based on playlist position.
+    func updateQueueNavigation(hasNext: Bool, hasPrevious: Bool) {
+        let center = MPRemoteCommandCenter.shared()
+        center.nextTrackCommand.isEnabled = hasNext
+        center.previousTrackCommand.isEnabled = hasPrevious
     }
 
     private var nowPlayingInfo = [String: Any]()

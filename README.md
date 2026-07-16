@@ -38,7 +38,7 @@ Eng Pulse is a complete system for curating, summarizing, and delivering daily s
 | [explorer-agent](./apps/explorer-agent/) | RSS/blog source discovery and management | Rust |
 | [notifier](./functions/notifier/) | Email notification on new summaries | Python |
 | [mobile](./apps/mobile/) | Cross-platform mobile app | Flutter |
-| [mobile-swift](./apps/mobile-swift/) | Native iOS app with TTS | Swift |
+| [mobile-swift](./apps/mobile-swift/) | Native iOS app with TTS and CarPlay | Swift |
 
 ## Quick Start
 

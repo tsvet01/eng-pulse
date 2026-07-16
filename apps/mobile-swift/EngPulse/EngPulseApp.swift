@@ -10,9 +10,11 @@ struct EngPulseApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
-        let cache = CacheService()
-        _appState = StateObject(wrappedValue: AppState(cacheService: cache))
-        _ttsService = StateObject(wrappedValue: TTSService(cacheService: cache))
+        // Shared with the CarPlay scene so both surfaces drive the same
+        // article list and audio playback
+        let services = AppServices.shared
+        _appState = StateObject(wrappedValue: services.appState)
+        _ttsService = StateObject(wrappedValue: services.ttsService)
         configureAppearance()
     }
 
