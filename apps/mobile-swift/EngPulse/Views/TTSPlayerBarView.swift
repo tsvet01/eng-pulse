@@ -3,7 +3,6 @@ import SwiftUI
 struct TTSPlayerBarView: View {
     let progress: Double
     let isPlaying: Bool
-    let isPaused: Bool
     let isLoading: Bool
     let title: String
     let currentTime: String
@@ -53,7 +52,7 @@ struct TTSPlayerBarView: View {
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
-                .disabled(isLoading)
+                .disabled(isLoading || !hasSeek)
                 .accessibilityLabel("Skip back 15 seconds")
 
                 Button(action: onToggle) {
@@ -77,7 +76,7 @@ struct TTSPlayerBarView: View {
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
-                .disabled(isLoading)
+                .disabled(isLoading || !hasSeek)
                 .accessibilityLabel("Skip forward 15 seconds")
 
                 Spacer()

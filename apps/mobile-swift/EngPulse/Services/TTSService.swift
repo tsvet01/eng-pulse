@@ -220,7 +220,7 @@ class TTSService: ObservableObject {
         guard let articleUrl, let savedPosition = getSavedPosition(for: articleUrl) else { return }
         clearSavedPosition(for: articleUrl)
         if savedPosition < audioPlayer.duration - 1 {
-            audioPlayer.seek(by: savedPosition)
+            audioPlayer.seek(to: savedPosition)
         }
     }
 
@@ -270,17 +270,14 @@ class TTSService: ObservableObject {
     }
 
     func togglePlayPause(_ text: String, articleUrl: String? = nil, articleTitle: String? = nil) {
-        if state == .playing && currentArticleUrl == articleUrl {
-            pause()
-        } else if state == .paused && currentArticleUrl == articleUrl {
-            resume()
+        if currentArticleUrl == articleUrl, state == .playing || state == .paused {
+            togglePauseResume()
         } else {
             startSpeaking(text, articleUrl: articleUrl, articleTitle: articleTitle)
         }
     }
 
     /// Pause or resume whatever is currently playing, regardless of article.
-    /// Used by the player bar when it's shown on a different article's screen.
     func togglePauseResume() {
         switch state {
         case .playing: pause()
@@ -322,7 +319,10 @@ class TTSService: ObservableObject {
     // MARK: - Resume Position
 
     private func savePlaybackPosition() {
-        guard let url = currentArticleUrl else { return }
+        // Only an active session may write a resume position: after a natural
+        // finish (state == .stopped) the player can still report a stale
+        // currentTime for the article that just ended.
+        guard state == .playing || state == .paused, let url = currentArticleUrl else { return }
         let position = audioPlayer.currentTime
         if position > 0 {
             UserDefaults.standard.set(position, forKey: "tts_position_\(url)")
