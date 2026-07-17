@@ -359,7 +359,13 @@ class TTSService: ObservableObject {
                 self.startSpeaking(text, articleUrl: summary.url, articleTitle: summary.title)
             } catch {
                 guard !Task.isCancelled, self.currentArticleUrl == summary.url else { return }
-                if self.hasNextInQueue {
+                // Connectivity errors will hit every remaining item too — stop
+                // the queue instead of cascading through it.
+                let isConnectivityError = (error as? URLError).map {
+                    [.notConnectedToInternet, .networkConnectionLost, .dnsLookupFailed,
+                     .cannotConnectToHost, .timedOut].contains($0.code)
+                } ?? false
+                if self.hasNextInQueue && !isConnectivityError {
                     // Skip unplayable articles instead of stalling the playlist
                     self.playNext()
                 } else {
@@ -417,6 +423,9 @@ class TTSService: ObservableObject {
 
     private func savePlaybackPosition() {
         guard let url = currentArticleUrl else { return }
+        // An article that played to (nearly) the end has no useful resume
+        // position — never re-save one after the finish path cleared it.
+        guard progress < 0.99 else { return }
         let position = audioPlayer.currentTime
         if position > 0 {
             UserDefaults.standard.set(position, forKey: "tts_position_\(url)")
