@@ -162,12 +162,11 @@ class TTSService: ObservableObject {
 
     /// Start speaking text, stopping any current playback first
     func startSpeaking(_ text: String, articleUrl: String? = nil, articleTitle: String? = nil) {
-        // Save the previous article's position before switching identity,
-        // so it isn't recorded under the new article's key.
-        savePlaybackPosition()
+        // Stop while currentArticleUrl still points at the previous article, so its
+        // resume position is saved under its own URL — not the new article's.
+        stopPlayback()
         currentArticleUrl = articleUrl
         currentArticleTitle = articleTitle
-        stopPlayback(savingPosition: false)
 
         errorMessage = nil
         NowPlayingService.shared.setTrack(title: articleTitle ?? "Eng Pulse", duration: 0)
@@ -225,10 +224,7 @@ class TTSService: ObservableObject {
             if let cachedURL = await cacheService.getCachedAudioURL(for: cacheKey) {
                 guard currentArticleUrl == expectedUrl, state == .loading else { return }
                 try audioPlayer.play(from: cachedURL)
-                if let savedPosition = getSavedPosition(for: expectedUrl ?? "") {
-                    audioPlayer.seek(by: savedPosition)
-                    clearSavedPosition(for: expectedUrl ?? "")
-                }
+                restoreSavedPosition(for: expectedUrl)
                 state = .playing
                 publishNowPlayingTrack()
                 return
@@ -243,10 +239,7 @@ class TTSService: ObservableObject {
             if let audioURL = await cacheService.getCachedAudioURL(for: cacheKey) {
                 guard currentArticleUrl == expectedUrl, state == .loading else { return }
                 try audioPlayer.play(from: audioURL)
-                if let savedPosition = getSavedPosition(for: expectedUrl ?? "") {
-                    audioPlayer.seek(by: savedPosition)
-                    clearSavedPosition(for: expectedUrl ?? "")
-                }
+                restoreSavedPosition(for: expectedUrl)
                 state = .playing
                 publishNowPlayingTrack()
 
@@ -294,6 +287,18 @@ class TTSService: ObservableObject {
         return false
     }
 
+    /// Seek to a previously saved resume position, if one exists and is sane.
+    /// A position at or past the end of the audio would make playback finish
+    /// instantly, so it is discarded instead of applied.
+    private func restoreSavedPosition(for articleUrl: String?) {
+        guard let articleUrl, let savedPosition = getSavedPosition(for: articleUrl) else { return }
+        clearSavedPosition(for: articleUrl)
+        if savedPosition < audioPlayer.duration - 1 {
+            audioPlayer.seek(to: savedPosition)
+        }
+    }
+
+
     func pause() {
         guard state == .playing else { return }
         savePlaybackPosition()
@@ -321,8 +326,8 @@ class TTSService: ObservableObject {
     }
 
     /// Stop playback without clearing article identity (used by startSpeaking to avoid bar flash)
-    private func stopPlayback(savingPosition: Bool = true) {
-        if savingPosition { savePlaybackPosition() }
+    private func stopPlayback() {
+        savePlaybackPosition()
         if isUsingLocalTTS {
             localTTS?.stop()
         } else {
@@ -347,10 +352,8 @@ class TTSService: ObservableObject {
     /// Text is an autoclosure so pause/resume taps don't pay for building the
     /// speech text (insight briefs decode JSON to produce it).
     func togglePlayPause(_ text: @autoclosure () -> String, articleUrl: String? = nil, articleTitle: String? = nil) {
-        if state == .playing && currentArticleUrl == articleUrl {
-            pause()
-        } else if state == .paused && currentArticleUrl == articleUrl {
-            resume()
+        if currentArticleUrl == articleUrl, state == .playing || state == .paused {
+            togglePauseResume()
         } else {
             // Playing a single article directly abandons any playlist
             clearQueue()
@@ -427,6 +430,15 @@ class TTSService: ObservableObject {
         }
     }
 
+    /// Pause or resume whatever is currently playing, regardless of article.
+    func togglePauseResume() {
+        switch state {
+        case .playing: pause()
+        case .paused: resume()
+        case .loading, .stopped: break
+        }
+    }
+
     func isPlayingArticle(_ url: String) -> Bool {
         (state == .playing || state == .loading) && currentArticleUrl == url
     }
@@ -473,7 +485,10 @@ class TTSService: ObservableObject {
     // MARK: - Resume Position
 
     private func savePlaybackPosition() {
-        guard let url = currentArticleUrl else { return }
+        // Only an active session may write a resume position: after a natural
+        // finish (state == .stopped) the player can still report a stale
+        // currentTime for the article that just ended.
+        guard state == .playing || state == .paused, let url = currentArticleUrl else { return }
         let position = audioPlayer.currentTime
         if position > 0 {
             UserDefaults.standard.set(position, forKey: "tts_position_\(url)")

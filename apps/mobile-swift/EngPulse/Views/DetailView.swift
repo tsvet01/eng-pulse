@@ -182,16 +182,24 @@ struct DetailView: View {
                         onDismiss: { ttsService.stop() }
                     )
                 }
-                if ttsService.currentArticleUrl == summary.url {
+                // Show the bar while any article is active, and keep it on this
+                // article's screen after its playback finishes (replay affordance).
+                if ttsService.state != .stopped || ttsService.currentArticleUrl == summary.url {
+                    let isThisArticle = ttsService.currentArticleUrl == summary.url
                     TTSPlayerBarView(
                         progress: ttsService.progress,
-                        isPlaying: isPlaying,
-                        isPaused: isPaused,
-                        isLoading: isLoadingTTS,
-                        title: summary.title,
+                        isPlaying: ttsService.state == .playing,
+                        isLoading: ttsService.state == .loading,
+                        title: isThisArticle ? summary.title : (ttsService.currentArticleTitle ?? "Eng Pulse"),
                         currentTime: ttsService.currentTimeFormatted,
                         duration: ttsService.durationFormatted,
-                        onToggle: { toggleTTS() },
+                        onToggle: {
+                            if ttsService.state == .stopped {
+                                toggleTTS()
+                            } else {
+                                ttsService.togglePauseResume()
+                            }
+                        },
                         onStop: { ttsService.stop() },
                         onSkipBack: { ttsService.skipBackward() },
                         onSkipForward: { ttsService.skipForward() }
@@ -287,6 +295,9 @@ struct DetailView: View {
             articleUrl: summary.url,
             articleTitle: summary.title
         )
+        // Starting playback consumes the persisted resume position, so drop the
+        // cached offer — otherwise a stale "Resume m:ss" reappears after finish.
+        savedPosition = nil
     }
 
     // MARK: - Sections
@@ -407,7 +418,6 @@ struct DetailView: View {
                 if let pos = savedPosition, (ttsService.state == .stopped || ttsService.currentArticleUrl != summary.url) {
                     Button {
                         toggleTTS()
-                        savedPosition = nil
                     } label: {
                         Text("Resume \(pos.mmss)")
                             .font(.caption2)
