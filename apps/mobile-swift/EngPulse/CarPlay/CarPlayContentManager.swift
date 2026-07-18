@@ -10,6 +10,9 @@ import UIKit
 /// - "Latest" tab: Play All (playlist) + every article, newest first
 /// - "Topics" tab: categories that drill into per-category lists with Play All
 /// Tapping an article plays just that article; Play All queues the whole list.
+///
+/// Templates are rebuilt only when the article data changes; playback changes
+/// just toggle the playing indicator on the existing rows.
 @MainActor
 final class CarPlayContentManager {
     private let interfaceController: CPInterfaceController
@@ -20,9 +23,15 @@ final class CarPlayContentManager {
     private let latestTemplate: CPListTemplate
     private let topicsTemplate: CPListTemplate
 
-    /// Category list currently pushed from the Topics tab, refreshed on data changes.
+    /// Category list currently pushed from the Topics tab (its Category rides
+    /// in `userInfo`), refreshed on data changes until it is popped.
     private weak var pushedCategoryTemplate: CPListTemplate?
-    private var pushedCategory: Category?
+
+    /// Live article rows keyed by article URL, so playback changes can flip
+    /// the playing indicator without rebuilding the lists.
+    private var articleItemsByUrl: [String: [CPListItem]] = [:]
+
+    private var isPresentingNowPlaying = false
 
     /// Leave room for the Play All row within CarPlay's list item limit.
     private var articleLimit: Int {
@@ -41,7 +50,7 @@ final class CarPlayContentManager {
         let tabBar = CPTabBarTemplate(templates: [latestTemplate, topicsTemplate])
         interfaceController.setRootTemplate(tabBar, animated: false, completion: nil)
 
-        reloadTemplates()
+        rebuildTemplates()
         observeChanges()
 
         // CarPlay can launch the app without the phone UI ever appearing,
@@ -51,44 +60,63 @@ final class CarPlayContentManager {
 
     func disconnect() {
         cancellables.removeAll()
+        articleItemsByUrl.removeAll()
     }
 
     // MARK: - Observation
 
     private func observeChanges() {
+        // dropFirst: @Published replays its current value on subscription and
+        // connect() already did an initial build.
         appState.$summaries
+            .dropFirst()
             .removeDuplicates()
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.reloadTemplates() }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.rebuildTemplates() }
             .store(in: &cancellables)
 
-        // Keep the per-row playing indicator in sync with playback.
         ttsService.$currentArticleUrl
-            .removeDuplicates()
-            .combineLatest(
-                ttsService.$state
-                    .map { $0 == .playing || $0 == .loading }
-                    .removeDuplicates()
-            )
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _, _ in self?.reloadTemplates() }
+            .combineLatest(ttsService.$state.map { $0 == .playing || $0 == .loading })
+            .dropFirst()
+            .removeDuplicates(by: { $0 == $1 })
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _, _ in self?.updatePlayingIndicators() }
             .store(in: &cancellables)
     }
 
-    private func reloadTemplates() {
+    private func rebuildTemplates() {
+        articleItemsByUrl.removeAll()
         let summaries = appState.summaries
-        latestTemplate.updateSections(latestSections(from: summaries))
-        topicsTemplate.updateSections(topicSections(from: summaries))
+        let latest = CarPlayContentBuilder.latestArticles(from: summaries, limit: articleLimit)
+        let groups = CarPlayContentBuilder.categoryGroups(from: summaries, limitPerCategory: articleLimit)
 
-        if let category = pushedCategory, let template = pushedCategoryTemplate {
-            template.updateSections(categorySections(for: category, from: summaries))
+        latestTemplate.updateSections(playableSections(for: latest))
+        topicsTemplate.updateSections(topicSections(from: groups))
+
+        if let template = pushedCategoryTemplate,
+           let category = template.userInfo as? Category {
+            let articles = groups.first(where: { $0.category == category })?.articles ?? []
+            template.updateSections(playableSections(for: articles))
+        }
+
+        updatePlayingIndicators()
+    }
+
+    private func updatePlayingIndicators() {
+        let activeUrl = (ttsService.state == .playing || ttsService.state == .loading)
+            ? ttsService.currentArticleUrl : nil
+        for (url, items) in articleItemsByUrl {
+            let isPlaying = url == activeUrl
+            for item in items where item.isPlaying != isPlaying {
+                item.isPlaying = isPlaying
+            }
         }
     }
 
     // MARK: - Sections
 
-    private func latestSections(from summaries: [Summary]) -> [CPListSection] {
-        let articles = CarPlayContentBuilder.latestArticles(from: summaries, limit: articleLimit)
+    /// The shared playable-list shape: a Play All row, then the article rows.
+    private func playableSections(for articles: [Summary]) -> [CPListSection] {
         guard !articles.isEmpty else { return [] }
         return [
             CPListSection(items: [playAllItem(for: articles)]),
@@ -96,15 +124,12 @@ final class CarPlayContentManager {
         ]
     }
 
-    private func topicSections(from summaries: [Summary]) -> [CPListSection] {
-        let groups = CarPlayContentBuilder.categoryGroups(from: summaries, limitPerCategory: articleLimit)
+    private func topicSections(from groups: [CarPlayContentBuilder.CategoryGroup]) -> [CPListSection] {
         guard !groups.isEmpty else { return [] }
-
         let items = groups.map { group in
-            let count = group.articles.count
             let item = CPListItem(
                 text: group.category.displayName,
-                detailText: "\(count) article\(count == 1 ? "" : "s")",
+                detailText: "\(group.totalCount) article\(group.totalCount == 1 ? "" : "s")",
                 image: UIImage(systemName: group.category.iconName)
             )
             item.accessoryType = .disclosureIndicator
@@ -119,22 +144,12 @@ final class CarPlayContentManager {
         return [CPListSection(items: items)]
     }
 
-    private func categorySections(for category: Category, from summaries: [Summary]) -> [CPListSection] {
-        let groups = CarPlayContentBuilder.categoryGroups(from: summaries, limitPerCategory: articleLimit)
-        guard let group = groups.first(where: { $0.category == category }) else { return [] }
-        return [
-            CPListSection(items: [playAllItem(for: group.articles)]),
-            CPListSection(items: group.articles.map { articleItem(for: $0) })
-        ]
-    }
-
     private func showCategory(_ category: Category) {
-        let template = CPListTemplate(
-            title: category.displayName,
-            sections: categorySections(for: category, from: appState.summaries)
-        )
+        let groups = CarPlayContentBuilder.categoryGroups(from: appState.summaries, limitPerCategory: articleLimit)
+        let articles = groups.first(where: { $0.category == category })?.articles ?? []
+        let template = CPListTemplate(title: category.displayName, sections: playableSections(for: articles))
+        template.userInfo = category
         pushedCategoryTemplate = template
-        pushedCategory = category
         interfaceController.pushTemplate(template, animated: true, completion: nil)
     }
 
@@ -161,13 +176,13 @@ final class CarPlayContentManager {
             detailText: CarPlayContentBuilder.detailText(for: summary)
         )
         item.playingIndicatorLocation = .trailing
-        item.isPlaying = ttsService.isPlayingArticle(summary.url)
         item.handler = { [weak self] _, completion in
             Task { @MainActor in
                 self?.play([summary])
                 completion()
             }
         }
+        articleItemsByUrl[summary.url, default: []].append(item)
         return item
     }
 
@@ -180,11 +195,15 @@ final class CarPlayContentManager {
 
     private func showNowPlaying() {
         let nowPlaying = CPNowPlayingTemplate.shared
-        guard interfaceController.topTemplate !== nowPlaying else { return }
+        guard !isPresentingNowPlaying, interfaceController.topTemplate !== nowPlaying else { return }
+        isPresentingNowPlaying = true
+        let completion: (Bool, Error?) -> Void = { [weak self] _, _ in
+            Task { @MainActor in self?.isPresentingNowPlaying = false }
+        }
         if interfaceController.templates.contains(where: { $0 === nowPlaying }) {
-            interfaceController.pop(to: nowPlaying, animated: true, completion: nil)
+            interfaceController.pop(to: nowPlaying, animated: true, completion: completion)
         } else {
-            interfaceController.pushTemplate(nowPlaying, animated: true, completion: nil)
+            interfaceController.pushTemplate(nowPlaying, animated: true, completion: completion)
         }
     }
 

@@ -48,9 +48,21 @@ struct Summary: Identifiable, Codable, Equatable, Hashable {
         return formatter
     }()
 
+    private static let shortDisplayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter
+    }()
+
     // Computed properties for UI
     var displayDate: Date {
         Self.dateFormatter.date(from: date) ?? Date()
+    }
+
+    /// Human date matching the phone list's style (e.g. "Jul 15"), for
+    /// surfaces that need a plain string such as CarPlay rows.
+    var shortDisplayDate: String {
+        Self.shortDisplayFormatter.string(from: displayDate)
     }
 
     var source: String {

@@ -89,6 +89,7 @@ final class CarPlayContentBuilderTests: XCTestCase {
         let summaries = (1...5).map { summary(date: "2026-07-0\($0)", title: "Rust tip \($0)") }
         let groups = CarPlayContentBuilder.categoryGroups(from: summaries, limitPerCategory: 2)
         XCTAssertEqual(groups.first?.articles.count, 2)
+        XCTAssertEqual(groups.first?.totalCount, 5, "totalCount reports the real size, not the capped list")
     }
 
     // MARK: - detailText
@@ -99,11 +100,14 @@ final class CarPlayContentBuilderTests: XCTestCase {
             title: "Anything",
             originalUrl: "https://www.thenewstack.io/some-article"
         )
-        XCTAssertEqual(CarPlayContentBuilder.detailText(for: article), "Thenewstack · 2026-07-15")
+        XCTAssertEqual(
+            CarPlayContentBuilder.detailText(for: article),
+            "Thenewstack · \(article.shortDisplayDate)"
+        )
     }
 
     func testDetailTextFallsBackToDateWhenSourceUnknown() {
         let article = summary(date: "2026-07-15", title: "Anything")
-        XCTAssertEqual(CarPlayContentBuilder.detailText(for: article), "2026-07-15")
+        XCTAssertEqual(CarPlayContentBuilder.detailText(for: article), article.shortDisplayDate)
     }
 }

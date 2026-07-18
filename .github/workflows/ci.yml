@@ -151,10 +151,19 @@ jobs:
     - name: Run Swift tests
       run: |
         cd apps/mobile-swift
+        # Pick any available iPhone simulator — hardcoded device names break
+        # whenever the runner image's Xcode drops that model
+        DEVICE=$(xcrun simctl list devices available | sed -nE 's/^ *(iPhone [^(]*[^ (]) *\(.*/\1/p' | head -n 1)
+        if [ -z "$DEVICE" ]; then
+          echo "No available iPhone simulator found" >&2
+          xcrun simctl list devices available >&2
+          exit 1
+        fi
+        echo "Using simulator: $DEVICE"
         xcodebuild test \
           -scheme EngPulse \
           -sdk iphonesimulator \
-          -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' \
+          -destination "platform=iOS Simulator,name=$DEVICE,OS=latest" \
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO
 

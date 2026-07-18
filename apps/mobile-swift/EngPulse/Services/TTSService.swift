@@ -72,17 +72,36 @@ class TTSService: ObservableObject {
         )
     }
 
-    private func handlePlaybackStateChange(_ isPlaying: Bool, clearPosition: Bool) {
+    private func handlePlaybackStateChange(_ isPlaying: Bool) {
         if isPlaying {
             state = .playing
         } else if state == .playing {
-            // Reaching here with state still .playing means playback ended on
-            // its own (pause/stop set their state synchronously first).
-            if clearPosition, let url = currentArticleUrl { clearSavedPosition(for: url) }
-            if hasNextInQueue {
-                playNext()
-                return
+            // Abnormal stop (decode error, external interruption). Natural
+            // finishes arrive via the players' finish callbacks, which always
+            // move state off .playing before this deferred sink fires; pause
+            // and stop set their state synchronously first.
+            state = .stopped
+            progress = 0
+            if queue.isEmpty {
+                NowPlayingService.shared.clearNowPlaying()
+            } else {
+                // Keep the track visible so play can retry the queue item
+                NowPlayingService.shared.updateProgress(currentTime: 0, isPlaying: false)
             }
+        }
+    }
+
+    /// Explicit natural-finish signal from the players — the only path that
+    /// clears resume positions and advances the playlist.
+    private func handleTrackFinished(clearPosition: Bool) {
+        guard state == .playing else { return }
+        if clearPosition, let url = currentArticleUrl { clearSavedPosition(for: url) }
+        // Discard the finished player so its end position can't be re-saved
+        // by the stop that precedes the next queue item.
+        audioPlayer.stop()
+        if hasNextInQueue {
+            playNext()
+        } else {
             state = .stopped
             progress = 0
             clearQueue()
@@ -91,10 +110,14 @@ class TTSService: ObservableObject {
     }
 
     private func setupAudioPlayerObservers() {
+        audioPlayer.onPlaybackFinished = { [weak self] in
+            self?.handleTrackFinished(clearPosition: true)
+        }
+
         audioPlayer.$isPlaying
             .removeDuplicates()
-            .receive(on: RunLoop.main)
-            .sink { [weak self] in self?.handlePlaybackStateChange($0, clearPosition: true) }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.handlePlaybackStateChange($0) }
             .store(in: &cancellables)
 
         audioPlayer.$progress
@@ -116,10 +139,14 @@ class TTSService: ObservableObject {
     private func setupLocalTTSObservers() {
         guard let localTTS = localTTS else { return }
 
+        localTTS.onSpeechFinished = { [weak self] in
+            self?.handleTrackFinished(clearPosition: false)
+        }
+
         localTTS.$isPlaying
             .removeDuplicates()
-            .receive(on: RunLoop.main)
-            .sink { [weak self] in self?.handlePlaybackStateChange($0, clearPosition: false) }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.handlePlaybackStateChange($0) }
             .store(in: &cancellables)
 
         localTTS.$progress
@@ -148,10 +175,13 @@ class TTSService: ObservableObject {
         if isUsingLocalTTS, let localTTS = localTTS {
             state = .loading
             let textToClean = text
+            let expectedUrl = articleUrl
             Task {
                 let cleanedText = await Task.detached(priority: .userInitiated) {
                     TextCleaner.cleanForSpeech(textToClean)
                 }.value
+                // A newer article may have started while this text was cleaning
+                guard self.currentArticleUrl == expectedUrl, self.state == .loading else { return }
                 self.currentText = cleanedText
                 localTTS.speak(text: cleanedText, rate: self.speechRate, pitch: self.pitch)
                 // state = .playing is set by the localTTS.$isPlaying observer
@@ -229,11 +259,39 @@ class TTSService: ObservableObject {
 
         } catch {
             if currentArticleUrl == expectedUrl {
-                errorMessage = error.localizedDescription
-                state = .stopped
+                handleQueueItemFailure(error)
             }
             print("TTS error: \(error)")
         }
+    }
+
+    /// Shared failure policy for both queue stages (content fetch and audio
+    /// synthesis): skip past one bad article, but stop on errors that would
+    /// hit every remaining item too.
+    private func handleQueueItemFailure(_ error: Error) {
+        if hasNextInQueue && !Self.isSystemicPlaybackError(error) {
+            // Skip unplayable articles instead of stalling the playlist
+            playNext()
+        } else {
+            errorMessage = error.localizedDescription
+            state = .stopped
+            // Keep the queue and track info so play can retry from the car
+            NowPlayingService.shared.updateProgress(currentTime: 0, isPlaying: false)
+        }
+    }
+
+    /// Errors that will affect every queue item alike (offline, server
+    /// outage), where skipping ahead would just cascade failures.
+    private static func isSystemicPlaybackError(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            return [.notConnectedToInternet, .networkConnectionLost, .dnsLookupFailed,
+                    .cannotFindHost, .cannotConnectToHost, .timedOut,
+                    .dataNotAllowed, .internationalRoamingOff].contains(urlError.code)
+        }
+        if case ArticleContentLoader.LoadError.httpError(let statusCode) = error {
+            return statusCode >= 500 || statusCode == 429
+        }
+        return false
     }
 
     func pause() {
@@ -249,13 +307,17 @@ class TTSService: ObservableObject {
     }
 
     func resume() {
-        guard state == .paused else { return }
-        if isUsingLocalTTS {
-            localTTS?.resume()
-        } else {
-            audioPlayer.resume()
+        if state == .paused {
+            if isUsingLocalTTS {
+                localTTS?.resume()
+            } else {
+                audioPlayer.resume()
+            }
+            state = .playing
+        } else if state == .stopped, !queue.isEmpty {
+            // Play pressed after a queue item failed — retry the current item
+            playCurrentQueueItem()
         }
-        state = .playing
     }
 
     /// Stop playback without clearing article identity (used by startSpeaking to avoid bar flash)
@@ -282,7 +344,9 @@ class TTSService: ObservableObject {
         clearQueue()
     }
 
-    func togglePlayPause(_ text: String, articleUrl: String? = nil, articleTitle: String? = nil) {
+    /// Text is an autoclosure so pause/resume taps don't pay for building the
+    /// speech text (insight briefs decode JSON to produce it).
+    func togglePlayPause(_ text: @autoclosure () -> String, articleUrl: String? = nil, articleTitle: String? = nil) {
         if state == .playing && currentArticleUrl == articleUrl {
             pause()
         } else if state == .paused && currentArticleUrl == articleUrl {
@@ -290,7 +354,7 @@ class TTSService: ObservableObject {
         } else {
             // Playing a single article directly abandons any playlist
             clearQueue()
-            startSpeaking(text, articleUrl: articleUrl, articleTitle: articleTitle)
+            startSpeaking(text(), articleUrl: articleUrl, articleTitle: articleTitle)
         }
     }
 
@@ -299,13 +363,12 @@ class TTSService: ObservableObject {
     var hasNextInQueue: Bool { queueIndex + 1 < queue.count }
     var hasPreviousInQueue: Bool { !queue.isEmpty && queueIndex > 0 }
 
-    /// Play a list of articles as a playlist, starting at the given index.
-    /// Content is fetched per article (cache first) and playback auto-advances
-    /// when an article finishes.
-    func playQueue(_ summaries: [Summary], startingAt index: Int = 0) {
-        guard !summaries.isEmpty, summaries.indices.contains(index) else { return }
+    /// Play a list of articles as a playlist. Content is fetched per article
+    /// (cache first) and playback auto-advances when an article finishes.
+    func playQueue(_ summaries: [Summary]) {
+        guard !summaries.isEmpty else { return }
         queue = summaries
-        queueIndex = index
+        queueIndex = 0
         playCurrentQueueItem()
     }
 
@@ -359,19 +422,7 @@ class TTSService: ObservableObject {
                 self.startSpeaking(text, articleUrl: summary.url, articleTitle: summary.title)
             } catch {
                 guard !Task.isCancelled, self.currentArticleUrl == summary.url else { return }
-                // Connectivity errors will hit every remaining item too — stop
-                // the queue instead of cascading through it.
-                let isConnectivityError = (error as? URLError).map {
-                    [.notConnectedToInternet, .networkConnectionLost, .dnsLookupFailed,
-                     .cannotConnectToHost, .timedOut].contains($0.code)
-                } ?? false
-                if self.hasNextInQueue && !isConnectivityError {
-                    // Skip unplayable articles instead of stalling the playlist
-                    self.playNext()
-                } else {
-                    self.errorMessage = error.localizedDescription
-                    self.state = .stopped
-                }
+                self.handleQueueItemFailure(error)
             }
         }
     }
@@ -423,9 +474,6 @@ class TTSService: ObservableObject {
 
     private func savePlaybackPosition() {
         guard let url = currentArticleUrl else { return }
-        // An article that played to (nearly) the end has no useful resume
-        // position — never re-save one after the finish path cleared it.
-        guard progress < 0.99 else { return }
         let position = audioPlayer.currentTime
         if position > 0 {
             UserDefaults.standard.set(position, forKey: "tts_position_\(url)")

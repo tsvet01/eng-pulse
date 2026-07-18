@@ -123,12 +123,26 @@ class AppState: ObservableObject {
 
     private let apiService = APIService()
     let cacheService: CacheService
+    private var activeLoad: Task<Void, Never>?
 
     init(cacheService: CacheService = CacheService()) {
         self.cacheService = cacheService
     }
 
+    /// Coalesces concurrent callers (phone UI and the CarPlay scene can both
+    /// trigger a load at launch) into a single fetch.
     func loadSummaries() async {
+        if let activeLoad {
+            await activeLoad.value
+            return
+        }
+        let task = Task { await performLoadSummaries() }
+        activeLoad = task
+        await task.value
+        activeLoad = nil
+    }
+
+    private func performLoadSummaries() async {
         errorMessage = nil
         isOffline = false
 
@@ -169,14 +183,9 @@ class AppState: ObservableObject {
     private func prefetchArticles(_ articles: [Summary]) {
         for article in articles {
             Task.detached(priority: .utility) { [cacheService] in
-                if await cacheService.getCachedContent(for: article.url) != nil { return }
-                guard let url = URL(string: article.url) else { return }
-                do {
-                    let (data, _) = try await URLSession.shared.data(from: url)
-                    if let content = String(data: data, encoding: .utf8) {
-                        try? await cacheService.cacheContent(content, for: article.url)
-                    }
-                } catch {}
+                // Loader is cache-first and validates HTTP status, so prefetch
+                // can never poison the cache with an error page
+                _ = try? await ArticleContentLoader.load(article, cacheService: cacheService)
             }
         }
     }

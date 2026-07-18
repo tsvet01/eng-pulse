@@ -7,9 +7,7 @@ import Foundation
 /// strips markdown later in the TTS pipeline).
 struct SpeechTextBuilder {
     static func speechText(for summary: Summary, content: String) -> String {
-        guard summary.isInsightBrief,
-              let data = content.data(using: .utf8),
-              let brief = try? JSONDecoder().decode(InsightBrief.self, from: data) else {
+        guard summary.isInsightBrief, let brief = InsightBrief.decode(from: content) else {
             return content
         }
 
