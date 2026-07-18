@@ -13,6 +13,11 @@ class AudioPlayerService: NSObject, ObservableObject {
     @Published var progress: Double = 0.0
     @Published var duration: TimeInterval = 0.0
 
+    /// Called when a track plays through to its natural end (not on stop/pause
+    /// or decode errors), so callers can distinguish completion from
+    /// interruption without inferring it from `isPlaying` flips.
+    var onPlaybackFinished: (() -> Void)?
+
     private func ensureAudioSession() {
         guard !sessionConfigured else { return }
         do {
@@ -112,6 +117,7 @@ extension AudioPlayerService: AVAudioPlayerDelegate {
             self.isPlaying = false
             self.progress = 1.0  // Show complete
             self.stopProgressTimer()
+            self.onPlaybackFinished?()
         }
     }
 

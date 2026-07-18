@@ -251,19 +251,17 @@ struct DetailView: View {
 
     private func setContent(_ content: String) {
         fullContent = content
-        if summary.isInsightBrief,
-           let data = content.data(using: .utf8),
-           let brief = try? JSONDecoder().decode(InsightBrief.self, from: data) {
+        if summary.isInsightBrief, let brief = InsightBrief.decode(from: content) {
             insightBrief = brief
         }
     }
 
     private func loadFullContent() async {
         loadingError = nil
+        let cache = cacheService ?? CacheService()
 
         // Phase 1: Show cached content instantly
-        if let cacheService = cacheService,
-           let cached = await cacheService.getCachedContent(for: summary.url) {
+        if let cached = await cache.getCachedContent(for: summary.url) {
             setContent(cached)
             return
         }
@@ -272,37 +270,31 @@ struct DetailView: View {
         if fullContent == nil { isLoadingContent = true }
         defer { isLoadingContent = false }
 
-        guard let url = URL(string: summary.url) else {
-            if fullContent == nil { loadingError = "Invalid URL" }
-            return
-        }
-
         do {
-            var request = URLRequest(url: url)
-            request.timeoutInterval = 30
-            let (data, _) = try await URLSession.shared.data(for: request)
-            if let content = String(data: data, encoding: .utf8) {
-                setContent(content)
-                if let cacheService = cacheService {
-                    try? await cacheService.cacheContent(content, for: summary.url)
-                }
-            } else if fullContent == nil {
-                loadingError = "Could not decode content"
-            }
+            let content = try await ArticleContentLoader.load(summary, cacheService: cache)
+            setContent(content)
         } catch {
-            if fullContent == nil {
-                if let error = error as? URLError, error.code == .timedOut {
-                    loadingError = "Request timed out. Please try again."
-                } else {
-                    loadingError = "Unable to load content. Check your connection."
-                }
+            guard fullContent == nil else { return }
+            if let error = error as? URLError, error.code == .timedOut {
+                loadingError = "Request timed out. Please try again."
+            } else if let error = error as? ArticleContentLoader.LoadError {
+                loadingError = error.localizedDescription
+            } else {
+                loadingError = "Unable to load content. Check your connection."
             }
         }
     }
 
     private func toggleTTS() {
         guard let content = fullContent else { return }
-        ttsService.togglePlayPause(content, articleUrl: summary.url, articleTitle: summary.title)
+        // Passed as an autoclosure — the speech text (and its JSON decode for
+        // insight briefs) is only built when playback actually starts, not on
+        // pause/resume taps.
+        ttsService.togglePlayPause(
+            SpeechTextBuilder.speechText(for: summary, content: content),
+            articleUrl: summary.url,
+            articleTitle: summary.title
+        )
         // Starting playback consumes the persisted resume position, so drop the
         // cached offer — otherwise a stale "Resume m:ss" reappears after finish.
         savedPosition = nil

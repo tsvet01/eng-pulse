@@ -9,6 +9,7 @@ Native iOS app for viewing AI-curated daily software engineering summaries.
 - **Daily Summaries**: View AI-generated article summaries with markdown rendering
 - **Model Filter**: Filter by AI model (Gemini, Claude, GPT) via toolbar menu
 - **Text-to-Speech**: Listen to articles with adjustable speed and pitch
+- **CarPlay**: Browse articles in the car and listen to a single article or a playlist with auto-advance
 - **Push Notifications**: APNs integration for new summary alerts
 - **Offline Support**: Local caching for offline reading
 - **Pull to Refresh**: Manual refresh for latest content
@@ -20,6 +21,7 @@ Native iOS app for viewing AI-curated daily software engineering summaries.
 ```
 EngPulse/
 ├── EngPulseApp.swift           # App entry, AppDelegate, AppState
+├── AppServices.swift           # Shared service container (app + CarPlay scenes)
 ├── Models/
 │   └── Summary.swift           # Article model with categories
 ├── Views/
@@ -27,11 +29,17 @@ EngPulse/
 │   ├── HomeView.swift          # Article list with filter
 │   ├── DetailView.swift        # Full article with TTS
 │   └── SettingsView.swift      # TTS and notification settings
+├── CarPlay/
+│   ├── CarPlaySceneDelegate.swift   # CarPlay scene entry point
+│   ├── CarPlayContentManager.swift  # Tab/list templates, playback wiring
+│   └── CarPlayContentBuilder.swift  # Pure list-shaping logic (tested)
 └── Services/
     ├── APIService.swift        # GCS API client
+    ├── ArticleContentLoader.swift # View-independent content fetching
     ├── CacheService.swift      # UserDefaults caching
     ├── NotificationService.swift # APNs handling
-    └── TTSService.swift        # Text-to-speech playback
+    ├── SpeechTextBuilder.swift # Spoken text (handles insight-brief JSON)
+    └── TTSService.swift        # Text-to-speech playback + playlist queue
 ```
 
 ## Requirements
@@ -127,6 +135,33 @@ ttsService.togglePlayPause(content, articleUrl: url)
 @AppStorage("ttsSpeechRate") var speechRate: Double = 0.55
 @AppStorage("ttsPitch") var pitch: Double = 1.0
 ```
+
+## CarPlay
+
+The app registers a CarPlay audio scene (`CPTemplateApplicationSceneSessionRoleApplication`
+in `Info.plist`, delegate `CarPlaySceneDelegate`) with two tabs:
+
+- **Latest**: newest articles first, plus a "Play All" playlist row
+- **Topics**: articles grouped by inferred category, each with its own "Play All"
+
+Tapping an article plays just that article; "Play All" queues the list as a
+playlist that auto-advances and supports next/previous track from the CarPlay
+now-playing screen (backed by the same `TTSService` queue the phone uses, so
+playback state stays in sync across both screens).
+
+### Requirements
+
+- The `com.apple.developer.carplay-audio` entitlement is declared in
+  `EngPulse.entitlements`. Running on a physical device requires CarPlay
+  entitlement approval from Apple
+  (request at https://developer.apple.com/contact/carplay/) and a provisioning
+  profile that includes it. Simulator builds (including CI) are unaffected.
+
+### Testing in the Simulator
+
+1. Run the app in an iOS Simulator from Xcode
+2. In the Simulator menu bar: **I/O → External Displays → CarPlay**
+3. The Eng Pulse icon appears on the CarPlay home screen
 
 ## Model Filtering
 

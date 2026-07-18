@@ -13,6 +13,10 @@ class LocalTTSService: NSObject, ObservableObject {
     @Published var isPlaying: Bool = false
     @Published var progress: Double = 0.0
 
+    /// Called when an utterance finishes naturally (not on stop/cancel), so
+    /// callers can distinguish completion from interruption.
+    var onSpeechFinished: (() -> Void)?
+
     override init() {
         super.init()
         synthesizer.delegate = self
@@ -84,6 +88,7 @@ extension LocalTTSService: AVSpeechSynthesizerDelegate {
             guard !synthesizer.isSpeaking else { return }
             self.isPlaying = false
             self.progress = 1.0
+            self.onSpeechFinished?()
         }
     }
 

@@ -37,6 +37,14 @@
 		F1000002 /* InsightBriefView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2000002 /* InsightBriefView.swift */; };
 		S1000001 /* SkeletonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = S2000001 /* SkeletonView.swift */; };
 		N1000001 /* NowPlayingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = N2000001 /* NowPlayingService.swift */; };
+		CP100001 /* CarPlaySceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = CP200001 /* CarPlaySceneDelegate.swift */; };
+		CP100002 /* CarPlayContentManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CP200002 /* CarPlayContentManager.swift */; };
+		CP100003 /* CarPlayContentBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = CP200003 /* CarPlayContentBuilder.swift */; };
+		CP100004 /* ArticleContentLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = CP200004 /* ArticleContentLoader.swift */; };
+		CP100005 /* SpeechTextBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = CP200005 /* SpeechTextBuilder.swift */; };
+		CP100006 /* AppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = CP200006 /* AppServices.swift */; };
+		CP100007 /* CarPlayContentBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CP200007 /* CarPlayContentBuilderTests.swift */; };
+		CP100008 /* SpeechTextBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CP200008 /* SpeechTextBuilderTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -84,6 +92,14 @@
 		F2000002 /* InsightBriefView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightBriefView.swift; sourceTree = "<group>"; };
 		S2000001 /* SkeletonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkeletonView.swift; sourceTree = "<group>"; };
 		N2000001 /* NowPlayingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingService.swift; sourceTree = "<group>"; };
+		CP200001 /* CarPlaySceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlaySceneDelegate.swift; sourceTree = "<group>"; };
+		CP200002 /* CarPlayContentManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayContentManager.swift; sourceTree = "<group>"; };
+		CP200003 /* CarPlayContentBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayContentBuilder.swift; sourceTree = "<group>"; };
+		CP200004 /* ArticleContentLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArticleContentLoader.swift; sourceTree = "<group>"; };
+		CP200005 /* SpeechTextBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechTextBuilder.swift; sourceTree = "<group>"; };
+		CP200006 /* AppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppServices.swift; sourceTree = "<group>"; };
+		CP200007 /* CarPlayContentBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayContentBuilderTests.swift; sourceTree = "<group>"; };
+		CP200008 /* SpeechTextBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechTextBuilderTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -119,16 +135,28 @@
 			isa = PBXGroup;
 			children = (
 				A2000001 /* EngPulseApp.swift */,
+				CP200006 /* AppServices.swift */,
 				E1000001 /* Theme.swift */,
 				A5000004 /* Views */,
 				A5000005 /* Models */,
 				A5000006 /* Services */,
+				CP500001 /* CarPlay */,
 				A2000009 /* Assets.xcassets */,
 				3AA66F142F65A300009104BA /* GoogleService-Info.plist */,
 				A2000010 /* Info.plist */,
 				A200000C /* EngPulse.entitlements */,
 			);
 			path = EngPulse;
+			sourceTree = "<group>";
+		};
+		CP500001 /* CarPlay */ = {
+			isa = PBXGroup;
+			children = (
+				CP200001 /* CarPlaySceneDelegate.swift */,
+				CP200002 /* CarPlayContentManager.swift */,
+				CP200003 /* CarPlayContentBuilder.swift */,
+			);
+			path = CarPlay;
 			sourceTree = "<group>";
 		};
 		A5000003 /* Products */ = {
@@ -170,6 +198,7 @@
 			isa = PBXGroup;
 			children = (
 				A2000007 /* APIService.swift */,
+				CP200004 /* ArticleContentLoader.swift */,
 				A2000010A /* AudioPlayerService.swift */,
 				A2000008 /* CacheService.swift */,
 				3AA66F112F65A28B009104BA /* FeedbackService.swift */,
@@ -177,6 +206,7 @@
 				D2000001 /* LocalTTSService.swift */,
 				A200000B /* NotificationService.swift */,
 				N2000001 /* NowPlayingService.swift */,
+				CP200005 /* SpeechTextBuilder.swift */,
 				C2000001 /* TextCleaner.swift */,
 				A200000D /* TTSService.swift */,
 			);
@@ -189,6 +219,8 @@
 				B2000003 /* MarkdownRendererTests.swift */,
 				C2000005 /* TextCleanerTests.swift */,
 				D2000003 /* LocalTTSServiceTests.swift */,
+				CP200007 /* CarPlayContentBuilderTests.swift */,
+				CP200008 /* SpeechTextBuilderTests.swift */,
 			);
 			path = EngPulseTests;
 			sourceTree = "<group>";
@@ -320,6 +352,12 @@
 				F1000001 /* InsightBrief.swift in Sources */,
 				F1000002 /* InsightBriefView.swift in Sources */,
 				S1000001 /* SkeletonView.swift in Sources */,
+				CP100001 /* CarPlaySceneDelegate.swift in Sources */,
+				CP100002 /* CarPlayContentManager.swift in Sources */,
+				CP100003 /* CarPlayContentBuilder.swift in Sources */,
+				CP100004 /* ArticleContentLoader.swift in Sources */,
+				CP100005 /* SpeechTextBuilder.swift in Sources */,
+				CP100006 /* AppServices.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -330,6 +368,8 @@
 				B1000003 /* MarkdownRendererTests.swift in Sources */,
 				C1000005 /* TextCleanerTests.swift in Sources */,
 				D1000002 /* LocalTTSServiceTests.swift in Sources */,
+				CP100007 /* CarPlayContentBuilderTests.swift in Sources */,
+				CP100008 /* SpeechTextBuilderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

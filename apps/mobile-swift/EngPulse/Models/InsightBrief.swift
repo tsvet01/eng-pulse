@@ -19,4 +19,11 @@ struct InsightBrief: Codable {
         case deepDive = "deep_dive"
         case meta
     }
+
+    /// Single decode point for the insight-brief JSON payload, shared by the
+    /// article screen and the speech pipeline so both parse identically.
+    static func decode(from content: String) -> InsightBrief? {
+        guard let data = content.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(InsightBrief.self, from: data)
+    }
 }
