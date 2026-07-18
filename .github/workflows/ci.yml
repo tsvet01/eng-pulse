@@ -151,10 +151,22 @@ jobs:
     - name: Run Swift tests
       run: |
         cd apps/mobile-swift
+        # Pick an iPhone simulator that exists on this runner image instead of
+        # hard-coding a model name that disappears when the image updates.
+        # Select by UDID from the newest iOS runtime: parsing the JSON (not the
+        # human-readable listing) survives parenthesized device names, and a
+        # UDID destination can't hit a name/OS mismatch.
+        DEVICE=$(xcrun simctl list devices available --json | jq -r '
+          .devices | to_entries
+          | map(select(.key | contains("SimRuntime.iOS")))
+          | sort_by(.key) | reverse
+          | map(.value[] | select(.name | startswith("iPhone")))
+          | first // empty | "\(.udid) \(.name)"')
+        echo "Using simulator: ${DEVICE:?no iPhone simulator available}"
         xcodebuild test \
           -scheme EngPulse \
           -sdk iphonesimulator \
-          -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+          -destination "platform=iOS Simulator,id=${DEVICE%% *}" \
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO
 
