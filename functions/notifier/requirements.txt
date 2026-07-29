@@ -1,6 +1,6 @@
 functions-framework==3.10.1
 google-cloud-storage==3.10.1
-google-cloud-firestore==2.26.0
+google-cloud-firestore==2.27.0
 google-cloud-secret-manager==2.21.0
 google-auth==2.49.1
 requests==2.33.1
