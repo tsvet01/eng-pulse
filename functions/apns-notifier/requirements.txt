@@ -1,4 +1,4 @@
-functions-framework==3.10.1
+functions-framework==3.10.2
 google-cloud-firestore==2.26.0
 google-cloud-secret-manager==2.27.0
 PyJWT==2.12.1
