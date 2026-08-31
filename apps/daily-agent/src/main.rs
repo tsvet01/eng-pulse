@@ -69,6 +69,16 @@ fn shadow_model_from(env_val: Option<String>) -> Option<String> {
     env_val.filter(|m| !m.is_empty())
 }
 
+/// Head-to-head judge instruction; scores alone saturate at the ceiling.
+fn pairwise_instruction(has_shadow: bool) -> &'static str {
+    if has_shadow {
+        "The summaries cover the same article. After scoring, compare them head-to-head and add one top-level field to the same JSON object:\n\
+         \"pairwise_winner\": the summary_id of the summary a senior engineering leader should prefer, or \"tie\" only if they are genuinely indistinguishable. Scores may be equal while one summary is still clearly preferable — decide the winner independently of the scores.\n\n"
+    } else {
+        ""
+    }
+}
+
 fn shadow_model() -> Option<String> {
     shadow_model_from(std::env::var("SHADOW_MODEL").ok())
 }
@@ -824,7 +834,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 section.push_str(&format!("--- Summary: {} ---\n{}\n\n", SHADOW_SUMMARY_ID, json));
             }
             if let Some(json) = run_eval_pass(
-                &http_client, *eval_provider, eval_key, format!("{}{}", v3_prompt, section), &gcs_client, &bucket_name, &today, "eval-v3"
+                &http_client, *eval_provider, eval_key,
+                format!("{}{}{}", v3_prompt, pairwise_instruction(shadow_v3_json.is_some()), section),
+                &gcs_client, &bucket_name, &today, "eval-v3"
             ).await {
                 apply_eval_scores(&json, &mut new_manifest_entries);
             }
@@ -1016,6 +1028,18 @@ mod tests {
     fn test_parse_selection_index_only_special_chars() {
         assert_eq!(parse_selection_index("!@#$%^&*()"), None);
         assert_eq!(parse_selection_index("..."), None);
+    }
+
+    #[test]
+    fn test_pairwise_instruction_present_with_shadow() {
+        let ins = pairwise_instruction(true);
+        assert!(ins.contains("pairwise_winner"));
+        assert!(ins.contains("tie"));
+    }
+
+    #[test]
+    fn test_pairwise_instruction_empty_without_shadow() {
+        assert_eq!(pairwise_instruction(false), "");
     }
 
     #[test]
