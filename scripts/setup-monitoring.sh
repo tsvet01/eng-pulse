@@ -310,9 +310,49 @@ EOF
         echo "Agent fatal-error alert already exists"
     fi
 
+    # Alert: No successful run in 26 hours (staleness)
+    echo "Creating staleness alert..."
+    cat > /tmp/staleness-alert.json << 'EOF'
+{
+  "displayName": "Eng Pulse: no successful daily run in 26h",
+  "documentation": {
+    "content": "se-daily-agent-job has not completed successfully in 26h — the daily summary is missing or stale. Re-run: gcloud run jobs execute se-daily-agent-job --region us-central1 (use --args=--date,YYYY-MM-DD to backfill an older day). This alert stays open until a run succeeds.",
+    "mimeType": "text/markdown"
+  },
+  "conditions": [
+    {
+      "displayName": "No successful execution in 26h",
+      "conditionAbsent": {
+        "filter": "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"se-daily-agent-job\" AND metric.type=\"run.googleapis.com/job/completed_execution_count\" AND metric.labels.result=\"succeeded\"",
+        "aggregations": [
+          { "alignmentPeriod": "3600s", "perSeriesAligner": "ALIGN_SUM" }
+        ],
+        "duration": "93600s",
+        "trigger": { "count": 1 }
+      }
+    }
+  ],
+  "combiner": "OR",
+  "enabled": true,
+  "alertStrategy": { "autoClose": "604800s" }
+}
+EOF
+
+    EXISTING_ALERT=$(gcloud alpha monitoring policies list \
+        --filter="displayName='Eng Pulse: no successful daily run in 26h'" \
+        --format="value(name)" 2>/dev/null | head -1 || true)
+
+    if [ -z "$EXISTING_ALERT" ]; then
+        gcloud alpha monitoring policies create \
+            --policy-from-file=/tmp/staleness-alert.json \
+            $CHANNELS_FLAG 2>/dev/null || echo "Note: Alert creation requires additional permissions"
+    else
+        echo "Staleness alert already exists"
+    fi
+
     rm -f /tmp/daily-agent-alert.json /tmp/explorer-agent-alert.json \
           /tmp/notifier-alert.json /tmp/missing-summary-alert.json \
-          /tmp/agent-error-alert.json
+          /tmp/agent-error-alert.json /tmp/staleness-alert.json
 }
 
 # ============================================
