@@ -26,6 +26,7 @@
 3. **Promotion gate:** shadow avg score ≥ prod avg score in `eval-v3/{date}.json` for 5 consecutive days → flip `DEFAULT_CLAUDE_MODEL` to `claude-opus-5`, remove `SHADOW_MODEL`, verify with a real run (separate PR, out of scope here).
 4. **Config:** `SHADOW_MODEL` env var on the job, wired in `deploy.yml` so redeploys preserve it. Unset ⇒ lane fully off (today's behavior).
 5. **Judge report shape:** `eval-v3/{date}.json` already stores `{"scores": [{"summary_id", key_idea_clarity, why_it_matters_relevance, deep_dive_depth, action_quality, "reasoning"}]}`. Prod id stays `v3-claude`; shadow id is `v3-shadow`. `apply_eval_scores` matches manifest entries by id, so `v3-shadow` is naturally ignored for the manifest.
+6. **Follow-up note (2026-08-31):** judge scores are currently saturated (prod flat 5.0 across all four criteria), so before acting on the 5-day promotion gate in Note 3, the judge prompt should first be amended to emit an explicit pairwise winner between prod and shadow for the same day (e.g. `"pairwise_winner": "v3-claude" | "v3-shadow" | "tie"`) — comparing two scores both pinned at the ceiling isn't a real signal. Separately, staleness alerting is already delivered by the live "No Summary Generated (25h)" Cloud Monitoring policy (`conditionMonitoringQueryLanguage`, MQL `absent_for 90000s`, see `scripts/setup-monitoring.sh`); do not re-add `conditionAbsent`-based staleness variants — Cloud Monitoring rejects `conditionAbsent` durations beyond ~24h at policy-creation time, which is why the MQL form is used instead.
 
 ---
 
