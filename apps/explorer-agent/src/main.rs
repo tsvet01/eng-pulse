@@ -379,17 +379,41 @@ async fn fetch_latest_pub_date(client: &reqwest::Client, feed_url: &str) -> Resu
     Ok(None)
 }
 
-#[instrument(skip(client, api_key, content_sample), fields(source_name = %name))]
-async fn is_relevant_with_llm(client: &reqwest::Client, api_key: &str, name: &str, url: &str, content_sample: &str) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+/// Cap on how much feed content goes into the relevance prompt. Full-text
+/// feeds can be megabytes (danluu.com's atom.xml is >6MB ≈ 2.7M tokens); a
+/// yes/no relevance gate only needs the first few KB of titles/descriptions.
+const MAX_RELEVANCE_SAMPLE_BYTES: usize = 4096;
+
+/// Truncate to at most `max` bytes without splitting a UTF-8 character.
+fn truncate_to_char_boundary(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+fn build_relevance_prompt(name: &str, url: &str, content_sample: &str) -> String {
     let content_context = if content_sample.is_empty() {
         "No content sample available — judge by name and URL only.".to_string()
     } else {
-        format!("Content sample:\n{}", content_sample)
+        format!(
+            "Content sample:\n{}",
+            truncate_to_char_boundary(content_sample, MAX_RELEVANCE_SAMPLE_BYTES)
+        )
     };
-    let prompt = format!(
+    format!(
         "Blog: '{}' at {}\n\n{}\n\nIs this a technical engineering blog that publishes substantive, deep content relevant to a senior systems engineer (C++/Rust, infrastructure, AI tooling)? Not a news site, not marketing, not beginner tutorials.\n\nRespond ONLY with 'yes' or 'no'.",
         name, url, content_context
-    );
+    )
+}
+
+#[instrument(skip(client, api_key, content_sample), fields(source_name = %name))]
+async fn is_relevant_with_llm(client: &reqwest::Client, api_key: &str, name: &str, url: &str, content_sample: &str) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    let prompt = build_relevance_prompt(name, url, content_sample);
 
     let response = call_llm_with_retry(client, LlmProvider::Claude, api_key, prompt).await?;
     Ok(response.trim().to_lowercase().starts_with("yes"))
@@ -408,6 +432,33 @@ fn clean_llm_json(response: &str) -> &str {
 mod tests {
     use super::*;
     use chrono::Datelike;
+
+    #[test]
+    fn test_relevance_prompt_caps_oversized_content_sample() {
+        // A full-text feed (e.g. danluu.com is >6MB) must not blow up the prompt.
+        let huge_sample = "x".repeat(100_000);
+        let prompt = build_relevance_prompt("Dan Luu", "https://danluu.com/atom.xml", &huge_sample);
+        assert!(
+            prompt.len() <= MAX_RELEVANCE_SAMPLE_BYTES + 512,
+            "prompt is {} bytes, expected <= cap + template overhead",
+            prompt.len()
+        );
+    }
+
+    #[test]
+    fn test_relevance_prompt_truncates_on_char_boundary() {
+        // Multibyte content must not panic on a non-boundary slice.
+        let multibyte = "é".repeat(MAX_RELEVANCE_SAMPLE_BYTES); // 2 bytes per char
+        let prompt = build_relevance_prompt("Blog", "https://example.com", &multibyte);
+        assert!(prompt.len() <= MAX_RELEVANCE_SAMPLE_BYTES + 512);
+    }
+
+    #[test]
+    fn test_relevance_prompt_keeps_small_sample_intact() {
+        let sample = "A blog about Rust internals and profiling.";
+        let prompt = build_relevance_prompt("Blog", "https://example.com", sample);
+        assert!(prompt.contains(sample));
+    }
 
     #[test]
     fn test_clean_llm_json_with_fences() {
