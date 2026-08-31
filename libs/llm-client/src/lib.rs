@@ -99,6 +99,11 @@ pub struct LlmOptions {
     pub system: Option<String>,
     /// Per-call model override (beats env var and default).
     pub model: Option<String>,
+    /// Per-call max_tokens override for Claude (beats the 4096 default). On
+    /// Opus 5, adaptive thinking tokens count against this budget, so a
+    /// caller expecting thinking should raise it to leave room for the
+    /// answer.
+    pub max_tokens: Option<u32>,
 }
 
 /// Model precedence: per-call override > env var > provider default.
@@ -475,7 +480,7 @@ pub async fn call_claude_with_retry(
 fn build_claude_request(model: String, text: String, options: &LlmOptions) -> ClaudeRequest {
     ClaudeRequest {
         model,
-        max_tokens: 4096,
+        max_tokens: options.max_tokens.unwrap_or(4096),
         system: options.system.clone(),
         messages: vec![ClaudeMessage {
             role: "user".to_string(),
@@ -1010,6 +1015,22 @@ mod tests {
         let request = build_claude_request("claude-opus-4-8".to_string(), "Hi".to_string(), &options);
         let json = serde_json::to_string(&request).unwrap();
         assert!(!json.contains("temperature"), "temperature must not be sent to Claude, got: {json}");
+    }
+
+    #[test]
+    fn test_build_claude_request_honors_max_tokens_override() {
+        // Opus 5 adaptive thinking counts against max_tokens, so callers that
+        // expect thinking must be able to raise the cap above the 4096 default.
+        let options = LlmOptions { max_tokens: Some(16000), ..Default::default() };
+        let request = build_claude_request("claude-opus-5".to_string(), "Hi".to_string(), &options);
+        assert_eq!(request.max_tokens, 16000);
+    }
+
+    #[test]
+    fn test_build_claude_request_default_max_tokens_when_none() {
+        let options = LlmOptions::default();
+        let request = build_claude_request("claude-opus-4-8".to_string(), "Hi".to_string(), &options);
+        assert_eq!(request.max_tokens, 4096);
     }
 
     #[test]

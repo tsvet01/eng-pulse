@@ -139,6 +139,23 @@ async fn run_smoke(
             }
         }
     }
+
+    // Also smoke-check the shadow model, if configured, so a bad SHADOW_MODEL
+    // id fails the deploy gate instead of surfacing as a nightly warn.
+    if let Some(shadow) = shadow_model() {
+        if let Some((_, claude_key)) = providers.iter().find(|(p, _)| *p == LlmProvider::Claude) {
+            let prompt = "Reply with the single word: OK".to_string();
+            let options = LlmOptions { model: Some(shadow.clone()), ..Default::default() };
+            match call_llm(http_client, LlmProvider::Claude, claude_key, prompt, &options).await {
+                Ok(resp) => info!(provider = "claude", model = %shadow, reply = %resp.trim(), "Shadow smoke check passed"),
+                Err(e) => {
+                    error!(provider = "claude", model = %shadow, error = %e, "Shadow smoke check FAILED");
+                    failures.push(format!("shadow({}): {}", shadow, e));
+                }
+            }
+        }
+    }
+
     if failures.is_empty() {
         info!("Smoke test passed for all providers");
         Ok(())
@@ -685,7 +702,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Shadow lane: same prompt, candidate model; never enters the manifest.
         if let Some(shadow) = shadow_model() {
             let shadow_prompt = v3_config.summary_prompt(&best_article.source, &best_article.title, &truncated_text);
-            let shadow_options = LlmOptions { model: Some(shadow.clone()), ..Default::default() };
+            // Opus 5 adaptive thinking tokens count against max_tokens; raise
+            // the cap so the JSON answer isn't truncated. Prod paths keep the
+            // 4096 default.
+            let shadow_options = LlmOptions { model: Some(shadow.clone()), max_tokens: Some(16000), ..Default::default() };
 
             match call_llm(&http_client, LlmProvider::Claude, claude_key, shadow_prompt, &shadow_options).await {
                 Ok(response) => {
@@ -887,6 +907,7 @@ async fn fetch_article_content(client: &reqwest::Client, url: &str) -> Result<St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     fn args(items: &[&str]) -> Vec<String> {
         std::iter::once("daily-agent")
@@ -1003,5 +1024,98 @@ mod tests {
         assert_eq!(shadow_model_from(Some("claude-opus-5".to_string())), Some("claude-opus-5".to_string()));
         assert_eq!(shadow_model_from(Some(String::new())), None); // empty = off
         assert_eq!(shadow_model_from(None), None);
+    }
+
+    // --- run_smoke: shadow model gating (finding 5) ---
+    //
+    // A bad SHADOW_MODEL id must fail the deploy smoke gate instead of only
+    // surfacing as a nightly warn once the real run tries the shadow lane.
+    // #[serial] because these tests mutate process env vars (CLAUDE_BASE_URL,
+    // SHADOW_MODEL) shared with other tests in this binary.
+
+    #[tokio::test]
+    #[serial]
+    async fn test_run_smoke_fails_when_shadow_model_smoke_call_fails() {
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        use wiremock::matchers::{body_partial_json, method, path};
+
+        let mock_server = MockServer::start().await;
+
+        // Prod smoke call (default model, no override) succeeds.
+        Mock::given(method("POST"))
+            .and(path("/messages"))
+            .and(body_partial_json(serde_json::json!({"model": "claude-opus-4-8"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "content": [{"text": "OK"}]
+            })))
+            .with_priority(1)
+            .mount(&mock_server)
+            .await;
+
+        // Shadow smoke call, using a bad model id the way a SHADOW_MODEL typo
+        // would, fails.
+        Mock::given(method("POST"))
+            .and(path("/messages"))
+            .and(body_partial_json(serde_json::json!({"model": "claude-bad-shadow"})))
+            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+                "error": {"message": "model: claude-bad-shadow not found"}
+            })))
+            .with_priority(1)
+            .mount(&mock_server)
+            .await;
+
+        unsafe {
+            std::env::set_var("CLAUDE_BASE_URL", mock_server.uri());
+            std::env::set_var("SHADOW_MODEL", "claude-bad-shadow");
+        }
+
+        let providers = vec![(LlmProvider::Claude, "test-key".to_string())];
+        let result = run_smoke(&reqwest::Client::new(), &providers).await;
+
+        unsafe {
+            std::env::remove_var("CLAUDE_BASE_URL");
+            std::env::remove_var("SHADOW_MODEL");
+        }
+
+        let err = result.expect_err("a failing shadow smoke call must fail the whole gate");
+        assert!(
+            err.to_string().contains("claude-bad-shadow"),
+            "error should name the shadow model, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_run_smoke_passes_when_shadow_model_smoke_call_succeeds() {
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "content": [{"text": "OK"}]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        unsafe {
+            std::env::set_var("CLAUDE_BASE_URL", mock_server.uri());
+            std::env::set_var("SHADOW_MODEL", "claude-opus-5");
+        }
+
+        let providers = vec![(LlmProvider::Claude, "test-key".to_string())];
+        let result = run_smoke(&reqwest::Client::new(), &providers).await;
+
+        unsafe {
+            std::env::remove_var("CLAUDE_BASE_URL");
+            std::env::remove_var("SHADOW_MODEL");
+        }
+
+        assert!(
+            result.is_ok(),
+            "smoke should pass when both prod and shadow calls succeed: {result:?}"
+        );
     }
 }
