@@ -484,6 +484,10 @@ fn build_claude_request(model: String, text: String, options: &LlmOptions) -> Cl
     }
 }
 
+fn first_text_block(content: &[ClaudeContentBlock]) -> Option<&str> {
+    content.iter().find_map(|b| b.text.as_deref())
+}
+
 async fn call_claude(client: &reqwest::Client, api_key: &str, text: String, options: &LlmOptions) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let model = resolve_model_from(
         options.model.as_deref(),
@@ -532,10 +536,8 @@ async fn call_claude(client: &reqwest::Client, api_key: &str, text: String, opti
     }
 
     if let Some(content) = resp.content {
-        if let Some(block) = content.first() {
-            if let Some(text) = &block.text {
-                return Ok(text.clone());
-            }
+        if let Some(text) = first_text_block(&content) {
+            return Ok(text.to_string());
         }
     }
 
@@ -1046,5 +1048,21 @@ mod tests {
         let response: ClaudeResponse = serde_json::from_str(json).unwrap();
         let content = response.content.unwrap();
         assert_eq!(content[0].text, None);
+    }
+
+    #[test]
+    fn test_first_text_block_skips_leading_thinking_block() {
+        // Opus 5 adaptive thinking: first block can be a thinking block with no text.
+        let blocks = vec![
+            ClaudeContentBlock { text: None },
+            ClaudeContentBlock { text: Some("answer".to_string()) },
+        ];
+        assert_eq!(first_text_block(&blocks), Some("answer"));
+    }
+
+    #[test]
+    fn test_first_text_block_none_when_no_text() {
+        let blocks = vec![ClaudeContentBlock { text: None }];
+        assert_eq!(first_text_block(&blocks), None);
     }
 }
