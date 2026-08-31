@@ -12,7 +12,7 @@ use rss::Channel;
 use atom_syndication::Feed;
 use tracing::{info, warn, error, debug, instrument};
 use std::time::Duration as StdDuration;
-use llm_client::{call_llm_with_retry, init_logging, SourceConfig, SourceType, extract_domain, DEFAULT_BUCKET, LlmProvider};
+use llm_client::{call_llm, call_llm_with_retry, init_logging, LlmOptions, SourceConfig, SourceType, extract_domain, DEFAULT_BUCKET, LlmProvider};
 
 // --- Configuration Constants ---
 const HTTP_TIMEOUT_SECS: u64 = 60;
@@ -384,6 +384,17 @@ async fn fetch_latest_pub_date(client: &reqwest::Client, feed_url: &str) -> Resu
 /// yes/no relevance gate only needs the first few KB of titles/descriptions.
 const MAX_RELEVANCE_SAMPLE_BYTES: usize = 4096;
 
+/// The relevance gate is a yes/no classification — Haiku handles it at a
+/// fifth of Opus input pricing.
+const RELEVANCE_MODEL: &str = "claude-haiku-4-5";
+
+fn relevance_llm_options() -> LlmOptions {
+    LlmOptions {
+        model: Some(RELEVANCE_MODEL.to_string()),
+        ..Default::default()
+    }
+}
+
 /// Truncate to at most `max` bytes without splitting a UTF-8 character.
 fn truncate_to_char_boundary(s: &str, max: usize) -> &str {
     if s.len() <= max {
@@ -415,7 +426,7 @@ fn build_relevance_prompt(name: &str, url: &str, content_sample: &str) -> String
 async fn is_relevant_with_llm(client: &reqwest::Client, api_key: &str, name: &str, url: &str, content_sample: &str) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
     let prompt = build_relevance_prompt(name, url, content_sample);
 
-    let response = call_llm_with_retry(client, LlmProvider::Claude, api_key, prompt).await?;
+    let response = call_llm(client, LlmProvider::Claude, api_key, prompt, &relevance_llm_options()).await?;
     Ok(response.trim().to_lowercase().starts_with("yes"))
 }
 
@@ -432,6 +443,14 @@ fn clean_llm_json(response: &str) -> &str {
 mod tests {
     use super::*;
     use chrono::Datelike;
+
+    #[test]
+    fn test_relevance_gate_uses_cheap_model() {
+        // A yes/no gate doesn't need Opus pricing.
+        let options = relevance_llm_options();
+        assert_eq!(options.model.as_deref(), Some(RELEVANCE_MODEL));
+        assert_eq!(RELEVANCE_MODEL, "claude-haiku-4-5");
+    }
 
     #[test]
     fn test_relevance_prompt_caps_oversized_content_sample() {

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, warn, instrument};
+use tracing::{debug, error, info, warn, instrument};
 use tracing_subscriber::{fmt, EnvFilter};
 use backoff::{ExponentialBackoff, future::retry};
 use std::time::Duration;
@@ -97,6 +97,20 @@ pub struct LlmOptions {
     pub temperature: Option<f32>,
     /// System message (Claude/OpenAI). Ignored by Gemini.
     pub system: Option<String>,
+    /// Per-call model override. Beats the provider's env var and default.
+    pub model: Option<String>,
+}
+
+/// Model precedence: per-call override > env var > provider default.
+fn resolve_model_from(
+    options_model: Option<&str>,
+    env_model: Option<String>,
+    default_model: &str,
+) -> String {
+    options_model
+        .map(str::to_string)
+        .or(env_model)
+        .unwrap_or_else(|| default_model.to_string())
 }
 
 // --- Shared Logging ---
@@ -158,9 +172,19 @@ pub struct GeminiCandidate {
 }
 
 #[derive(Deserialize, Debug)]
+pub struct GeminiUsageMetadata {
+    #[serde(rename = "promptTokenCount", default)]
+    pub prompt_token_count: u64,
+    #[serde(rename = "candidatesTokenCount", default)]
+    pub candidates_token_count: u64,
+}
+
+#[derive(Deserialize, Debug)]
 pub struct GeminiResponse {
     pub candidates: Option<Vec<GeminiCandidate>>,
     pub error: Option<GeminiError>,
+    #[serde(rename = "usageMetadata")]
+    pub usage_metadata: Option<GeminiUsageMetadata>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -222,8 +246,11 @@ fn is_transient_boxed(err: &(dyn std::error::Error + Send + Sync + 'static)) -> 
 }
 
 async fn call_gemini(client: &reqwest::Client, api_key: &str, text: String, options: &LlmOptions) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    // Get model from environment or use default
-    let model = std::env::var("GEMINI_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+    let model = resolve_model_from(
+        options.model.as_deref(),
+        std::env::var("GEMINI_MODEL").ok(),
+        DEFAULT_MODEL,
+    );
 
     // Allow overriding base URL for testing
     let base_url = std::env::var("GEMINI_BASE_URL")
@@ -265,6 +292,16 @@ async fn call_gemini(client: &reqwest::Client, api_key: &str, text: String, opti
 
     if let Some(error) = resp.error {
         return Err(format!("Gemini API Error: {}", error.message).into());
+    }
+
+    if let Some(usage) = &resp.usage_metadata {
+        info!(
+            provider = "gemini",
+            model = %model,
+            input_tokens = usage.prompt_token_count,
+            output_tokens = usage.candidates_token_count,
+            "LLM usage"
+        );
     }
 
     if let Some(candidates) = resp.candidates {
@@ -325,7 +362,11 @@ pub async fn call_openai_with_retry(
 }
 
 async fn call_openai(client: &reqwest::Client, api_key: &str, text: String, options: &LlmOptions) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| DEFAULT_OPENAI_MODEL.to_string());
+    let model = resolve_model_from(
+        options.model.as_deref(),
+        std::env::var("OPENAI_MODEL").ok(),
+        DEFAULT_OPENAI_MODEL,
+    );
 
     // Allow overriding base URL for testing
     let base_url = std::env::var("OPENAI_BASE_URL")
@@ -397,9 +438,18 @@ struct ClaudeContentBlock {
 }
 
 #[derive(Deserialize, Debug)]
+struct ClaudeUsage {
+    #[serde(default)]
+    input_tokens: u64,
+    #[serde(default)]
+    output_tokens: u64,
+}
+
+#[derive(Deserialize, Debug)]
 struct ClaudeResponse {
     content: Option<Vec<ClaudeContentBlock>>,
     error: Option<ClaudeError>,
+    usage: Option<ClaudeUsage>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -435,7 +485,11 @@ fn build_claude_request(model: String, text: String, options: &LlmOptions) -> Cl
 }
 
 async fn call_claude(client: &reqwest::Client, api_key: &str, text: String, options: &LlmOptions) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let model = std::env::var("CLAUDE_MODEL").unwrap_or_else(|_| DEFAULT_CLAUDE_MODEL.to_string());
+    let model = resolve_model_from(
+        options.model.as_deref(),
+        std::env::var("CLAUDE_MODEL").ok(),
+        DEFAULT_CLAUDE_MODEL,
+    );
 
     // Allow overriding base URL for testing
     let base_url = std::env::var("CLAUDE_BASE_URL")
@@ -465,6 +519,16 @@ async fn call_claude(client: &reqwest::Client, api_key: &str, text: String, opti
 
     if let Some(error) = resp.error {
         return Err(format!("Claude API Error: {}", error.message).into());
+    }
+
+    if let Some(usage) = &resp.usage {
+        info!(
+            provider = "claude",
+            model = %request.model,
+            input_tokens = usage.input_tokens,
+            output_tokens = usage.output_tokens,
+            "LLM usage"
+        );
     }
 
     if let Some(content) = resp.content {
@@ -560,6 +624,53 @@ pub fn get_model_env_var(provider: LlmProvider) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_options_model_beats_env_and_default() {
+        let resolved = resolve_model_from(
+            Some("claude-haiku-4-5"),
+            Some("claude-opus-4-8".to_string()),
+            DEFAULT_CLAUDE_MODEL,
+        );
+        assert_eq!(resolved, "claude-haiku-4-5");
+    }
+
+    #[test]
+    fn test_env_model_beats_default() {
+        let resolved = resolve_model_from(None, Some("env-model".to_string()), "default-model");
+        assert_eq!(resolved, "env-model");
+    }
+
+    #[test]
+    fn test_default_model_when_nothing_set() {
+        let resolved = resolve_model_from(None, None, DEFAULT_CLAUDE_MODEL);
+        assert_eq!(resolved, DEFAULT_CLAUDE_MODEL);
+    }
+
+    #[test]
+    fn test_claude_response_parses_usage() {
+        let json = r#"{"content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":100,"output_tokens":50}}"#;
+        let resp: ClaudeResponse = serde_json::from_str(json).unwrap();
+        let usage = resp.usage.unwrap();
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.output_tokens, 50);
+    }
+
+    #[test]
+    fn test_claude_response_without_usage_still_parses() {
+        let json = r#"{"content":[{"type":"text","text":"hi"}]}"#;
+        let resp: ClaudeResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.usage.is_none());
+    }
+
+    #[test]
+    fn test_gemini_response_parses_usage_metadata() {
+        let json = r#"{"candidates":[{"content":{"parts":[{"text":"hi"}]}}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}"#;
+        let resp: GeminiResponse = serde_json::from_str(json).unwrap();
+        let usage = resp.usage_metadata.unwrap();
+        assert_eq!(usage.prompt_token_count, 10);
+        assert_eq!(usage.candidates_token_count, 5);
+    }
 
     #[test]
     fn test_is_transient_error_timeout() {
@@ -893,7 +1004,7 @@ mod tests {
         // Regression: Opus 4.7+ deprecated `temperature` and rejects it with a
         // 400 invalid_request_error. It must NEVER be serialized for Claude, even
         // when a caller sets one (e.g. eval passes Some(0.3)).
-        let options = LlmOptions { temperature: Some(0.3), system: None };
+        let options = LlmOptions { temperature: Some(0.3), ..Default::default() };
         let request = build_claude_request("claude-opus-4-8".to_string(), "Hi".to_string(), &options);
         let json = serde_json::to_string(&request).unwrap();
         assert!(!json.contains("temperature"), "temperature must not be sent to Claude, got: {json}");
