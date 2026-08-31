@@ -60,6 +60,18 @@ fn parse_run_mode(args: &[String]) -> Result<RunMode, String> {
 
 /// Content snippet length for two-phase selection
 const SELECTION_SNIPPET_CHARS: usize = 1000;
+
+/// Manifest-less summary id for the shadow V3 lane; never written to manifest.json.
+const SHADOW_SUMMARY_ID: &str = "v3-shadow";
+
+/// Empty or unset SHADOW_MODEL disables the shadow lane.
+fn shadow_model_from(env_val: Option<String>) -> Option<String> {
+    env_val.filter(|m| !m.is_empty())
+}
+
+fn shadow_model() -> Option<String> {
+    shadow_model_from(std::env::var("SHADOW_MODEL").ok())
+}
 use readability::extractor;
 use std::io::Cursor;
 use crate::fetcher::{SourceConfig, Article};
@@ -607,6 +619,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // --- Stage 3: V3 Insight Brief ---
     info!("=== Stage 3: V3 Insight Brief ===");
     let v3_config = prompts::PromptConfig::V3;
+    let mut shadow_v3_json: Option<String> = None;
 
     let claude_entry = enabled_providers.iter().find(|(p, _)| *p == LlmProvider::Claude);
     if let Some((_, claude_key)) = claude_entry {
@@ -667,6 +680,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
             }
             Err(e) => warn!(error = %e, "V3 summary generation failed"),
+        }
+
+        // Shadow lane: same prompt, candidate model; never enters the manifest.
+        if let Some(shadow) = shadow_model() {
+            let shadow_prompt = v3_config.summary_prompt(&best_article.source, &best_article.title, &truncated_text);
+            let shadow_options = LlmOptions { model: Some(shadow.clone()), ..Default::default() };
+
+            match call_llm(&http_client, LlmProvider::Claude, claude_key, shadow_prompt, &shadow_options).await {
+                Ok(response) => {
+                    let json_str = response.trim();
+                    let clean_json = if let (Some(start), Some(end)) = (json_str.find('{'), json_str.rfind('}')) {
+                        json_str[start..=end].to_string()
+                    } else {
+                        json_str.to_string()
+                    };
+
+                    match serde_json::from_str::<serde_json::Value>(&clean_json) {
+                        Ok(parsed) if parsed.get("key_idea").is_some() && parsed.get("deep_dive").is_some() => {
+                            let object_path = format!("summaries/v3-shadow/{}.json", today);
+                            match gcs_client.upload_object(
+                                &UploadObjectRequest { bucket: bucket_name.clone(), ..Default::default() },
+                                clean_json.as_bytes().to_vec(),
+                                &UploadType::Simple(Media::new(object_path.clone())),
+                            ).await {
+                                Ok(_) => {
+                                    info!(model = %shadow, "Shadow V3 brief uploaded to {}", object_path);
+                                    shadow_v3_json = Some(clean_json);
+                                }
+                                Err(e) => warn!(error = %e, "Failed to upload shadow V3 brief"),
+                            }
+                        }
+                        _ => warn!(model = %shadow, "Shadow V3 response invalid, skipping"),
+                    }
+                }
+                Err(e) => warn!(model = %shadow, error = %e, "Shadow V3 generation failed"),
+            }
         }
     } else {
         info!("Skipping V3: no Claude API key available");
@@ -736,7 +785,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
 
         // Eval V3 summaries with insight-brief rubric
-        if !v3_summaries.is_empty() {
+        if !v3_summaries.is_empty() || shadow_v3_json.is_some() {
             let v3_prompt = String::from(
                 "You are evaluating Insight Brief summaries for a senior engineering leader (C++/Rust, hedge fund, low-latency systems).\n\n\
                 Score each summary on these criteria (1-5 scale):\n\
@@ -750,6 +799,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let mut section = String::new();
             for (id, content) in &v3_summaries {
                 section.push_str(&format!("--- Summary: {} ---\n{}\n\n", id, content));
+            }
+            if let Some(json) = &shadow_v3_json {
+                section.push_str(&format!("--- Summary: {} ---\n{}\n\n", SHADOW_SUMMARY_ID, json));
             }
             if let Some(json) = run_eval_pass(
                 &http_client, *eval_provider, eval_key, format!("{}{}", v3_prompt, section), &gcs_client, &bucket_name, &today, "eval-v3"
@@ -943,5 +995,13 @@ mod tests {
     fn test_parse_selection_index_only_special_chars() {
         assert_eq!(parse_selection_index("!@#$%^&*()"), None);
         assert_eq!(parse_selection_index("..."), None);
+    }
+
+    #[test]
+    fn test_shadow_model_reads_env() {
+        // Pure precedence check via the helper's inner fn.
+        assert_eq!(shadow_model_from(Some("claude-opus-5".to_string())), Some("claude-opus-5".to_string()));
+        assert_eq!(shadow_model_from(Some(String::new())), None); // empty = off
+        assert_eq!(shadow_model_from(None), None);
     }
 }
