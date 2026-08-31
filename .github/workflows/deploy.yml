@@ -64,6 +64,7 @@ jobs:
           --region ${{ env.REGION }} \
           --project ${{ env.PROJECT_ID }} \
           --set-secrets GEMINI_API_KEY=gemini-api-key:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest \
+          --set-env-vars=SHADOW_MODEL=claude-opus-5 \
           --task-timeout 5m
 
     # --- Explorer Agent ---
