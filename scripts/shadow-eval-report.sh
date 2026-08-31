@@ -12,7 +12,7 @@ r = json.load(sys.stdin)
 scores = {s['summary_id']: (s['key_idea_clarity'] + s['why_it_matters_relevance'] + s['deep_dive_depth'] + s['action_quality']) / 4
           for s in r.get('scores', [])}
 prod, shadow = scores.get('v3-claude'), scores.get('v3-shadow')
-verdict = '-' if shadow is None else ('SHADOW' if shadow > prod else ('tie' if shadow == prod else 'prod'))
+verdict = '-' if (shadow is None or prod is None) else ('SHADOW' if shadow > prod else ('tie' if shadow == prod else 'prod'))
 print(f\"${DATE}  prod={prod}  shadow={shadow}  winner={verdict}\")
 " || echo "${DATE}  (no eval report)"
 done
