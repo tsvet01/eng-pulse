@@ -97,7 +97,7 @@ pub struct LlmOptions {
     pub temperature: Option<f32>,
     /// System message (Claude/OpenAI). Ignored by Gemini.
     pub system: Option<String>,
-    /// Per-call model override. Beats the provider's env var and default.
+    /// Per-call model override (beats env var and default).
     pub model: Option<String>,
 }
 

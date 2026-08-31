@@ -379,13 +379,10 @@ async fn fetch_latest_pub_date(client: &reqwest::Client, feed_url: &str) -> Resu
     Ok(None)
 }
 
-/// Cap on how much feed content goes into the relevance prompt. Full-text
-/// feeds can be megabytes (danluu.com's atom.xml is >6MB ≈ 2.7M tokens); a
-/// yes/no relevance gate only needs the first few KB of titles/descriptions.
+/// Feeds can be huge; the yes/no gate only needs a small sample.
 const MAX_RELEVANCE_SAMPLE_BYTES: usize = 4096;
 
-/// The relevance gate is a yes/no classification — Haiku handles it at a
-/// fifth of Opus input pricing.
+/// A cheap model is enough for a yes/no gate.
 const RELEVANCE_MODEL: &str = "claude-haiku-4-5";
 
 fn relevance_llm_options() -> LlmOptions {
@@ -446,7 +443,6 @@ mod tests {
 
     #[test]
     fn test_relevance_gate_uses_cheap_model() {
-        // A yes/no gate doesn't need Opus pricing.
         let options = relevance_llm_options();
         assert_eq!(options.model.as_deref(), Some(RELEVANCE_MODEL));
         assert_eq!(RELEVANCE_MODEL, "claude-haiku-4-5");
@@ -454,7 +450,6 @@ mod tests {
 
     #[test]
     fn test_relevance_prompt_caps_oversized_content_sample() {
-        // A full-text feed (e.g. danluu.com is >6MB) must not blow up the prompt.
         let huge_sample = "x".repeat(100_000);
         let prompt = build_relevance_prompt("Dan Luu", "https://danluu.com/atom.xml", &huge_sample);
         assert!(
@@ -466,7 +461,6 @@ mod tests {
 
     #[test]
     fn test_relevance_prompt_truncates_on_char_boundary() {
-        // Multibyte content must not panic on a non-boundary slice.
         let multibyte = "é".repeat(MAX_RELEVANCE_SAMPLE_BYTES); // 2 bytes per char
         let prompt = build_relevance_prompt("Blog", "https://example.com", &multibyte);
         assert!(prompt.len() <= MAX_RELEVANCE_SAMPLE_BYTES + 512);
