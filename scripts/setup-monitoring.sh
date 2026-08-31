@@ -209,27 +209,26 @@ EOF
         echo "Notifier alert already exists"
     fi
 
-    # Alert: No summaries generated in 36 hours (missed daily run)
+    # Alert: No summary generated in 25 hours (missed daily run)
+    #
+    # Matches the live MQL-based policy already running in GCP. A
+    # conditionAbsent duration this long (>~24h) is rejected by Cloud
+    # Monitoring at policy-creation time, so absence is expressed inside the
+    # MQL query itself via `absent_for` instead.
     echo "Creating missing summary alert..."
     cat > /tmp/missing-summary-alert.json << 'EOF'
 {
-  "displayName": "No Summary Generated (36h)",
+  "displayName": "No Summary Generated (25h)",
   "documentation": {
-    "content": "No new summary has been generated in 36 hours. The daily agent may not be running.",
+    "content": "No new summary has been generated in 25 hours. The daily agent may not be running.",
     "mimeType": "text/markdown"
   },
   "conditions": [
     {
       "displayName": "No successful job executions",
-      "conditionAbsent": {
-        "filter": "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"se-daily-agent-job\" AND metric.type=\"run.googleapis.com/job/completed_execution_count\" AND metric.labels.result=\"succeeded\"",
-        "aggregations": [
-          {
-            "alignmentPeriod": "3600s",
-            "perSeriesAligner": "ALIGN_SUM"
-          }
-        ],
-        "duration": "129600s",
+      "conditionMonitoringQueryLanguage": {
+        "query": "fetch cloud_run_job :: run.googleapis.com/job/completed_execution_count | filter resource.job_name == 'se-daily-agent-job' && metric.result == 'succeeded' | absent_for 90000s",
+        "duration": "0s",
         "trigger": {
           "count": 1
         }
@@ -245,7 +244,7 @@ EOF
 EOF
 
     EXISTING_ALERT=$(gcloud alpha monitoring policies list \
-        --filter="displayName='No Summary Generated (36h)'" \
+        --filter="displayName='No Summary Generated (25h)'" \
         --format="value(name)" 2>/dev/null | head -1 || true)
 
     if [ -z "$EXISTING_ALERT" ]; then

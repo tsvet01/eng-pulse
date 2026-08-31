@@ -60,6 +60,18 @@ fn parse_run_mode(args: &[String]) -> Result<RunMode, String> {
 
 /// Content snippet length for two-phase selection
 const SELECTION_SNIPPET_CHARS: usize = 1000;
+
+/// Manifest-less summary id for the shadow V3 lane; never written to manifest.json.
+const SHADOW_SUMMARY_ID: &str = "v3-shadow";
+
+/// Empty or unset SHADOW_MODEL disables the shadow lane.
+fn shadow_model_from(env_val: Option<String>) -> Option<String> {
+    env_val.filter(|m| !m.is_empty())
+}
+
+fn shadow_model() -> Option<String> {
+    shadow_model_from(std::env::var("SHADOW_MODEL").ok())
+}
 use readability::extractor;
 use std::io::Cursor;
 use crate::fetcher::{SourceConfig, Article};
@@ -127,6 +139,23 @@ async fn run_smoke(
             }
         }
     }
+
+    // Also smoke-check the shadow model, if configured, so a bad SHADOW_MODEL
+    // id fails the deploy gate instead of surfacing as a nightly warn.
+    if let Some(shadow) = shadow_model() {
+        if let Some((_, claude_key)) = providers.iter().find(|(p, _)| *p == LlmProvider::Claude) {
+            let prompt = "Reply with the single word: OK".to_string();
+            let options = LlmOptions { model: Some(shadow.clone()), ..Default::default() };
+            match call_llm(http_client, LlmProvider::Claude, claude_key, prompt, &options).await {
+                Ok(resp) => info!(provider = "claude", model = %shadow, reply = %resp.trim(), "Shadow smoke check passed"),
+                Err(e) => {
+                    error!(provider = "claude", model = %shadow, error = %e, "Shadow smoke check FAILED");
+                    failures.push(format!("shadow({}): {}", shadow, e));
+                }
+            }
+        }
+    }
+
     if failures.is_empty() {
         info!("Smoke test passed for all providers");
         Ok(())
@@ -607,6 +636,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // --- Stage 3: V3 Insight Brief ---
     info!("=== Stage 3: V3 Insight Brief ===");
     let v3_config = prompts::PromptConfig::V3;
+    let mut shadow_v3_json: Option<String> = None;
 
     let claude_entry = enabled_providers.iter().find(|(p, _)| *p == LlmProvider::Claude);
     if let Some((_, claude_key)) = claude_entry {
@@ -667,6 +697,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
             }
             Err(e) => warn!(error = %e, "V3 summary generation failed"),
+        }
+
+        // Shadow lane: same prompt, candidate model; never enters the manifest.
+        if let Some(shadow) = shadow_model() {
+            let shadow_prompt = v3_config.summary_prompt(&best_article.source, &best_article.title, &truncated_text);
+            // Opus 5 adaptive thinking tokens count against max_tokens; raise
+            // the cap so the JSON answer isn't truncated. Prod paths keep the
+            // 4096 default.
+            let shadow_options = LlmOptions { model: Some(shadow.clone()), max_tokens: Some(16000), ..Default::default() };
+
+            match call_llm(&http_client, LlmProvider::Claude, claude_key, shadow_prompt, &shadow_options).await {
+                Ok(response) => {
+                    let json_str = response.trim();
+                    let clean_json = if let (Some(start), Some(end)) = (json_str.find('{'), json_str.rfind('}')) {
+                        json_str[start..=end].to_string()
+                    } else {
+                        json_str.to_string()
+                    };
+
+                    match serde_json::from_str::<serde_json::Value>(&clean_json) {
+                        Ok(parsed) if parsed.get("key_idea").is_some() && parsed.get("deep_dive").is_some() => {
+                            let object_path = format!("summaries/v3-shadow/{}.json", today);
+                            match gcs_client.upload_object(
+                                &UploadObjectRequest { bucket: bucket_name.clone(), ..Default::default() },
+                                clean_json.as_bytes().to_vec(),
+                                &UploadType::Simple(Media::new(object_path.clone())),
+                            ).await {
+                                Ok(_) => {
+                                    info!(model = %shadow, "Shadow V3 brief uploaded to {}", object_path);
+                                    shadow_v3_json = Some(clean_json);
+                                }
+                                Err(e) => warn!(error = %e, "Failed to upload shadow V3 brief"),
+                            }
+                        }
+                        _ => warn!(model = %shadow, "Shadow V3 response invalid, skipping"),
+                    }
+                }
+                Err(e) => warn!(model = %shadow, error = %e, "Shadow V3 generation failed"),
+            }
         }
     } else {
         info!("Skipping V3: no Claude API key available");
@@ -736,7 +805,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
 
         // Eval V3 summaries with insight-brief rubric
-        if !v3_summaries.is_empty() {
+        if !v3_summaries.is_empty() || shadow_v3_json.is_some() {
             let v3_prompt = String::from(
                 "You are evaluating Insight Brief summaries for a senior engineering leader (C++/Rust, hedge fund, low-latency systems).\n\n\
                 Score each summary on these criteria (1-5 scale):\n\
@@ -750,6 +819,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let mut section = String::new();
             for (id, content) in &v3_summaries {
                 section.push_str(&format!("--- Summary: {} ---\n{}\n\n", id, content));
+            }
+            if let Some(json) = &shadow_v3_json {
+                section.push_str(&format!("--- Summary: {} ---\n{}\n\n", SHADOW_SUMMARY_ID, json));
             }
             if let Some(json) = run_eval_pass(
                 &http_client, *eval_provider, eval_key, format!("{}{}", v3_prompt, section), &gcs_client, &bucket_name, &today, "eval-v3"
@@ -835,6 +907,7 @@ async fn fetch_article_content(client: &reqwest::Client, url: &str) -> Result<St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     fn args(items: &[&str]) -> Vec<String> {
         std::iter::once("daily-agent")
@@ -943,5 +1016,106 @@ mod tests {
     fn test_parse_selection_index_only_special_chars() {
         assert_eq!(parse_selection_index("!@#$%^&*()"), None);
         assert_eq!(parse_selection_index("..."), None);
+    }
+
+    #[test]
+    fn test_shadow_model_reads_env() {
+        // Pure precedence check via the helper's inner fn.
+        assert_eq!(shadow_model_from(Some("claude-opus-5".to_string())), Some("claude-opus-5".to_string()));
+        assert_eq!(shadow_model_from(Some(String::new())), None); // empty = off
+        assert_eq!(shadow_model_from(None), None);
+    }
+
+    // --- run_smoke: shadow model gating (finding 5) ---
+    //
+    // A bad SHADOW_MODEL id must fail the deploy smoke gate instead of only
+    // surfacing as a nightly warn once the real run tries the shadow lane.
+    // #[serial] because these tests mutate process env vars (CLAUDE_BASE_URL,
+    // SHADOW_MODEL) shared with other tests in this binary.
+
+    #[tokio::test]
+    #[serial]
+    async fn test_run_smoke_fails_when_shadow_model_smoke_call_fails() {
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        use wiremock::matchers::{body_partial_json, method, path};
+
+        let mock_server = MockServer::start().await;
+
+        // Prod smoke call (default model, no override) succeeds.
+        Mock::given(method("POST"))
+            .and(path("/messages"))
+            .and(body_partial_json(serde_json::json!({"model": "claude-opus-4-8"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "content": [{"text": "OK"}]
+            })))
+            .with_priority(1)
+            .mount(&mock_server)
+            .await;
+
+        // Shadow smoke call, using a bad model id the way a SHADOW_MODEL typo
+        // would, fails.
+        Mock::given(method("POST"))
+            .and(path("/messages"))
+            .and(body_partial_json(serde_json::json!({"model": "claude-bad-shadow"})))
+            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+                "error": {"message": "model: claude-bad-shadow not found"}
+            })))
+            .with_priority(1)
+            .mount(&mock_server)
+            .await;
+
+        unsafe {
+            std::env::set_var("CLAUDE_BASE_URL", mock_server.uri());
+            std::env::set_var("SHADOW_MODEL", "claude-bad-shadow");
+        }
+
+        let providers = vec![(LlmProvider::Claude, "test-key".to_string())];
+        let result = run_smoke(&reqwest::Client::new(), &providers).await;
+
+        unsafe {
+            std::env::remove_var("CLAUDE_BASE_URL");
+            std::env::remove_var("SHADOW_MODEL");
+        }
+
+        let err = result.expect_err("a failing shadow smoke call must fail the whole gate");
+        assert!(
+            err.to_string().contains("claude-bad-shadow"),
+            "error should name the shadow model, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_run_smoke_passes_when_shadow_model_smoke_call_succeeds() {
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "content": [{"text": "OK"}]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        unsafe {
+            std::env::set_var("CLAUDE_BASE_URL", mock_server.uri());
+            std::env::set_var("SHADOW_MODEL", "claude-opus-5");
+        }
+
+        let providers = vec![(LlmProvider::Claude, "test-key".to_string())];
+        let result = run_smoke(&reqwest::Client::new(), &providers).await;
+
+        unsafe {
+            std::env::remove_var("CLAUDE_BASE_URL");
+            std::env::remove_var("SHADOW_MODEL");
+        }
+
+        assert!(
+            result.is_ok(),
+            "smoke should pass when both prod and shadow calls succeed: {result:?}"
+        );
     }
 }

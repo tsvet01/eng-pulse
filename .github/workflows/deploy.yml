@@ -64,7 +64,8 @@ jobs:
           --region ${{ env.REGION }} \
           --project ${{ env.PROJECT_ID }} \
           --set-secrets GEMINI_API_KEY=gemini-api-key:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest \
-          --task-timeout 5m
+          --update-env-vars=SHADOW_MODEL=claude-opus-5 \
+          --task-timeout 10m
 
     # --- Explorer Agent ---
     - name: Build & Push Explorer Agent (Cloud Build)
