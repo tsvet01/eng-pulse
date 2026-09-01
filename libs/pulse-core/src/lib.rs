@@ -44,7 +44,7 @@ pub struct InsightBrief {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BriefMeta {
-    pub confidence: Option<f32>,
+    pub confidence: Option<f64>,
     pub category: Option<String>,
 }
 
@@ -59,7 +59,7 @@ pub struct Brief {
     pub article_url: String,
     pub article_title: String,
     pub model: Option<String>,
-    pub eval_score: Option<f32>,
+    pub eval_score: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

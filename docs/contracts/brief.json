@@ -2,7 +2,7 @@
   "article_title": "Example post",
   "article_url": "https://example.com/post",
   "date": "2026-09-01",
-  "eval_score": 0.949999988079071,
+  "eval_score": 0.95,
   "feed_slug": "engineering",
   "format": "insight-brief-v3",
   "model": "claude-opus-4-8",
@@ -11,7 +11,7 @@
     "key_idea": "One clear sentence.",
     "meta": {
       "category": "platform-engineering",
-      "confidence": 0.8999999761581421
+      "confidence": 0.9
     },
     "what_to_change": "One concrete action.",
     "why_it_matters": "Why the reader cares."
