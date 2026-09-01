@@ -1,5 +1,9 @@
 /// Prepend optional context blocks to a base prompt.
-fn inject_context(base: String, selection_context: Option<&str>, recent_picks: Option<&str>) -> String {
+fn inject_context(
+    base: String,
+    selection_context: Option<&str>,
+    recent_picks: Option<&str>,
+) -> String {
     let mut prompt = base;
     if let Some(ctx) = selection_context {
         prompt = format!("{}\n\n{}", ctx, prompt);
@@ -71,7 +75,11 @@ impl PromptConfig {
         selection_context: Option<&str>,
         recent_picks: Option<&str>,
     ) -> String {
-        inject_context(self.shortlist_prompt(articles_text), selection_context, recent_picks)
+        inject_context(
+            self.shortlist_prompt(articles_text),
+            selection_context,
+            recent_picks,
+        )
     }
 
     /// Build final selection prompt with optional context.
@@ -81,7 +89,11 @@ impl PromptConfig {
         selection_context: Option<&str>,
         recent_picks: Option<&str>,
     ) -> String {
-        inject_context(self.final_selection_prompt(candidates_text), selection_context, recent_picks)
+        inject_context(
+            self.final_selection_prompt(candidates_text),
+            selection_context,
+            recent_picks,
+        )
     }
 
     fn v1_selection_prompt(&self, articles_text: &str) -> String {
