@@ -1,62 +1,24 @@
-# Stage 1: Build the application
-FROM rust:1.94-bookworm as builder
-
+FROM rust:1.94-bookworm AS builder
 WORKDIR /app
-
-# Copy only Cargo files first for dependency caching
+COPY Cargo.toml Cargo.lock ./
 COPY libs/llm-client/Cargo.toml libs/llm-client/Cargo.toml
+COPY apps/daily-agent/Cargo.toml apps/daily-agent/Cargo.toml
 COPY apps/explorer-agent/Cargo.toml apps/explorer-agent/Cargo.toml
-COPY apps/explorer-agent/Cargo.lock apps/explorer-agent/Cargo.lock
+RUN mkdir -p libs/llm-client/src apps/daily-agent/src apps/explorer-agent/src \
+ && echo "pub fn dummy() {}" > libs/llm-client/src/lib.rs \
+ && echo "fn main() {}" > apps/daily-agent/src/main.rs \
+ && echo "fn main() {}" > apps/explorer-agent/src/main.rs \
+ && cargo build --release -p se-explorer-agent \
+ && rm -rf libs/*/src apps/*/src target/release/.fingerprint/se-explorer-agent-* target/release/.fingerprint/llm-client-*
+COPY libs libs
+COPY apps/explorer-agent apps/explorer-agent
+RUN cargo build --release -p se-explorer-agent
 
-# Create dummy source files to build dependencies
-RUN mkdir -p libs/llm-client/src && echo "pub fn dummy() {}" > libs/llm-client/src/lib.rs
-RUN mkdir -p apps/explorer-agent/src && echo "fn main() {}" > apps/explorer-agent/src/main.rs
-
-# Build dependencies only (this layer will be cached)
-WORKDIR /app/apps/explorer-agent
-RUN cargo build --release || true
-
-# Remove dummy source and compiled artifacts to force rebuild
-# Keep deps/ intact for caching, but remove the main binary and its fingerprints
-RUN rm -rf /app/libs/llm-client/src /app/apps/explorer-agent/src \
-    /app/apps/explorer-agent/target/release/se-explorer-agent \
-    /app/apps/explorer-agent/target/release/.fingerprint/se-explorer-agent-* \
-    /app/apps/explorer-agent/target/release/.fingerprint/llm-client-* \
-    /app/apps/explorer-agent/target/release/deps/libse_explorer_agent* \
-    /app/apps/explorer-agent/target/release/deps/libllm_client* \
-    /app/apps/explorer-agent/target/release/deps/se_explorer_agent* \
-    /app/apps/explorer-agent/target/release/deps/llm_client*
-
-# Now copy actual source code
-WORKDIR /app
-COPY libs/llm-client/src libs/llm-client/src
-COPY apps/explorer-agent/src apps/explorer-agent/src
-
-# Build the application
-WORKDIR /app/apps/explorer-agent
-RUN cargo build --release
-
-# Stage 2: Create the runtime image
 FROM debian:bookworm-slim
-
 LABEL org.opencontainers.image.source="https://github.com/tsvet01/eng-pulse"
 LABEL org.opencontainers.image.description="RSS/blog source discovery agent"
-
-WORKDIR /app
-
-# Install necessary runtime dependencies (SSL, CA certs)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    libssl3 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create non-root user for security
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
 RUN useradd --no-create-home --shell /bin/false appuser
-
-# Copy the binary from the builder stage
-COPY --from=builder /app/apps/explorer-agent/target/release/se-explorer-agent /usr/local/bin/se-explorer-agent
-
-# Switch to non-root user
+COPY --from=builder /app/target/release/se-explorer-agent /usr/local/bin/se-explorer-agent
 USER appuser
-
 CMD ["se-explorer-agent"]

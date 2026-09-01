@@ -1,64 +1,26 @@
-# Stage 1: Build the application
-FROM rust:1.94-bookworm as builder
-
+FROM rust:1.94-bookworm AS builder
 WORKDIR /app
-
-# Copy only Cargo files first for dependency caching
+COPY Cargo.toml Cargo.lock ./
 COPY libs/llm-client/Cargo.toml libs/llm-client/Cargo.toml
 COPY apps/daily-agent/Cargo.toml apps/daily-agent/Cargo.toml
-COPY apps/daily-agent/Cargo.lock apps/daily-agent/Cargo.lock
+COPY apps/explorer-agent/Cargo.toml apps/explorer-agent/Cargo.toml
+RUN mkdir -p libs/llm-client/src apps/daily-agent/src apps/explorer-agent/src \
+ && echo "pub fn dummy() {}" > libs/llm-client/src/lib.rs \
+ && echo "fn main() {}" > apps/daily-agent/src/main.rs \
+ && echo "fn main() {}" > apps/explorer-agent/src/main.rs \
+ && cargo build --release -p se-daily-agent \
+ && rm -rf libs/*/src apps/*/src target/release/.fingerprint/se-daily-agent-* target/release/.fingerprint/llm-client-*
+COPY libs libs
+COPY apps/daily-agent apps/daily-agent
+RUN cargo build --release -p se-daily-agent
 
-# Create dummy source files to build dependencies
-RUN mkdir -p libs/llm-client/src && echo "pub fn dummy() {}" > libs/llm-client/src/lib.rs
-RUN mkdir -p apps/daily-agent/src && echo "fn main() {}" > apps/daily-agent/src/main.rs
-
-# Build dependencies only (this layer will be cached)
-WORKDIR /app/apps/daily-agent
-RUN cargo build --release || true
-
-# Remove dummy source and compiled artifacts to force rebuild
-# Keep deps/ intact for caching, but remove the main binary and its fingerprints
-RUN rm -rf /app/libs/llm-client/src /app/apps/daily-agent/src \
-    /app/apps/daily-agent/target/release/se-daily-agent \
-    /app/apps/daily-agent/target/release/.fingerprint/se-daily-agent-* \
-    /app/apps/daily-agent/target/release/.fingerprint/llm-client-* \
-    /app/apps/daily-agent/target/release/deps/libse_daily_agent* \
-    /app/apps/daily-agent/target/release/deps/libllm_client* \
-    /app/apps/daily-agent/target/release/deps/se_daily_agent* \
-    /app/apps/daily-agent/target/release/deps/llm_client*
-
-# Now copy actual source code
-WORKDIR /app
-COPY libs/llm-client/src libs/llm-client/src
-COPY apps/daily-agent/src apps/daily-agent/src
-
-# Build the application
-WORKDIR /app/apps/daily-agent
-RUN cargo build --release
-
-# Stage 2: Create the runtime image
 FROM debian:bookworm-slim
-
 LABEL org.opencontainers.image.source="https://github.com/tsvet01/eng-pulse"
 LABEL org.opencontainers.image.description="Daily engineering article summarizer"
-
-WORKDIR /app
-
-# Install necessary runtime dependencies (SSL, CA certs)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    libssl3 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create non-root user for security
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
 RUN useradd --no-create-home --shell /bin/false appuser
-
-# Copy the binary from the builder stage
-COPY --from=builder /app/apps/daily-agent/target/release/se-daily-agent /usr/local/bin/se-daily-agent
-
-# Switch to non-root user
+COPY --from=builder /app/target/release/se-daily-agent /usr/local/bin/se-daily-agent
 USER appuser
-
 # ENTRYPOINT (not CMD) so `gcloud run jobs execute --args=...` appends to the
 # binary invocation (e.g. --smoke, --date) instead of replacing the command.
 ENTRYPOINT ["se-daily-agent"]
