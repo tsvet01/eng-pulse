@@ -6,4 +6,5 @@ members = [
     "libs/pulse-core",
     "apps/daily-agent",
     "apps/explorer-agent",
+    "apps/pulse-api",
 ]

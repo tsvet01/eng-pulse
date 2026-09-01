@@ -5,11 +5,13 @@ COPY libs/llm-client/Cargo.toml libs/llm-client/Cargo.toml
 COPY libs/pulse-core/Cargo.toml libs/pulse-core/Cargo.toml
 COPY apps/daily-agent/Cargo.toml apps/daily-agent/Cargo.toml
 COPY apps/explorer-agent/Cargo.toml apps/explorer-agent/Cargo.toml
-RUN mkdir -p libs/llm-client/src libs/pulse-core/src apps/daily-agent/src apps/explorer-agent/src \
+COPY apps/pulse-api/Cargo.toml apps/pulse-api/Cargo.toml
+RUN mkdir -p libs/llm-client/src libs/pulse-core/src apps/daily-agent/src apps/explorer-agent/src apps/pulse-api/src \
  && echo "pub fn dummy() {}" > libs/llm-client/src/lib.rs \
  && echo "pub fn dummy() {}" > libs/pulse-core/src/lib.rs \
  && echo "fn main() {}" > apps/daily-agent/src/main.rs \
  && echo "fn main() {}" > apps/explorer-agent/src/main.rs \
+ && echo "fn main() {}" > apps/pulse-api/src/main.rs \
  && cargo build --release -p se-daily-agent \
  && rm -rf libs/*/src apps/daily-agent/src \
       target/release/.fingerprint/se-daily-agent-* target/release/.fingerprint/llm-client-* target/release/.fingerprint/pulse-core-*
