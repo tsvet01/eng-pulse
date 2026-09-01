@@ -137,6 +137,28 @@ Rule: a real run + a real device at every phase boundary before the next starts.
 - GCP-native comparison at the same scale: Cloud Run + Firestore ≈ $0–2 hosting (rejected: proprietary), Cloud Run + Cloud SQL ≈ $10–12, Cloud Run + Supabase free ≈ $1–2. Hetzner is ~$4–5/month more than the cheapest variants at 50 users but flat with growth, owned, and portable.
 - Levers: Haiku headline shortlist (built in); **retire the legacy V1 dual-provider path after Opus 5 promotion** (roughly half of today's LLM calls produce nothing users see); cap active feeds.
 
-## 12. Roadmap items outside this spec
+## 12. Repository layout and CI
+
+**Monorepo (kept).** The contract fixtures (`pulse-core` → JSON → Swift/Kotlin tests) and the Cargo workspace (pipeline + API sharing types) both require co-location; a solo developer's cross-cutting PRs are the norm. Layout after Phase 0/5:
+
+```
+Cargo.toml (workspace)      libs/llm-client · libs/pulse-core · apps/daily-agent · apps/explorer-agent · apps/pulse-api
+apps/mobile-swift           apps/mobile-android (Gradle, self-contained)      infra/hetzner · infra/gcp
+functions/ (until Phase 3)  docs/
+```
+
+**One workflow, path-filtered (`dorny/paths-filter`), deploys gated per component on main:**
+
+- `rust`: `cargo fmt --check`, `clippy --workspace -D warnings`, `test --workspace` (rust-cache).
+- `api-it`: Postgres service container → `sqlx migrate` → integration tests (when api/rust change).
+- `fixtures`: regenerate from `pulse-core`, `git diff --exit-code` — drift guard for the mobile contract.
+- `swift` (macOS) / `android` (ubuntu + SDK; debug APK artifact for sideloading): only when their dir or the fixtures change.
+- `terraform`: `fmt -check`, `validate`, `plan` with read-only credentials, plan posted as a PR comment.
+- `python`: until Phase 3.
+- Main only, after tests: `deploy-agents` (Cloud Build → Cloud Run jobs + `--smoke`, unchanged), `deploy-api` (docker build → GHCR → SSH `compose pull && up -d` → migrations on boot → `/healthz` check), `terraform-apply` (GitHub environment `production` with required reviewer = Anton), `deploy-functions` (until Phase 3).
+- The current `deploy.yml`/`workflow_run` indirection is folded into `ci.yml` via `needs:` + `if: github.ref == 'refs/heads/main'`, so backend-only merges skip the Swift build.
+- Secrets live in the `production` environment (Hetzner/Cloudflare tokens, SSH deploy key, app `.env`); mobile distribution stays outside CI (Xcode/TestFlight; sideloaded APK, Play internal testing later).
+
+## 13. Roadmap items outside this spec
 
 Opus 5 promotion decision (shadow lane running); V1 retirement; Android Auto; watch app; explorer proposing sources to feed owners; account-linking UI; per-feed staleness alerts from `runs`.
