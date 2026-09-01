@@ -19,6 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let pool = PgPoolOptions::new()
         .max_connections(8)
+        .acquire_timeout(std::time::Duration::from_secs(5))
         .connect(&database_url)
         .await?;
     sqlx::migrate!("./migrations").run(&pool).await?; // refuse to serve if migrations fail
