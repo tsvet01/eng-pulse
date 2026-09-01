@@ -9,7 +9,8 @@ RUN mkdir -p libs/llm-client/src apps/daily-agent/src apps/explorer-agent/src \
  && echo "fn main() {}" > apps/daily-agent/src/main.rs \
  && echo "fn main() {}" > apps/explorer-agent/src/main.rs \
  && cargo build --release -p se-daily-agent \
- && rm -rf libs/*/src apps/*/src target/release/.fingerprint/se-daily-agent-* target/release/.fingerprint/llm-client-*
+ && rm -rf libs/*/src apps/daily-agent/src \
+      target/release/.fingerprint/se-daily-agent-* target/release/.fingerprint/llm-client-*
 COPY libs libs
 COPY apps/daily-agent apps/daily-agent
 RUN cargo build --release -p se-daily-agent
