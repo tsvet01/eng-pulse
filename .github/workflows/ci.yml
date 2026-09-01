@@ -5,178 +5,284 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch:
 
 permissions:
   contents: read
+  packages: write
+  id-token: write
+  pull-requests: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  PROJECT_ID: tsvet01
+  REGION: us-central1
+  REPO_NAME: agent-repo
+  IMAGE_TAG: ${{ github.sha }}
+  API_IMAGE: ghcr.io/tsvet01/pulse-api
 
 jobs:
-  rust-check:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.f.outputs.rust }}
+      api: ${{ steps.f.outputs.api }}
+      agents: ${{ steps.f.outputs.agents }}
+      swift: ${{ steps.f.outputs.swift }}
+      infra: ${{ steps.f.outputs.infra }}
+      functions: ${{ steps.f.outputs.functions }}
+    steps:
+    - uses: actions/checkout@v6
+    - id: f
+      uses: dorny/paths-filter@v3
+      with:
+        filters: |
+          rust: ['Cargo.toml', 'Cargo.lock', 'libs/**', 'apps/daily-agent/**', 'apps/explorer-agent/**', 'apps/pulse-api/**']
+          api: ['Cargo.toml', 'Cargo.lock', 'libs/**', 'apps/pulse-api/**']
+          agents: ['Cargo.toml', 'Cargo.lock', 'libs/**', 'apps/daily-agent/**', 'apps/explorer-agent/**']
+          swift: ['apps/mobile-swift/**', 'docs/contracts/**']
+          infra: ['infra/**']
+          functions: ['functions/**']
+
+  rust:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
+    - uses: dtolnay/rust-toolchain@stable
+      with: { components: "clippy, rustfmt" }
+    - uses: Swatinem/rust-cache@v2
+    - run: cargo fmt --all -- --check
+    - run: cargo clippy --workspace -- -D warnings
+    - run: cargo test --workspace
 
-    - name: Set up Rust
-      uses: dtolnay/rust-toolchain@stable
-
-    - name: Cache Cargo dependencies
-      uses: actions/cache@v5
-      with:
-        path: |
-          ~/.cargo/bin/
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-          target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
-
-    - name: Check Daily Agent
-      run: cd apps/daily-agent && cargo check --verbose
-
-    - name: Check Explorer Agent
-      run: cd apps/explorer-agent && cargo check --verbose
-
-    - name: Clippy Lint Daily Agent
-      run: cd apps/daily-agent && cargo clippy -- -D warnings
-
-    - name: Clippy Lint Explorer Agent
-      run: cd apps/explorer-agent && cargo clippy -- -D warnings
-
-    - name: Test llm-client
-      run: cd libs/llm-client && cargo test --verbose
-
-    - name: Test Daily Agent
-      run: cd apps/daily-agent && cargo test --verbose
-
-    - name: Test Explorer Agent
-      run: cd apps/explorer-agent && cargo test --verbose
-
-  python-check:
+  fixtures:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+    - run: cargo run -p pulse-core --bin fixtures -- docs/contracts
+    - name: Fail on fixture drift
+      run: git diff --exit-code -- docs/contracts
 
-    - name: Set up Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: '3.12'
-
-    - name: Install dependencies
-      run: |
-        pip install -r functions/notifier/requirements-dev.txt
-        pip install -r functions/shared/requirements-dev.txt
-
-    - name: Check Python syntax
-      run: |
-        python -m py_compile functions/notifier/main.py
-        python -m py_compile functions/fcm-tokens/main.py
-        python -m py_compile functions/apns-notifier/main.py
-        python -m py_compile functions/feedback-receiver/main.py
-        python -c "import ast; [ast.parse(open(f).read()) for f in __import__('glob').glob('functions/shared/*.py')]"
-
-    - name: Run shared tests
-      run: cd functions && python -m pytest shared/ -v
-
-    - name: Run notifier tests
-      run: cd functions/notifier && python -m pytest test_main.py -v
-
-    - name: Run apns-notifier tests
-      run: cd functions/apns-notifier && python -m pytest test_main.py -v
-
-    - name: Run fcm-tokens tests
-      run: cd functions/fcm-tokens && python -m pytest test_main.py -v
-
-    - name: Run feedback-receiver tests
-      run: |
-        cp -r functions/shared functions/feedback-receiver/shared
-        cd functions/feedback-receiver
-        pip install -r requirements.txt
-        python -m pytest test_main.py -v
-
-  flutter-check:
+  api-it:
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_USER: pulse, POSTGRES_PASSWORD: pulse, POSTGRES_DB: pulse }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U pulse" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://pulse:pulse@localhost:5432/pulse
     steps:
     - uses: actions/checkout@v6
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+    - name: Migrations apply and /healthz answers
+      run: |
+        cargo run -p pulse-api &
+        for i in $(seq 1 30); do curl -sf localhost:8080/healthz && break; sleep 1; done
+        curl -sf localhost:8080/healthz | grep '"db":"ok"'
 
-    - name: Set up Flutter
-      uses: subosito/flutter-action@v2
-      with:
-        channel: 'stable'
-
-    - name: Get dependencies
-      run: cd apps/mobile && flutter pub get
-
-    - name: Setup Firebase config for CI
-      run: cp apps/mobile/lib/firebase_options.dart.ci apps/mobile/lib/firebase_options.dart
-
-    - name: Analyze code
-      run: cd apps/mobile && flutter analyze
-
-    - name: Run tests
-      run: cd apps/mobile && flutter test
-
-  swift-check:
+  swift:
+    needs: changes
+    if: needs.changes.outputs.swift == 'true'
     runs-on: macos-latest
     steps:
     - uses: actions/checkout@v6
-
-    - name: Select Xcode version
-      run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-
-    - name: Show Xcode version
-      run: xcodebuild -version
-
-    - name: Create Secrets.xcconfig for CI
-      run: touch apps/mobile-swift/Secrets.xcconfig
-
-    - name: Setup Firebase config for CI
-      run: cp apps/mobile-swift/GoogleService-Info.plist.ci apps/mobile-swift/EngPulse/GoogleService-Info.plist
-
-    - name: Build Swift app
+    - run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+    - run: touch apps/mobile-swift/Secrets.xcconfig
+    - run: cp apps/mobile-swift/GoogleService-Info.plist.ci apps/mobile-swift/EngPulse/GoogleService-Info.plist
+    - name: Build and test
       run: |
         cd apps/mobile-swift
-        xcodebuild -scheme EngPulse \
-          -sdk iphonesimulator \
-          -destination 'generic/platform=iOS Simulator' \
-          -configuration Debug \
-          CODE_SIGN_IDENTITY="" \
-          CODE_SIGNING_REQUIRED=NO \
-          build
-
-    - name: Run Swift tests
-      run: |
-        cd apps/mobile-swift
-        # Pick an iPhone simulator that exists on this runner image instead of
-        # hard-coding a model name that disappears when the image updates.
-        # Select by UDID from the newest iOS runtime: parsing the JSON (not the
-        # human-readable listing) survives parenthesized device names, and a
-        # UDID destination can't hit a name/OS mismatch.
         DEVICE=$(xcrun simctl list devices available --json | jq -r '
-          .devices | to_entries
-          | map(select(.key | contains("SimRuntime.iOS")))
-          | sort_by(.key) | reverse
-          | map(.value[] | select(.name | startswith("iPhone")))
+          .devices | to_entries | map(select(.key | contains("SimRuntime.iOS")))
+          | sort_by(.key) | reverse | map(.value[] | select(.name | startswith("iPhone")))
           | first // empty | "\(.udid) \(.name)"')
-        echo "Using simulator: ${DEVICE:?no iPhone simulator available}"
-        xcodebuild test \
-          -scheme EngPulse \
-          -sdk iphonesimulator \
+        xcodebuild test -scheme EngPulse -sdk iphonesimulator \
           -destination "platform=iOS Simulator,id=${DEVICE%% *}" \
-          CODE_SIGN_IDENTITY="" \
-          CODE_SIGNING_REQUIRED=NO
+          CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO
 
-    - name: Check for Swift warnings
+  python:
+    needs: changes
+    if: needs.changes.outputs.functions == 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
+      with: { python-version: '3.12' }
+    - run: |
+        pip install -r functions/notifier/requirements-dev.txt -r functions/shared/requirements-dev.txt
+        for f in notifier fcm-tokens apns-notifier feedback-receiver; do python -m py_compile functions/$f/main.py; done
+        (cd functions && python -m pytest shared/ -q)
+        for f in notifier apns-notifier fcm-tokens; do (cd functions/$f && python -m pytest test_main.py -q); done
+        cp -r functions/shared functions/feedback-receiver/shared
+        (cd functions/feedback-receiver && pip install -r requirements.txt -q && python -m pytest test_main.py -q)
+
+  terraform-plan:
+    needs: changes
+    if: needs.changes.outputs.infra == 'true'
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: infra/hetzner } }
+    env:
+      HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      TF_VAR_cloudflare_zone_id: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+      TF_VAR_admin_cidr: ${{ secrets.ADMIN_CIDR }}
+      TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+    steps:
+    - uses: actions/checkout@v6
+    - uses: google-github-actions/auth@v3
+      with: { credentials_json: "${{ secrets.GCP_CREDENTIALS }}" }
+    - uses: hashicorp/setup-terraform@v3
+      with: { terraform_version: "1.9.8" }
+    - run: terraform fmt -check -recursive
+    - run: terraform init -input=false
+    - run: terraform validate
+    - id: plan
+      run: terraform plan -no-color -input=false -out=tfplan 2>&1 | tee plan.txt
+    - name: Post plan on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const plan = fs.readFileSync('infra/hetzner/plan.txt', 'utf8').slice(0, 60000);
+          await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number,
+            body: '### Terraform plan (infra/hetzner)\n```\n' + plan + '\n```' });
+
+  # ---------------- main only ----------------
+  deploy-agents:
+    needs: [changes, rust, fixtures]
+    if: github.ref == 'refs/heads/main' && needs.changes.outputs.agents == 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: google-github-actions/auth@v3
+      with: { credentials_json: "${{ secrets.GCP_CREDENTIALS }}" }
+    - uses: google-github-actions/setup-gcloud@v3
+    - run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+    - name: Build & deploy daily-agent
       run: |
-        cd apps/mobile-swift
-        xcodebuild -scheme EngPulse \
-          -sdk iphonesimulator \
-          -destination 'generic/platform=iOS Simulator' \
-          -configuration Debug \
-          CODE_SIGN_IDENTITY="" \
-          CODE_SIGNING_REQUIRED=NO \
-          build 2>&1 | grep -E "warning:" | grep -v "non-Sendable" || true
+        gcloud builds submit --config=apps/daily-agent/cloudbuild.yaml \
+          --substitutions=_IMAGE_TAG=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:${{ env.IMAGE_TAG }} \
+          --machine-type=E2_HIGHCPU_8 .
+        gcloud run jobs update se-daily-agent-job --region ${{ env.REGION }} --project ${{ env.PROJECT_ID }} \
+          --remove-env-vars GEMINI_API_KEY,ANTHROPIC_API_KEY --clear-secrets || true
+        gcloud run jobs deploy se-daily-agent-job \
+          --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:${{ env.IMAGE_TAG }} \
+          --region ${{ env.REGION }} --project ${{ env.PROJECT_ID }} \
+          --set-secrets GEMINI_API_KEY=gemini-api-key:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest \
+          --update-env-vars=SHADOW_MODEL=claude-opus-5 --task-timeout 10m
+    - name: Build & deploy explorer-agent
+      run: |
+        gcloud builds submit --config=apps/explorer-agent/cloudbuild.yaml \
+          --substitutions=_IMAGE_TAG=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-explorer-agent:${{ env.IMAGE_TAG }} \
+          --machine-type=E2_HIGHCPU_8 .
+        gcloud run jobs update se-explorer-agent-job --region ${{ env.REGION }} --project ${{ env.PROJECT_ID }} \
+          --remove-env-vars GEMINI_API_KEY,ANTHROPIC_API_KEY --clear-secrets || true
+        gcloud run jobs deploy se-explorer-agent-job \
+          --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-explorer-agent:${{ env.IMAGE_TAG }} \
+          --region ${{ env.REGION }} --project ${{ env.PROJECT_ID }} \
+          --set-secrets GEMINI_API_KEY=gemini-api-key:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest \
+          --task-timeout 30m
+    - name: Smoke gate (real LLM call per provider + shadow model)
+      run: gcloud run jobs execute se-daily-agent-job --region ${{ env.REGION }} --project ${{ env.PROJECT_ID }} --args=--smoke --wait
+
+  deploy-functions:
+    needs: [changes, python]
+    if: github.ref == 'refs/heads/main' && needs.changes.outputs.functions == 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: google-github-actions/auth@v3
+      with: { credentials_json: "${{ secrets.GCP_CREDENTIALS }}" }
+    - uses: google-github-actions/setup-gcloud@v3
+    - name: Deploy all four functions (same flags as before)
+      run: |
+        set -e
+        for f in notifier feedback-receiver apns-notifier fcm-tokens; do cp -r functions/shared functions/$f/shared; done
+        (cd functions/notifier && gcloud functions deploy se-daily-notifier --gen2 --runtime=python312 --region=${{ env.REGION }} --source=. --entry-point=send_summary_email \
+          --trigger-event-filters="type=google.cloud.storage.object.v1.finalized" --trigger-event-filters="bucket=${{ env.PROJECT_ID }}-agent-brain" --clear-env-vars \
+          --set-secrets "GMAIL_USER=gmail-user:latest,GMAIL_APP_PASSWORD=gmail-app-password:latest,DEST_EMAIL=dest-email:latest" --project ${{ env.PROJECT_ID }})
+        (cd functions/feedback-receiver && gcloud functions deploy feedback-receiver --gen2 --runtime=python312 --region=${{ env.REGION }} --project=${{ env.PROJECT_ID }} --source=. --entry-point=receive_feedback --trigger-http --allow-unauthenticated)
+        (cd functions/apns-notifier && gcloud functions deploy register-apns-token --gen2 --runtime=python312 --region=${{ env.REGION }} --project=${{ env.PROJECT_ID }} --source=. --entry-point=register_apns_token --trigger-http --allow-unauthenticated --memory=256MB --timeout=30s \
+          && gcloud functions deploy trigger-apns-notification --gen2 --runtime=python312 --region=${{ env.REGION }} --project=${{ env.PROJECT_ID }} --source=. --entry-point=trigger_apns_notification --trigger-http --allow-unauthenticated --memory=256MB --timeout=60s)
+        (cd functions/fcm-tokens && gcloud functions deploy register-token --gen2 --runtime=python312 --region=${{ env.REGION }} --project=${{ env.PROJECT_ID }} --source=. --entry-point=register_token --trigger-http --allow-unauthenticated --memory=256MB --timeout=30s \
+          && gcloud functions deploy unregister-token --gen2 --runtime=python312 --region=${{ env.REGION }} --project=${{ env.PROJECT_ID }} --source=. --entry-point=unregister_token --trigger-http --allow-unauthenticated --memory=256MB --timeout=30s)
+
+  deploy-api:
+    needs: [changes, rust, api-it]
+    if: github.ref == 'refs/heads/main' && needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+    - uses: actions/checkout@v6
+    - uses: docker/login-action@v3
+      with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+    - uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: apps/pulse-api/Dockerfile
+        push: true
+        tags: ${{ env.API_IMAGE }}:${{ env.IMAGE_TAG }},${{ env.API_IMAGE }}:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+    - name: Write runtime env on the box, pull, restart, health-check
+      uses: appleboy/ssh-action@v1
+      with:
+        host: api.eng-pulse.tsvetkov.org
+        username: deploy
+        key: ${{ secrets.DEPLOY_SSH_KEY }}
+        envs: PULSE_ENV,GCS_BACKUP_SA_JSON,IMAGE_TAG
+        script: |
+          set -e
+          umask 077
+          cd /opt/pulse
+          printf '%s\n' "$PULSE_ENV" > .env
+          cat .env.defaults >> .env                      # compose interpolates only from .env
+          echo "PULSE_API_TAG=$IMAGE_TAG" >> .env
+          printf '%s\n' "$GCS_BACKUP_SA_JSON" > gcs-backup-sa.json
+          set -a; . ./.env; set +a
+          mountpoint -q "$(dirname "$PG_DATA")" || { echo "postgres volume not mounted at $PG_DATA"; exit 1; }
+          docker compose pull -q && docker compose up -d
+          for i in $(seq 1 30); do curl -sf localhost:8080/healthz | grep -q '"db":"ok"' && exit 0; sleep 2; done
+          docker compose logs --tail 50 pulse-api; exit 1
+      env:
+        PULSE_ENV: ${{ secrets.PULSE_ENV }}
+        GCS_BACKUP_SA_JSON: ${{ secrets.GCS_BACKUP_SA_JSON }}
+        IMAGE_TAG: ${{ env.IMAGE_TAG }}
+
+  terraform-apply:
+    needs: [changes, terraform-plan]
+    if: github.ref == 'refs/heads/main' && needs.changes.outputs.infra == 'true'
+    runs-on: ubuntu-latest
+    environment: production          # required reviewer = Anton → click to approve
+    defaults: { run: { working-directory: infra/hetzner } }
+    env:
+      HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      TF_VAR_cloudflare_zone_id: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+      TF_VAR_admin_cidr: ${{ secrets.ADMIN_CIDR }}
+      TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+    steps:
+    - uses: actions/checkout@v6
+    - uses: google-github-actions/auth@v3
+      with: { credentials_json: "${{ secrets.GCP_CREDENTIALS }}" }
+    - uses: hashicorp/setup-terraform@v3
+      with: { terraform_version: "1.9.8" }
+    - run: terraform init -input=false
+    - run: terraform apply -auto-approve -input=false
