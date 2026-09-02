@@ -1,0 +1,48 @@
+#cloud-config
+package_update: true
+packages: [docker.io, docker-compose-v2, unattended-upgrades, curl, jq]
+users:
+  - name: deploy
+    groups: [docker]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys: ["${ssh_public_key}"]
+write_files:
+  - path: /opt/pulse/docker-compose.yml
+    content: |
+      ${indent(6, compose)}
+  - path: /opt/pulse/Caddyfile
+    content: |
+      ${indent(6, caddyfile)}
+  - path: /opt/pulse/backup.sh
+    permissions: "0755"
+    content: |
+      ${indent(6, backup_sh)}
+  - path: /etc/systemd/system/pulse.service
+    content: |
+      [Unit]
+      Description=Eng Pulse compose stack
+      Requires=docker.service
+      After=docker.service network-online.target
+      RequiresMountsFor=/mnt/HC_Volume_${volume_id}
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=true
+      WorkingDirectory=/opt/pulse
+      ExecStart=/usr/bin/docker compose up -d
+      ExecStop=/usr/bin/docker compose down
+
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/cron.d/pulse-backup
+    content: "15 3 * * * deploy /opt/pulse/backup.sh >> /var/log/pulse-backup.log 2>&1\n"
+  - path: /opt/pulse/.env.defaults
+    content: |
+      PULSE_API_IMAGE=${api_image}
+      PG_DATA=/mnt/HC_Volume_${volume_id}/postgres
+runcmd:
+  - chown -R deploy:deploy /opt/pulse
+  - systemctl enable docker
+  - systemctl daemon-reload
+  - systemctl enable pulse.service
