@@ -27,6 +27,10 @@ terraform plan
 terraform apply
 ```
 
+cloud-init only *enables* `pulse.service`; on the very first boot the stack
+is started by the first CI `deploy-api` run (it writes `.env` then
+`docker compose up -d`); every later reboot starts it via systemd.
+
 Without credentials (e.g. in CI or for a quick syntax check), validate the
 stack without touching the backend or any provider API:
 
