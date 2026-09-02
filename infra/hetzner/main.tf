@@ -6,10 +6,14 @@ resource "hcloud_ssh_key" "anton" {
 resource "hcloud_firewall" "pulse" {
   name = "pulse"
   rule {
-    direction  = "in"
-    protocol   = "tcp"
-    port       = "22"
-    source_ips = [var.admin_cidr]
+    direction = "in"
+    protocol  = "tcp"
+    port      = "22"
+    # GitHub-hosted runners have no stable, publishable IP range, so the
+    # deploy job's SSH step cannot be restricted to var.admin_cidr here.
+    # Access control is enforced at the SSH layer instead (see
+    # cloud-init.yaml.tftpl: key-only auth, AllowUsers deploy root).
+    source_ips = ["0.0.0.0/0", "::/0"]
   }
   rule {
     direction  = "in"

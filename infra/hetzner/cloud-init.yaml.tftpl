@@ -1,6 +1,7 @@
 #cloud-config
 package_update: true
 packages: [docker.io, docker-compose-v2, unattended-upgrades, curl, jq]
+ssh_pwauth: false
 users:
   - name: deploy
     groups: [docker]
@@ -18,6 +19,16 @@ write_files:
     permissions: "0755"
     content: |
       ${indent(6, backup_sh)}
+  - path: /etc/ssh/sshd_config.d/10-pulse.conf
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin prohibit-password
+      AllowUsers deploy root
+  - path: /etc/systemd/system/docker.service.d/10-pulse-volume.conf
+    content: |
+      [Unit]
+      RequiresMountsFor=/mnt/HC_Volume_${volume_id}
   - path: /etc/systemd/system/pulse.service
     content: |
       [Unit]
@@ -30,6 +41,7 @@ write_files:
       Type=oneshot
       RemainAfterExit=true
       WorkingDirectory=/opt/pulse
+      ExecStartPre=/usr/bin/mountpoint -q /mnt/HC_Volume_${volume_id}
       ExecStart=/usr/bin/docker compose up -d
       ExecStop=/usr/bin/docker compose down
 
@@ -46,3 +58,4 @@ runcmd:
   - systemctl enable docker
   - systemctl daemon-reload
   - systemctl enable pulse.service
+  - systemctl restart ssh

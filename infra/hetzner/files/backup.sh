@@ -7,7 +7,7 @@ STAMP=$(date -u +%F)
 mkdir -p backups
 docker compose exec -T postgres pg_dump -U pulse pulse | gzip > "backups/pulse-${STAMP}.sql.gz"
 docker run --rm -v /opt/pulse/backups:/b -v /opt/pulse/gcs-backup-sa.json:/sa.json:ro rclone/rclone \
-  --gcs-service-account-file /sa.json copy /b :gcs:tsvet01-pulse-backups/postgres
+  --gcs-service-account-file /sa.json --gcs-bucket-policy-only copy /b :gcs:tsvet01-pulse-backups/postgres
 docker run --rm -v /opt/pulse/gcs-backup-sa.json:/sa.json:ro rclone/rclone \
-  --gcs-service-account-file /sa.json delete --min-age 30d :gcs:tsvet01-pulse-backups/postgres
+  --gcs-service-account-file /sa.json --gcs-bucket-policy-only delete --min-age 30d :gcs:tsvet01-pulse-backups/postgres
 find backups -name '*.sql.gz' -mtime +3 -delete
