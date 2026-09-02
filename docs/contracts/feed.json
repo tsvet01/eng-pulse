@@ -1,0 +1,16 @@
+{
+  "description": "Systems, infrastructure, AI tooling",
+  "is_active": true,
+  "name": "Engineering",
+  "slug": "engineering",
+  "sources": [
+    {
+      "kind": "rss",
+      "url": "https://blog.cloudflare.com/rss/"
+    }
+  ],
+  "topics": [
+    "distributed systems",
+    "rust"
+  ]
+}

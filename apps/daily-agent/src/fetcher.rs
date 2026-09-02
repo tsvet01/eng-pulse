@@ -1,10 +1,10 @@
-use rss::Channel;
 use atom_syndication::Feed as AtomFeed;
+use chrono::{DateTime, Duration, Utc};
+use rss::Channel;
 use serde::Deserialize;
 use std::error::Error;
 use std::time::Duration as StdDuration;
-use chrono::{DateTime, Utc, Duration};
-use tracing::{warn, debug};
+use tracing::{debug, warn};
 
 // Re-export from llm-client for convenience
 pub use llm_client::{SourceConfig, SourceType};
@@ -42,13 +42,19 @@ pub struct FetchWindow {
 impl FetchWindow {
     /// Articles published within the last 24 hours (default daily behavior).
     pub fn last_24h() -> Self {
-        FetchWindow { start: Utc::now() - Duration::hours(24), end: None }
+        FetchWindow {
+            start: Utc::now() - Duration::hours(24),
+            end: None,
+        }
     }
 
     /// A single UTC calendar day `[date 00:00, date+1 00:00)` — used for backfill.
     pub fn day(date: chrono::NaiveDate) -> Self {
         let start = date.and_hms_opt(0, 0, 0).expect("valid midnight").and_utc();
-        FetchWindow { start, end: Some(start + Duration::hours(24)) }
+        FetchWindow {
+            start,
+            end: Some(start + Duration::hours(24)),
+        }
     }
 
     /// True if `ts` falls within this window.
@@ -75,7 +81,11 @@ pub fn create_http_client() -> Result<reqwest::Client, Box<dyn Error + Send + Sy
         .map_err(|e| e.into())
 }
 
-pub async fn fetch_from_source(source: &SourceConfig, client: &reqwest::Client, window: FetchWindow) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
+pub async fn fetch_from_source(
+    source: &SourceConfig,
+    client: &reqwest::Client,
+    window: FetchWindow,
+) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
     match source.source_type {
         SourceType::Rss => fetch_rss(source, client, window).await,
         SourceType::Atom => fetch_atom(source, client, window).await,
@@ -103,7 +113,11 @@ fn parse_rss_date(date_str: &str) -> Option<DateTime<Utc>> {
     None
 }
 
-async fn fetch_rss(source: &SourceConfig, client: &reqwest::Client, window: FetchWindow) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
+async fn fetch_rss(
+    source: &SourceConfig,
+    client: &reqwest::Client,
+    window: FetchWindow,
+) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
     let content = client.get(&source.url).send().await?.bytes().await?;
     let channel = Channel::read_from(&content[..])?;
 
@@ -111,7 +125,9 @@ async fn fetch_rss(source: &SourceConfig, client: &reqwest::Client, window: Fetc
     let mut skipped_dates = 0;
 
     for item in channel.items().iter().take(MAX_ITEMS_PER_SOURCE) {
-        if let (Some(title), Some(link), Some(pub_date)) = (item.title(), item.link(), item.pub_date()) {
+        if let (Some(title), Some(link), Some(pub_date)) =
+            (item.title(), item.link(), item.pub_date())
+        {
             // Parse date using multiple format attempts
             let parsed_date = match parse_rss_date(pub_date) {
                 Some(dt) => dt,
@@ -140,7 +156,11 @@ async fn fetch_rss(source: &SourceConfig, client: &reqwest::Client, window: Fetc
     Ok(articles)
 }
 
-async fn fetch_atom(source: &SourceConfig, client: &reqwest::Client, window: FetchWindow) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
+async fn fetch_atom(
+    source: &SourceConfig,
+    client: &reqwest::Client,
+    window: FetchWindow,
+) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
     let content = client.get(&source.url).send().await?.text().await?;
     let feed = content.parse::<AtomFeed>()?;
 
@@ -185,7 +205,11 @@ async fn fetch_atom(source: &SourceConfig, client: &reqwest::Client, window: Fet
     Ok(articles)
 }
 
-async fn fetch_hackernews(source: &SourceConfig, client: &reqwest::Client, window: FetchWindow) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
+async fn fetch_hackernews(
+    source: &SourceConfig,
+    client: &reqwest::Client,
+    window: FetchWindow,
+) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
     let top_ids: Vec<u32> = client.get(&source.url).send().await?.json().await?;
 
     let mut articles = Vec::new();
@@ -281,9 +305,19 @@ mod tests {
         assert!(w.contains(d.and_hms_opt(0, 0, 0).unwrap().and_utc()));
         assert!(w.contains(d.and_hms_opt(23, 59, 59).unwrap().and_utc()));
         // The next day is excluded (upper bound is exclusive).
-        assert!(!w.contains((d + Duration::days(1)).and_hms_opt(0, 0, 0).unwrap().and_utc()));
+        assert!(!w.contains(
+            (d + Duration::days(1))
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc()
+        ));
         // The previous day is excluded.
-        assert!(!w.contains((d - Duration::days(1)).and_hms_opt(12, 0, 0).unwrap().and_utc()));
+        assert!(!w.contains(
+            (d - Duration::days(1))
+                .and_hms_opt(12, 0, 0)
+                .unwrap()
+                .and_utc()
+        ));
     }
 
     #[test]
@@ -381,15 +415,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_rss_with_mock_server() {
-        use wiremock::{MockServer, Mock, ResponseTemplate};
         use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
-        
+
         // Use current time to ensure freshness check passes
         let now = Utc::now().to_rfc2822();
 
-        let rss_content = format!(r#"
+        let rss_content = format!(
+            r#"
             <rss version="2.0">
                 <channel>
                     <title>Test Feed</title>
@@ -400,7 +435,9 @@ mod tests {
                     </item>
                 </channel>
             </rss>
-        "#, now);
+        "#,
+            now
+        );
 
         Mock::given(method("GET"))
             .and(path("/feed.xml"))
@@ -415,7 +452,9 @@ mod tests {
         };
 
         let client = create_http_client().unwrap();
-        let articles = fetch_from_source(&source, &client, FetchWindow::last_24h()).await.unwrap();
+        let articles = fetch_from_source(&source, &client, FetchWindow::last_24h())
+            .await
+            .unwrap();
 
         assert_eq!(articles.len(), 1);
         assert_eq!(articles[0].title, "Mock Article");

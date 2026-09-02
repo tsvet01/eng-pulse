@@ -1,0 +1,10 @@
+# Cargo.toml (repo root)
+[workspace]
+resolver = "2"
+members = [
+    "libs/llm-client",
+    "libs/pulse-core",
+    "apps/daily-agent",
+    "apps/explorer-agent",
+    "apps/pulse-api",
+]
