@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
+    inputs:
+      deploy_api:
+        type: boolean
+        default: false
+        description: "Force deploy-api"
 
 permissions:
   contents: read
@@ -26,6 +31,9 @@ env:
 jobs:
   changes:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       rust: ${{ steps.f.outputs.rust }}
       api: ${{ steps.f.outputs.api }}
@@ -70,6 +78,8 @@ jobs:
     - run: cargo run -p pulse-core --bin fixtures -- docs/contracts
     - name: Fail on fixture drift
       run: git diff --exit-code -- docs/contracts
+    - name: Fail on untracked fixture files
+      run: test -z "$(git status --porcelain docs/contracts)"
 
   api-it:
     needs: changes
@@ -88,9 +98,12 @@ jobs:
     - uses: actions/checkout@v6
     - uses: dtolnay/rust-toolchain@stable
     - uses: Swatinem/rust-cache@v2
-    - name: Migrations apply and /healthz answers
+      with:
+        cache-on-failure: true
+    - run: cargo build -p pulse-api
+    - name: Start pulse-api and wait for /healthz
       run: |
-        cargo run -p pulse-api &
+        ./target/debug/pulse-api &
         for i in $(seq 1 30); do curl -sf localhost:8080/healthz && break; sleep 1; done
         curl -sf localhost:8080/healthz | grep '"db":"ok"'
 
@@ -159,9 +172,9 @@ jobs:
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: terraform-plan
-        path: |
-          infra/hetzner/plan.txt
-          infra/hetzner/tfplan
+        # Public repo: never upload the binary tfplan (it can contain unredacted
+        # sensitive values). plan.txt is Terraform's redacted human-readable plan.
+        path: infra/hetzner/plan.txt
         retention-days: 7
     - name: Summarize plan (no full plan text leaves the job logs/artifact)
       if: github.event_name == 'pull_request'
@@ -255,7 +268,13 @@ jobs:
 
   deploy-api:
     needs: [changes, rust, api-it]
-    if: github.ref == 'refs/heads/main' && needs.changes.outputs.api == 'true'
+    # always() so a workflow_dispatch (where rust/api-it are skipped because
+    # `changes` reports no diff) doesn't get blocked by "needs" being skipped;
+    # an actual failure in either upstream job still blocks the deploy.
+    if: |
+      always() && github.ref == 'refs/heads/main' &&
+      (needs.changes.outputs.api == 'true' || inputs.deploy_api == true) &&
+      needs.rust.result != 'failure' && needs.api-it.result != 'failure'
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -279,7 +298,8 @@ jobs:
         host: api.eng-pulse.tsvetkov.org
         username: deploy
         key: ${{ secrets.DEPLOY_SSH_KEY }}
-        envs: PULSE_ENV,GCS_BACKUP_SA_JSON,IMAGE_TAG
+        fingerprint: ${{ secrets.DEPLOY_HOST_FINGERPRINT }}
+        envs: PULSE_ENV,GCS_BACKUP_SA_JSON,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
         script: |
           set -e
           umask 077
@@ -290,12 +310,15 @@ jobs:
           printf '%s\n' "$GCS_BACKUP_SA_JSON" > gcs-backup-sa.json
           set -a; . ./.env; set +a
           mountpoint -q "$(dirname "$PG_DATA")" || { echo "postgres volume not mounted at $PG_DATA"; exit 1; }
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           docker compose pull -q && docker compose up -d
           for i in $(seq 1 30); do curl -sf localhost:8080/healthz | grep -q '"db":"ok"' && exit 0; sleep 2; done
           docker compose logs --tail 50 pulse-api; exit 1
       env:
         PULSE_ENV: ${{ secrets.PULSE_ENV }}
         GCS_BACKUP_SA_JSON: ${{ secrets.GCS_BACKUP_SA_JSON }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_ACTOR: ${{ github.actor }}
 
   terraform-apply:
     needs: [changes, terraform-plan]
