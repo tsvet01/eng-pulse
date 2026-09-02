@@ -25,7 +25,7 @@
 
 - Hetzner Cloud API token (project "eng-pulse"), Cloudflare API token (Zone:DNS:Edit on `tsvetkov.org`) and the zone ID; confirmation that `tsvetkov.org` nameservers are Cloudflare's.
 - His public SSH key and admin IP/CIDR for the firewall.
-- GitHub environment `production` secrets: `HCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `DEPLOY_SSH_KEY` (private key for the box's `deploy` user), `PULSE_ENV` (the `.env` file body, see Task 7), `GCS_BACKUP_SA_JSON`. `GCP_CREDENTIALS` already exists (reused for Terraform state access).
+- GitHub environment `production` secrets: `HCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `ADMIN_CIDR`, `SSH_PUBLIC_KEY`, `DEPLOY_SSH_KEY` (private key for the box's `deploy` user), `PULSE_ENV` (the `.env` file body, see Task 7), `GCS_BACKUP_SA_JSON`. `GCP_CREDENTIALS` already exists (reused for Terraform state access).
 
 ---
 

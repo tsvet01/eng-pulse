@@ -9,9 +9,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
-  id-token: write
-  pull-requests: write
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -19,6 +16,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   PROJECT_ID: tsvet01
   REGION: us-central1
   REPO_NAME: agent-repo
@@ -136,6 +134,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.infra == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     defaults: { run: { working-directory: infra/hetzner } }
     env:
       HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
@@ -145,24 +146,35 @@ jobs:
       TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
     steps:
     - uses: actions/checkout@v6
-    - uses: google-github-actions/auth@v3
+    - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
       with: { credentials_json: "${{ secrets.GCP_CREDENTIALS }}" }
-    - uses: hashicorp/setup-terraform@v3
+    - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
       with: { terraform_version: "1.9.8" }
     - run: terraform fmt -check -recursive
     - run: terraform init -input=false
     - run: terraform validate
     - id: plan
       run: terraform plan -no-color -input=false -out=tfplan 2>&1 | tee plan.txt
-    - name: Post plan on PR
+    - name: Upload full plan as artifact
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: terraform-plan
+        path: |
+          infra/hetzner/plan.txt
+          infra/hetzner/tfplan
+        retention-days: 7
+    - name: Summarize plan (no full plan text leaves the job logs/artifact)
       if: github.event_name == 'pull_request'
-      uses: actions/github-script@v7
+      run: grep -E '^(Plan:|No changes|  # )' plan.txt > plan-summary.txt || true
+    - name: Post plan summary on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
       with:
         script: |
           const fs = require('fs');
-          const plan = fs.readFileSync('infra/hetzner/plan.txt', 'utf8').slice(0, 60000);
+          const summary = fs.readFileSync('infra/hetzner/plan-summary.txt', 'utf8').slice(0, 60000) || 'No changes.';
           await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number,
-            body: '### Terraform plan (infra/hetzner)\n```\n' + plan + '\n```' });
+            body: '### Terraform plan summary (infra/hetzner)\nFull plan: see the `terraform-plan` workflow artifact on this run.\n```\n' + summary + '\n```' });
 
   # ---------------- main only ----------------
   deploy-agents:
@@ -171,9 +183,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
-    - uses: google-github-actions/auth@v3
+    - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
       with: { credentials_json: "${{ secrets.GCP_CREDENTIALS }}" }
-    - uses: google-github-actions/setup-gcloud@v3
+    - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
     - run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
     - name: Build & deploy daily-agent
       run: |
@@ -208,32 +220,52 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
-    - uses: google-github-actions/auth@v3
+    - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
       with: { credentials_json: "${{ secrets.GCP_CREDENTIALS }}" }
-    - uses: google-github-actions/setup-gcloud@v3
-    - name: Deploy all four functions (same flags as before)
+    - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+    - name: Deploy all four functions (same flags as before; one failing doesn't block the rest)
       run: |
-        set -e
         for f in notifier feedback-receiver apns-notifier fcm-tokens; do cp -r functions/shared functions/$f/shared; done
-        (cd functions/notifier && gcloud functions deploy se-daily-notifier --gen2 --runtime=python312 --region=${{ env.REGION }} --source=. --entry-point=send_summary_email \
-          --trigger-event-filters="type=google.cloud.storage.object.v1.finalized" --trigger-event-filters="bucket=${{ env.PROJECT_ID }}-agent-brain" --clear-env-vars \
-          --set-secrets "GMAIL_USER=gmail-user:latest,GMAIL_APP_PASSWORD=gmail-app-password:latest,DEST_EMAIL=dest-email:latest" --project ${{ env.PROJECT_ID }})
-        (cd functions/feedback-receiver && gcloud functions deploy feedback-receiver --gen2 --runtime=python312 --region=${{ env.REGION }} --project=${{ env.PROJECT_ID }} --source=. --entry-point=receive_feedback --trigger-http --allow-unauthenticated)
-        (cd functions/apns-notifier && gcloud functions deploy register-apns-token --gen2 --runtime=python312 --region=${{ env.REGION }} --project=${{ env.PROJECT_ID }} --source=. --entry-point=register_apns_token --trigger-http --allow-unauthenticated --memory=256MB --timeout=30s \
-          && gcloud functions deploy trigger-apns-notification --gen2 --runtime=python312 --region=${{ env.REGION }} --project=${{ env.PROJECT_ID }} --source=. --entry-point=trigger_apns_notification --trigger-http --allow-unauthenticated --memory=256MB --timeout=60s)
-        (cd functions/fcm-tokens && gcloud functions deploy register-token --gen2 --runtime=python312 --region=${{ env.REGION }} --project=${{ env.PROJECT_ID }} --source=. --entry-point=register_token --trigger-http --allow-unauthenticated --memory=256MB --timeout=30s \
-          && gcloud functions deploy unregister-token --gen2 --runtime=python312 --region=${{ env.REGION }} --project=${{ env.PROJECT_ID }} --source=. --entry-point=unregister_token --trigger-http --allow-unauthenticated --memory=256MB --timeout=30s)
+
+        deploy_notifier() {
+          cd functions/notifier && gcloud functions deploy se-daily-notifier --gen2 --runtime=python312 --region=${{ env.REGION }} --source=. --entry-point=send_summary_email \
+            --trigger-event-filters="type=google.cloud.storage.object.v1.finalized" --trigger-event-filters="bucket=${{ env.PROJECT_ID }}-agent-brain" --clear-env-vars \
+            --set-secrets "GMAIL_USER=gmail-user:latest,GMAIL_APP_PASSWORD=gmail-app-password:latest,DEST_EMAIL=dest-email:latest" --project ${{ env.PROJECT_ID }}
+        }
+        deploy_feedback_receiver() {
+          cd functions/feedback-receiver && gcloud functions deploy feedback-receiver --gen2 --runtime=python312 --region=${{ env.REGION }} --project=${{ env.PROJECT_ID }} --source=. --entry-point=receive_feedback --trigger-http --allow-unauthenticated
+        }
+        deploy_apns_notifier() {
+          cd functions/apns-notifier \
+            && gcloud functions deploy register-apns-token --gen2 --runtime=python312 --region=${{ env.REGION }} --project=${{ env.PROJECT_ID }} --source=. --entry-point=register_apns_token --trigger-http --allow-unauthenticated --memory=256MB --timeout=30s \
+            && gcloud functions deploy trigger-apns-notification --gen2 --runtime=python312 --region=${{ env.REGION }} --project=${{ env.PROJECT_ID }} --source=. --entry-point=trigger_apns_notification --trigger-http --allow-unauthenticated --memory=256MB --timeout=60s
+        }
+        deploy_fcm_tokens() {
+          cd functions/fcm-tokens \
+            && gcloud functions deploy register-token --gen2 --runtime=python312 --region=${{ env.REGION }} --project=${{ env.PROJECT_ID }} --source=. --entry-point=register_token --trigger-http --allow-unauthenticated --memory=256MB --timeout=30s \
+            && gcloud functions deploy unregister-token --gen2 --runtime=python312 --region=${{ env.REGION }} --project=${{ env.PROJECT_ID }} --source=. --entry-point=unregister_token --trigger-http --allow-unauthenticated --memory=256MB --timeout=30s
+        }
+
+        failed=""
+        (deploy_notifier) || failed="$failed notifier"
+        (deploy_feedback_receiver) || failed="$failed feedback-receiver"
+        (deploy_apns_notifier) || failed="$failed apns-notifier"
+        (deploy_fcm_tokens) || failed="$failed fcm-tokens"
+        [ -z "$failed" ] || { echo "failed:$failed"; exit 1; }
 
   deploy-api:
     needs: [changes, rust, api-it]
     if: github.ref == 'refs/heads/main' && needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
     environment: production
+    permissions:
+      contents: read
+      packages: write
     steps:
     - uses: actions/checkout@v6
-    - uses: docker/login-action@v3
+    - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
       with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
-    - uses: docker/build-push-action@v6
+    - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
       with:
         context: .
         file: apps/pulse-api/Dockerfile
@@ -242,7 +274,7 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
     - name: Write runtime env on the box, pull, restart, health-check
-      uses: appleboy/ssh-action@v1
+      uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
       with:
         host: api.eng-pulse.tsvetkov.org
         username: deploy
@@ -264,7 +296,6 @@ jobs:
       env:
         PULSE_ENV: ${{ secrets.PULSE_ENV }}
         GCS_BACKUP_SA_JSON: ${{ secrets.GCS_BACKUP_SA_JSON }}
-        IMAGE_TAG: ${{ env.IMAGE_TAG }}
 
   terraform-apply:
     needs: [changes, terraform-plan]
@@ -280,9 +311,9 @@ jobs:
       TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
     steps:
     - uses: actions/checkout@v6
-    - uses: google-github-actions/auth@v3
+    - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
       with: { credentials_json: "${{ secrets.GCP_CREDENTIALS }}" }
-    - uses: hashicorp/setup-terraform@v3
+    - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
       with: { terraform_version: "1.9.8" }
     - run: terraform init -input=false
     - run: terraform apply -auto-approve -input=false
