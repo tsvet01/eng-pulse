@@ -34,11 +34,14 @@ Eng Pulse is a complete system for curating, summarizing, and delivering daily s
 | Component | Description | Tech Stack |
 |-----------|-------------|------------|
 | [llm-client](./libs/llm-client/) | Shared LLM API client with retry logic | Rust |
+| [pulse-core](./libs/pulse-core/) | Shared contract types + fixture generator (`docs/contracts/`) | Rust |
 | [daily-agent](./apps/daily-agent/) | Daily article selection and summarization | Rust |
 | [explorer-agent](./apps/explorer-agent/) | RSS/blog source discovery and management | Rust |
+| [pulse-api](./apps/pulse-api/) | Multi-user API skeleton (`/healthz`, sqlx migrations) | Rust |
 | [notifier](./functions/notifier/) | Email notification on new summaries | Python |
 | mobile-android | Native Kotlin/Compose app | Kotlin (planned, Phase 5) |
 | [mobile-swift](./apps/mobile-swift/) | Native iOS app with TTS and CarPlay | Swift |
+| [infra/](./infra/hetzner/) | Terraform: Hetzner box + Cloudflare DNS for `pulse-api` | Terraform |
 
 ## Quick Start
 
@@ -125,6 +128,8 @@ cd functions/notifier && ./deploy.sh
 GitHub Actions automatically:
 - **On PR**: Runs `cargo check`, `cargo clippy`, `cargo test`
 - **On merge to main**: Deploys all components to Google Cloud
+
+A single path-filtered workflow (`.github/workflows/ci.yml`) also gates and deploys `pulse-core`/`pulse-api`: `fixtures` fails on `docs/contracts/` drift or untracked fixture files, `api-it` boots `pulse-api` against a real Postgres and checks `/healthz`, and `terraform-plan`/`terraform-apply` plan and (with `production`-environment approval) apply the `infra/hetzner` Terraform stack.
 
 Credentials are stored in GCP Secret Manager and GitHub Secrets.
 

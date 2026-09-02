@@ -2,7 +2,7 @@
 
 ## Overview
 
-This runbook walks you through the one-time setup for Phase 0 deployment infrastructure. Repository-level secrets are visible to all jobs in GitHub Actions; the **`production` environment** adds a required-reviewer approval gate and holds only the secrets that must never be exposed to PR-time `terraform-plan` jobs. Repository-level secrets: `HCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `ADMIN_CIDR`, `SSH_PUBLIC_KEY`, `GCP_CREDENTIALS`. Production-only secrets: `DEPLOY_SSH_KEY`, `PULSE_ENV`, `GCS_BACKUP_SA_JSON`.
+This runbook walks you through the one-time setup for Phase 0 deployment infrastructure. Repository-level secrets are visible to all jobs in GitHub Actions; the **`production` environment** adds a required-reviewer approval gate and holds only the secrets that must never be exposed to PR-time `terraform-plan` jobs. Repository-level secrets: `HCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `ADMIN_CIDR`, `SSH_PUBLIC_KEY`, `GCP_CREDENTIALS`. Production-only secrets: `DEPLOY_SSH_KEY`, `DEPLOY_HOST_FINGERPRINT`, `PULSE_ENV`, `GCS_BACKUP_SA_JSON`.
 
 ---
 
@@ -42,6 +42,11 @@ Set these at **Settings → Secrets and variables → Actions → New repository
 Set these at **Settings → Environments → production → Environment secrets** (repository-level secrets are inherited; set only these three):
 
 - [ ] **`DEPLOY_SSH_KEY`**: SSH private key for `deploy` user on production box (contents of `~/.ssh/id_ed25519`). The public half (`SSH_PUBLIC_KEY`) is installed by cloud-init on the box.
+- [ ] **`DEPLOY_HOST_FINGERPRINT`**: the box's SSH host key fingerprint, so `appleboy/ssh-action` verifies it instead of trusting on first connect. Capture it **after the first `terraform apply`**, once `server_ipv4` is known:
+  ```bash
+  ssh-keygen -lf <(ssh-keyscan -t ed25519 <server_ipv4> 2>/dev/null) | awk '{print $2}'
+  ```
+  The output looks like `SHA256:AbCdEf...` — that whole `SHA256:...` string (not the raw key) is what `appleboy/ssh-action`'s `fingerprint:` input expects. Set it as this secret.
 - [ ] **`PULSE_ENV`**: environment file body (see section 3 below)
 - [ ] **`GCS_BACKUP_SA_JSON`**: GCS service account JSON for database backups
 
@@ -104,3 +109,23 @@ Once all sections are complete:
 - Cloudflare and Hetzner tokens are in place.
 
 Proceed to Terraform deployment (`terraform-apply` job) once a PR with infrastructure changes is approved.
+
+---
+
+## Merge day order
+
+Follow this order end to end for the first (and any subsequent infra-touching) merge to `main`:
+
+1. **Set repository secrets** — all of section 2's repository-level secrets (`HCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `ADMIN_CIDR`, `SSH_PUBLIC_KEY`, `GCP_CREDENTIALS`) so PR-time `terraform-plan` can run.
+2. **Open the PR and wait for `terraform-plan` to go green** on it (the plan summary posts as a PR comment; the full redacted plan is the `terraform-plan` workflow artifact).
+3. **Merge to `main`.**
+4. **Approve `terraform-apply`** in the `production` environment (required reviewer: Anton). This provisions the box and DNS records.
+5. **Capture `DEPLOY_HOST_FINGERPRINT`** (see item 8 in section 2) now that `server_ipv4` is known, and set it as a `production`-environment secret.
+6. **Wait out the DNS TTL** (300s) for `api.eng-pulse.tsvetkov.org` to resolve to the new box.
+7. **Trigger `deploy-api`.** Prefer re-running the failed/skipped jobs on the merge-commit's workflow run (Actions → that run → "Re-run failed jobs") so it reuses the same commit and build cache; only fall back to `workflow_dispatch` with `deploy_api=true` if that run is no longer re-runnable (e.g. expired).
+8. **Verify**: `curl https://api.eng-pulse.tsvetkov.org/healthz` returns `{"status":"ok","db":"ok"}` over valid TLS.
+9. **Run the backup once, as the `deploy` user** (not `sudo`, since `/opt/pulse` is owned by `deploy`):
+   ```bash
+   ssh deploy@api.eng-pulse.tsvetkov.org /opt/pulse/backup.sh
+   ```
+10. **Next morning, confirm the daily pipeline ran unaffected**: `./scripts/shadow-eval-report.sh 1`.

@@ -24,7 +24,7 @@ echo "=========================================="
 FAILED=0
 
 # Rust checks (using workspace)
-echo -e "\n${YELLOW}[1/6] Checking Rust compilation...${NC}"
+echo -e "\n${YELLOW}[1/4] Checking Rust compilation...${NC}"
 if cargo check --workspace --quiet 2>/dev/null; then
     echo -e "${GREEN}✓ Rust workspace compiles${NC}"
 else
@@ -32,7 +32,7 @@ else
     FAILED=1
 fi
 
-echo -e "\n${YELLOW}[2/6] Running Clippy lints...${NC}"
+echo -e "\n${YELLOW}[2/4] Running Clippy lints...${NC}"
 if cargo clippy --workspace --quiet -- -D warnings 2>/dev/null; then
     echo -e "${GREEN}✓ All crates pass clippy${NC}"
 else
@@ -40,7 +40,7 @@ else
     FAILED=1
 fi
 
-echo -e "\n${YELLOW}[3/6] Running Rust tests...${NC}"
+echo -e "\n${YELLOW}[3/4] Running Rust tests...${NC}"
 if cargo test --workspace --quiet 2>/dev/null; then
     echo -e "${GREEN}✓ All tests pass${NC}"
 else
@@ -49,7 +49,7 @@ else
 fi
 
 # Python checks
-echo -e "\n${YELLOW}[4/6] Checking Python syntax...${NC}"
+echo -e "\n${YELLOW}[4/4] Checking Python syntax...${NC}"
 if python3 -m py_compile functions/notifier/main.py 2>/dev/null; then
     echo -e "${GREEN}✓ notifier/main.py is valid${NC}"
 else
