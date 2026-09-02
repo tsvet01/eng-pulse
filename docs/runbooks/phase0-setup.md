@@ -2,7 +2,7 @@
 
 ## Overview
 
-This runbook walks you through the one-time setup for Phase 0 deployment infrastructure. Some secrets live at the **repository level** (needed by PR-time `terraform-plan` jobs, which run before approval) and others only in the **`production` environment** (for box-mutating operations like deploying the API). Repository-level secrets include `HCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `ADMIN_CIDR`, `SSH_PUBLIC_KEY`, and `GCP_CREDENTIALS`; environment secrets (approval-gated) are `DEPLOY_SSH_KEY`, `PULSE_ENV`, and `GCS_BACKUP_SA_JSON`.
+This runbook walks you through the one-time setup for Phase 0 deployment infrastructure. Repository-level secrets are visible to all jobs in GitHub Actions; the **`production` environment** adds a required-reviewer approval gate and holds only the secrets that must never be exposed to PR-time `terraform-plan` jobs. Repository-level secrets: `HCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `ADMIN_CIDR`, `SSH_PUBLIC_KEY`, `GCP_CREDENTIALS`. Production-only secrets: `DEPLOY_SSH_KEY`, `PULSE_ENV`, `GCS_BACKUP_SA_JSON`.
 
 ---
 
@@ -39,14 +39,9 @@ Set these at **Settings → Secrets and variables → Actions → New repository
 - [ ] **`GCP_CREDENTIALS`**: GCP service account JSON (for backup and Cloud Run deployments)
 
 ### Production environment secrets
-Set these at **Settings → Environments → production → Environment secrets**:
+Set these at **Settings → Environments → production → Environment secrets** (repository-level secrets are inherited; set only these three):
 
-- [ ] **`HCLOUD_TOKEN`**: (same as repository-level, repeated for `terraform-apply` approval gate)
-- [ ] **`CLOUDFLARE_API_TOKEN`**: (same as repository-level, repeated for `terraform-apply` approval gate)
-- [ ] **`CLOUDFLARE_ZONE_ID`**: (same as repository-level, repeated for `terraform-apply` approval gate)
-- [ ] **`ADMIN_CIDR`**: (same as repository-level, repeated for `terraform-apply` approval gate)
-- [ ] **`SSH_PUBLIC_KEY`**: (same as repository-level, repeated for `terraform-apply` approval gate)
-- [ ] **`DEPLOY_SSH_KEY`**: SSH private key for `deploy` user on production box (contents of `~/.ssh/id_ed25519`, kept secret)
+- [ ] **`DEPLOY_SSH_KEY`**: SSH private key for `deploy` user on production box (contents of `~/.ssh/id_ed25519`). The public half (`SSH_PUBLIC_KEY`) is installed by cloud-init on the box.
 - [ ] **`PULSE_ENV`**: environment file body (see section 3 below)
 - [ ] **`GCS_BACKUP_SA_JSON`**: GCS service account JSON for database backups
 
