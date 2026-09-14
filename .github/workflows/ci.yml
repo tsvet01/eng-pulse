@@ -16,7 +16,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # PRs share one group per branch (newer pushes cancel older runs). Pushes to main get a
+  # group per commit: a run parked on an environment approval must not queue later runs.
+  group: ci-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -196,6 +198,7 @@ jobs:
     needs: [changes, rust, fixtures]
     if: github.ref == 'refs/heads/main' && needs.changes.outputs.agents == 'true'
     runs-on: ubuntu-latest
+    concurrency: { group: deploy-agents-main, cancel-in-progress: false }  # serialize deploys
     steps:
     - uses: actions/checkout@v6
     - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
@@ -233,6 +236,7 @@ jobs:
     needs: [changes, python]
     if: github.ref == 'refs/heads/main' && needs.changes.outputs.functions == 'true'
     runs-on: ubuntu-latest
+    concurrency: { group: deploy-functions-main, cancel-in-progress: false }  # serialize deploys
     steps:
     - uses: actions/checkout@v6
     - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
@@ -278,6 +282,7 @@ jobs:
       (needs.changes.outputs.api == 'true' || inputs.deploy_api == true) &&
       needs.rust.result != 'failure' && needs.api-it.result != 'failure'
     runs-on: ubuntu-latest
+    concurrency: { group: deploy-api-main, cancel-in-progress: false }  # serialize deploys
     environment: production
     permissions:
       contents: read
@@ -326,6 +331,7 @@ jobs:
     needs: [changes, terraform-plan]
     if: github.ref == 'refs/heads/main' && needs.changes.outputs.infra == 'true'
     runs-on: ubuntu-latest
+    concurrency: { group: terraform-apply-main, cancel-in-progress: false }  # serialize deploys
     environment: production          # required reviewer = Anton → click to approve
     defaults: { run: { working-directory: infra/hetzner } }
     env:
