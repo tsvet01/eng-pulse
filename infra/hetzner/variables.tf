@@ -20,7 +20,7 @@ variable "ssh_public_key" {
 
 variable "server_type" {
   type    = string
-  default = "cx22"
+  default = "cx23"
 }
 
 variable "location" {

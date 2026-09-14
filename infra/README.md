@@ -1,7 +1,7 @@
 # infra
 
 Terraform for Eng Pulse's Hetzner hosting. Stack lives in `infra/hetzner`: a
-cx22 box, a 10 GB volume for Postgres data, a firewall, Cloudflare DNS records
+cx23 box, a 10 GB volume for Postgres data, a firewall, Cloudflare DNS records
 for `eng-pulse.tsvetkov.org` and `api.eng-pulse.tsvetkov.org`, and cloud-init
 that lays down `/opt/pulse/docker-compose.yml` (Caddy → pulse-api →
 Postgres) plus a systemd unit and nightly backup cron.
