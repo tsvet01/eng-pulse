@@ -97,7 +97,7 @@ Notifications fan out on brief ingest to members with notifications enabled: ema
 ## 8. Infrastructure as code (Terraform)
 
 ```
-infra/hetzner/   hcloud_server (cx22, Ubuntu 24.04, cloud-init) · hcloud_primary_ip · hcloud_volume (10 GB Postgres data)
+infra/hetzner/   hcloud_server (cx23, Ubuntu 24.04, cloud-init) · hcloud_primary_ip · hcloud_volume (10 GB Postgres data)
                  hcloud_firewall (22 from Anton's IP; 80/443 public) · hcloud_ssh_key
                  dns.tf: cloudflare_record A api.eng-pulse.tsvetkov.org (+ eng-pulse.tsvetkov.org reserved), DNS-only
                  backend: GCS bucket tsvet01-terraform-state (versioned, native locking)
