@@ -206,12 +206,12 @@ jobs:
           --substitutions=_IMAGE_TAG=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:${{ env.IMAGE_TAG }} \
           --machine-type=E2_HIGHCPU_8 .
         gcloud run jobs update se-daily-agent-job --region ${{ env.REGION }} --project ${{ env.PROJECT_ID }} \
-          --remove-env-vars GEMINI_API_KEY,ANTHROPIC_API_KEY --clear-secrets || true
+          --remove-env-vars GEMINI_API_KEY,ANTHROPIC_API_KEY,SHADOW_MODEL --clear-secrets || true
         gcloud run jobs deploy se-daily-agent-job \
           --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:${{ env.IMAGE_TAG }} \
           --region ${{ env.REGION }} --project ${{ env.PROJECT_ID }} \
           --set-secrets GEMINI_API_KEY=gemini-api-key:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest \
-          --update-env-vars=SHADOW_MODEL=claude-opus-5 --task-timeout 10m
+          --task-timeout 10m
     - name: Build & deploy explorer-agent
       run: |
         gcloud builds submit --config=apps/explorer-agent/cloudbuild.yaml \
