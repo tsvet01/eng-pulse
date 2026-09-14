@@ -1,8 +1,8 @@
-mod fetcher;
-mod prompts;
 mod eval;
 mod feedback;
+mod fetcher;
 mod manifest;
+mod prompts;
 
 /// Parse an index from LLM response, extracting the first contiguous digit sequence.
 fn parse_selection_index(response: &str) -> Option<usize> {
@@ -50,7 +50,9 @@ fn parse_run_mode(args: &[String]) -> Result<RunMode, String> {
         return Ok(RunMode::Smoke);
     }
     if let Some(pos) = args.iter().position(|a| a == "--date") {
-        let value = args.get(pos + 1).ok_or("--date requires a YYYY-MM-DD argument")?;
+        let value = args
+            .get(pos + 1)
+            .ok_or("--date requires a YYYY-MM-DD argument")?;
         let date = chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
             .map_err(|e| format!("invalid --date '{}': {}", value, e))?;
         return Ok(RunMode::Backfill(date));
@@ -82,25 +84,25 @@ fn pairwise_instruction(has_shadow: bool) -> &'static str {
 fn shadow_model() -> Option<String> {
     shadow_model_from(std::env::var("SHADOW_MODEL").ok())
 }
-use readability::extractor;
-use std::io::Cursor;
-use crate::fetcher::{SourceConfig, Article};
+use crate::fetcher::{Article, SourceConfig};
+use chrono::Utc;
 use gcloud_storage::client::{Client, ClientConfig};
 use gcloud_storage::http::objects::download::Range;
 use gcloud_storage::http::objects::get::GetObjectRequest;
-use gcloud_storage::http::objects::upload::{UploadObjectRequest, UploadType, Media};
-use chrono::Utc;
-use tracing::{info, warn, error, debug, instrument};
-use std::time::Duration;
+use gcloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
 use llm_client::{
-    call_llm_with_retry, call_llm, init_logging, extract_domain,
-    DEFAULT_BUCKET, LlmProvider, LlmOptions, get_api_key_env_var,
+    call_llm, call_llm_with_retry, extract_domain, get_api_key_env_var, init_logging, LlmOptions,
+    LlmProvider, DEFAULT_BUCKET,
 };
+use readability::extractor;
+use std::io::Cursor;
+use std::time::Duration;
+use tracing::{debug, error, info, instrument, warn};
 
+use crate::eval::{apply_eval_scores, log_calibration_agreement, run_eval_pass};
+use crate::feedback::{build_calibration_context, build_selection_context, load_recent_feedback};
+use crate::manifest::{gcs_object_path, gcs_public_url, ManifestEntry, SUMMARY_SNIPPET_CHARS};
 use futures::future::join_all;
-use crate::manifest::{ManifestEntry, gcs_public_url, gcs_object_path, SUMMARY_SNIPPET_CHARS};
-use crate::eval::{run_eval_pass, apply_eval_scores, log_calibration_agreement};
-use crate::feedback::{load_recent_feedback, build_calibration_context, build_selection_context};
 
 // --- Configuration Constants ---
 const HTTP_TIMEOUT_SECS: u64 = 60;
@@ -110,7 +112,8 @@ const MAX_ARTICLE_CHARS: usize = 50_000;
 const MIN_ARTICLE_CHARS: usize = 200;
 
 fn build_recent_picks_context(manifest: &[ManifestEntry], max_days: usize) -> Option<String> {
-    let recent: Vec<&ManifestEntry> = manifest.iter()
+    let recent: Vec<&ManifestEntry> = manifest
+        .iter()
         .filter(|e| e.prompt_version.is_none()) // Only production picks
         .take(max_days)
         .collect();
@@ -142,7 +145,9 @@ async fn run_smoke(
     for (provider, key) in providers {
         let prompt = "Reply with the single word: OK".to_string();
         match call_llm(http_client, *provider, key, prompt, &LlmOptions::default()).await {
-            Ok(resp) => info!(provider = %provider.as_str(), reply = %resp.trim(), "Smoke check passed"),
+            Ok(resp) => {
+                info!(provider = %provider.as_str(), reply = %resp.trim(), "Smoke check passed")
+            }
             Err(e) => {
                 error!(provider = %provider.as_str(), error = %e, "Smoke check FAILED");
                 failures.push(format!("{}: {}", provider.as_str(), e));
@@ -155,9 +160,22 @@ async fn run_smoke(
     if let Some(shadow) = shadow_model() {
         if let Some((_, claude_key)) = providers.iter().find(|(p, _)| *p == LlmProvider::Claude) {
             let prompt = "Reply with the single word: OK".to_string();
-            let options = LlmOptions { model: Some(shadow.clone()), ..Default::default() };
-            match call_llm(http_client, LlmProvider::Claude, claude_key, prompt, &options).await {
-                Ok(resp) => info!(provider = "claude", model = %shadow, reply = %resp.trim(), "Shadow smoke check passed"),
+            let options = LlmOptions {
+                model: Some(shadow.clone()),
+                ..Default::default()
+            };
+            match call_llm(
+                http_client,
+                LlmProvider::Claude,
+                claude_key,
+                prompt,
+                &options,
+            )
+            .await
+            {
+                Ok(resp) => {
+                    info!(provider = "claude", model = %shadow, reply = %resp.trim(), "Shadow smoke check passed")
+                }
                 Err(e) => {
                     error!(provider = "claude", model = %shadow, error = %e, "Shadow smoke check FAILED");
                     failures.push(format!("shadow({}): {}", shadow, e));
@@ -205,21 +223,27 @@ async fn backfill_beta(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let now = Utc::now();
     let target_dates: Vec<String> = (1..=days)
-        .map(|d| (now - chrono::Duration::days(d as i64)).format("%Y-%m-%d").to_string())
+        .map(|d| {
+            (now - chrono::Duration::days(d as i64))
+                .format("%Y-%m-%d")
+                .to_string()
+        })
         .collect();
 
     info!(dates = ?target_dates, "Backfilling beta summaries");
 
     // Download manifest
     let mut manifest: Vec<ManifestEntry> = {
-        let data = gcs_client.download_object(
-            &GetObjectRequest {
-                bucket: bucket_name.to_string(),
-                object: "manifest.json".to_string(),
-                ..Default::default()
-            },
-            &Range::default(),
-        ).await?;
+        let data = gcs_client
+            .download_object(
+                &GetObjectRequest {
+                    bucket: bucket_name.to_string(),
+                    object: "manifest.json".to_string(),
+                    ..Default::default()
+                },
+                &Range::default(),
+            )
+            .await?;
         serde_json::from_slice(&data)?
     };
 
@@ -227,9 +251,9 @@ async fn backfill_beta(
 
     for date in &target_dates {
         // Find a prod entry for this date (prompt_version is None for v1)
-        let prod_entry = manifest.iter().find(|e| {
-            e.date == *date && e.prompt_version.is_none() && e.original_url.is_some()
-        });
+        let prod_entry = manifest
+            .iter()
+            .find(|e| e.date == *date && e.prompt_version.is_none() && e.original_url.is_some());
 
         let (title, original_url) = match prod_entry {
             Some(e) => (e.title.clone(), e.original_url.clone().unwrap()),
@@ -259,31 +283,45 @@ async fn backfill_beta(
                 let object_name = format!("summaries/beta/claude/{}.md", date);
                 let summary_bytes = summary.into_bytes();
 
-                match gcs_client.upload_object(
-                    &UploadObjectRequest { bucket: bucket_name.to_string(), ..Default::default() },
-                    summary_bytes,
-                    &UploadType::Simple(Media::new(object_name.clone())),
-                ).await {
+                match gcs_client
+                    .upload_object(
+                        &UploadObjectRequest {
+                            bucket: bucket_name.to_string(),
+                            ..Default::default()
+                        },
+                        summary_bytes,
+                        &UploadType::Simple(Media::new(object_name.clone())),
+                    )
+                    .await
+                {
                     Ok(_) => {
                         let public_url = gcs_public_url(bucket_name, &object_name);
 
                         // Remove old beta entries for this date
-                        manifest.retain(|e| !(e.date == *date && e.prompt_version.as_deref() == Some("v2")));
+                        manifest.retain(|e| {
+                            !(e.date == *date && e.prompt_version.as_deref() == Some("v2"))
+                        });
 
                         // Find insertion point: after the last entry for this date
-                        let insert_idx = manifest.iter().position(|e| e.date < *date).unwrap_or(manifest.len());
-                        manifest.insert(insert_idx, ManifestEntry {
-                            date: date.clone(),
-                            url: public_url,
-                            title: title.clone(),
-                            summary_snippet,
-                            original_url: Some(original_url.clone()),
-                            model: Some(LlmProvider::Claude.model_name().to_string()),
-                            selected_by: None,
-                            prompt_version: Some(beta_config.version().to_string()),
-                            eval_score: None,
-                            format: None,
-                        });
+                        let insert_idx = manifest
+                            .iter()
+                            .position(|e| e.date < *date)
+                            .unwrap_or(manifest.len());
+                        manifest.insert(
+                            insert_idx,
+                            ManifestEntry {
+                                date: date.clone(),
+                                url: public_url,
+                                title: title.clone(),
+                                summary_snippet,
+                                original_url: Some(original_url.clone()),
+                                model: Some(LlmProvider::Claude.model_name().to_string()),
+                                selected_by: None,
+                                prompt_version: Some(beta_config.version().to_string()),
+                                eval_score: None,
+                                format: None,
+                            },
+                        );
 
                         info!(date = %date, "Beta summary backfilled");
                     }
@@ -296,11 +334,16 @@ async fn backfill_beta(
 
     // Upload updated manifest
     let manifest_json = serde_json::to_vec_pretty(&manifest)?;
-    gcs_client.upload_object(
-        &UploadObjectRequest { bucket: bucket_name.to_string(), ..Default::default() },
-        manifest_json,
-        &UploadType::Simple(Media::new("manifest.json".to_string())),
-    ).await?;
+    gcs_client
+        .upload_object(
+            &UploadObjectRequest {
+                bucket: bucket_name.to_string(),
+                ..Default::default()
+            },
+            manifest_json,
+            &UploadType::Simple(Media::new("manifest.json".to_string())),
+        )
+        .await?;
 
     info!(days = days, "Beta backfill complete");
     Ok(())
@@ -318,7 +361,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Get enabled providers
     let enabled_providers = get_enabled_providers();
     if enabled_providers.is_empty() {
-        error!("No LLM providers configured. Set at least one of: GEMINI_API_KEY, ANTHROPIC_API_KEY");
+        error!(
+            "No LLM providers configured. Set at least one of: GEMINI_API_KEY, ANTHROPIC_API_KEY"
+        );
         return Err("No LLM providers configured".into());
     }
 
@@ -335,8 +380,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Resolve operational mode from CLI args. Smoke mode exits before any GCS
     // work so it can run as a lightweight post-deploy gate.
-    let run_mode = parse_run_mode(&std::env::args().collect::<Vec<_>>())
-        .map_err(|e| { error!(error = %e, "Invalid arguments"); e })?;
+    let run_mode = parse_run_mode(&std::env::args().collect::<Vec<_>>()).map_err(|e| {
+        error!(error = %e, "Invalid arguments");
+        e
+    })?;
     if run_mode == RunMode::Smoke {
         info!("Running in smoke-test mode (no GCS/notification side effects)");
         return run_smoke(&http_client, &enabled_providers).await;
@@ -349,7 +396,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // --- Backfill mode: regenerate V2 beta summaries for recent days ---
     if let Ok(days_str) = std::env::var("BACKFILL_BETA_DAYS") {
         let days: usize = days_str.parse().unwrap_or(3);
-        let claude_key = enabled_providers.iter()
+        let claude_key = enabled_providers
+            .iter()
             .find(|(p, _)| *p == LlmProvider::Claude)
             .map(|(_, k)| k.as_str())
             .ok_or("BACKFILL_BETA_DAYS requires ANTHROPIC_API_KEY")?;
@@ -363,9 +411,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (today, fetch_window) = match run_mode {
         RunMode::Backfill(date) => {
             info!(date = %date, "Backfill mode: regenerating brief from articles published that day");
-            (date.format("%Y-%m-%d").to_string(), fetcher::FetchWindow::day(date))
+            (
+                date.format("%Y-%m-%d").to_string(),
+                fetcher::FetchWindow::day(date),
+            )
         }
-        _ => (Utc::now().format("%Y-%m-%d").to_string(), fetcher::FetchWindow::last_24h()),
+        _ => (
+            Utc::now().format("%Y-%m-%d").to_string(),
+            fetcher::FetchWindow::last_24h(),
+        ),
     };
 
     // Use first provider for article selection (Claude preferred)
@@ -373,14 +427,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // 1. Load Sources from GCS
     info!("Fetching sources.json from GCS");
-    let sources_data = gcs_client.download_object(
-        &GetObjectRequest {
-            bucket: bucket_name.to_string(),
-            object: "config/sources.json".to_string(),
-            ..Default::default()
-        },
-        &Range::default()
-    ).await?;
+    let sources_data = gcs_client
+        .download_object(
+            &GetObjectRequest {
+                bucket: bucket_name.to_string(),
+                object: "config/sources.json".to_string(),
+                ..Default::default()
+            },
+            &Range::default(),
+        )
+        .await?;
 
     let sources: Vec<SourceConfig> = serde_json::from_slice(&sources_data)?;
     info!(count = sources.len(), "Loaded sources from Cloud Storage");
@@ -395,7 +451,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ok(mut articles) => {
                 info!(source = %source.name, count = articles.len(), "Found articles");
                 all_articles.append(&mut articles);
-            },
+            }
             Err(e) => warn!(source = %source.name, error = %e, "Failed to fetch from source"),
         }
     }
@@ -405,27 +461,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         return Ok(());
     }
 
-    info!(total_articles = all_articles.len(), "Total articles collected");
+    info!(
+        total_articles = all_articles.len(),
+        "Total articles collected"
+    );
 
     // --- Manifest: download once, all stages append, single upload at the end ---
-    let mut manifest: Vec<ManifestEntry> = match gcs_client.download_object(
-        &GetObjectRequest {
-            bucket: bucket_name.to_string(),
-            object: "manifest.json".to_string(),
-            ..Default::default()
-        },
-        &Range::default()
-    ).await {
-        Ok(data) => {
-            serde_json::from_slice(&data).map_err(|e| {
-                error!(error = %e, "Failed to parse existing manifest.json - file may be corrupted");
-                e
-            })?
-        },
+    let mut manifest: Vec<ManifestEntry> = match gcs_client
+        .download_object(
+            &GetObjectRequest {
+                bucket: bucket_name.to_string(),
+                object: "manifest.json".to_string(),
+                ..Default::default()
+            },
+            &Range::default(),
+        )
+        .await
+    {
+        Ok(data) => serde_json::from_slice(&data).map_err(|e| {
+            error!(error = %e, "Failed to parse existing manifest.json - file may be corrupted");
+            e
+        })?,
         Err(e) if e.to_string().contains("No such object") || e.to_string().contains("404") => {
             info!("No existing manifest.json found, creating new one");
             Vec::new()
-        },
+        }
         Err(e) => {
             return Err(format!("Failed to download manifest.json: {}", e).into());
         }
@@ -437,10 +497,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let recent_urls: std::collections::HashSet<String> = if is_backfill {
         std::collections::HashSet::new()
     } else {
-        manifest.iter()
-            .filter(|e| e.date >= Utc::now().checked_sub_signed(chrono::Duration::days(7))
-                .map(|d| d.format("%Y-%m-%d").to_string())
-                .unwrap_or_default())
+        manifest
+            .iter()
+            .filter(|e| {
+                e.date
+                    >= Utc::now()
+                        .checked_sub_signed(chrono::Duration::days(7))
+                        .map(|d| d.format("%Y-%m-%d").to_string())
+                        .unwrap_or_default()
+            })
             .filter(|e| e.prompt_version.is_none()) // only dedup against v1 (prod) picks
             .filter_map(|e| e.original_url.clone())
             .collect()
@@ -479,7 +544,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     let prod_config = prompts::PromptConfig::V1;
-    let selection_opts = LlmOptions { temperature: Some(0.3), ..Default::default() };
+    let selection_opts = LlmOptions {
+        temperature: Some(0.3),
+        ..Default::default()
+    };
 
     // Phase 1: Shortlist top 5 from headlines
     let shortlist_prompt = prod_config.shortlist_prompt_with_context(
@@ -487,15 +555,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         selection_context.as_deref(),
         recent_picks.as_deref(),
     );
-    let shortlist_response = call_llm(&http_client, selection_provider, &selection_key, shortlist_prompt, &selection_opts).await?;
+    let shortlist_response = call_llm(
+        &http_client,
+        selection_provider,
+        &selection_key,
+        shortlist_prompt,
+        &selection_opts,
+    )
+    .await?;
     let mut shortlist = parse_shortlist_indices(&shortlist_response, all_articles.len());
 
     // Fallback: if shortlist parsing fails, use single-shot selection
     if shortlist.is_empty() {
         warn!(response = %shortlist_response.trim(), "Failed to parse shortlist, falling back to single-shot");
         let fallback_prompt = prod_config.selection_prompt(&articles_text);
-        let fallback = call_llm(&http_client, selection_provider, &selection_key, fallback_prompt, &selection_opts).await?;
-        let idx = parse_selection_index(&fallback).unwrap_or(0).min(all_articles.len().saturating_sub(1));
+        let fallback = call_llm(
+            &http_client,
+            selection_provider,
+            &selection_key,
+            fallback_prompt,
+            &selection_opts,
+        )
+        .await?;
+        let idx = parse_selection_index(&fallback)
+            .unwrap_or(0)
+            .min(all_articles.len().saturating_sub(1));
         shortlist = vec![idx];
     }
 
@@ -505,7 +589,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let safe_index = if shortlist.len() == 1 {
         shortlist[0]
     } else {
-        info!("Phase 2: Fetching content for {} candidates", shortlist.len());
+        info!(
+            "Phase 2: Fetching content for {} candidates",
+            shortlist.len()
+        );
         let mut candidates_text = String::new();
         for &idx in &shortlist {
             let article = &all_articles[idx];
@@ -530,14 +617,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             selection_context.as_deref(),
             recent_picks.as_deref(),
         );
-        let final_response = call_llm(&http_client, selection_provider, &selection_key, final_prompt, &selection_opts).await?;
+        let final_response = call_llm(
+            &http_client,
+            selection_provider,
+            &selection_key,
+            final_prompt,
+            &selection_opts,
+        )
+        .await?;
         let picked = parse_selection_index(&final_response).unwrap_or(shortlist[0]);
 
         // Validate the pick is in our shortlist
         if shortlist.contains(&picked) {
             picked
         } else {
-            warn!(picked = picked, "Final pick not in shortlist, using first candidate");
+            warn!(
+                picked = picked,
+                "Final pick not in shortlist, using first candidate"
+            );
             shortlist[0]
         }
     };
@@ -565,22 +662,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let truncated_text: String = article_text.chars().take(MAX_ARTICLE_CHARS).collect();
     debug!(char_count = truncated_text.len(), "Article text truncated");
 
-    let summary_prompt = prod_config.summary_prompt(&best_article.source, &best_article.title, &truncated_text);
+    let summary_prompt =
+        prod_config.summary_prompt(&best_article.source, &best_article.title, &truncated_text);
 
     // --- Stage 2: Prod (v1) — parallel LLM calls ---
 
-    info!("Generating summaries in parallel across {} provider(s)", enabled_providers.len());
+    info!(
+        "Generating summaries in parallel across {} provider(s)",
+        enabled_providers.len()
+    );
 
-    let summary_futures: Vec<_> = enabled_providers.iter().map(|(provider, api_key)| {
-        let client = http_client.clone();
-        let key = api_key.clone();
-        let prompt = summary_prompt.clone();
-        let p = *provider;
-        async move {
-            let result = call_llm_with_retry(&client, p, &key, prompt).await;
-            (p, result)
-        }
-    }).collect();
+    let summary_futures: Vec<_> = enabled_providers
+        .iter()
+        .map(|(provider, api_key)| {
+            let client = http_client.clone();
+            let key = api_key.clone();
+            let prompt = summary_prompt.clone();
+            let p = *provider;
+            async move {
+                let result = call_llm_with_retry(&client, p, &key, prompt).await;
+                (p, result)
+            }
+        })
+        .collect();
 
     let llm_results = join_all(summary_futures).await;
 
@@ -602,14 +706,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 info!(provider = %provider.as_str(), object = %object_name, "Uploading summary to GCS");
 
                 let upload_type = UploadType::Simple(Media::new(object_name.clone()));
-                match gcs_client.upload_object(
-                    &UploadObjectRequest {
-                        bucket: bucket_name.to_string(),
-                        ..Default::default()
-                    },
-                    summary_bytes,
-                    &upload_type
-                ).await {
+                match gcs_client
+                    .upload_object(
+                        &UploadObjectRequest {
+                            bucket: bucket_name.to_string(),
+                            ..Default::default()
+                        },
+                        summary_bytes,
+                        &upload_type,
+                    )
+                    .await
+                {
                     Ok(_) => {
                         info!(provider = %provider.as_str(), "Summary upload complete");
 
@@ -648,42 +755,70 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let v3_config = prompts::PromptConfig::V3;
     let mut shadow_v3_json: Option<String> = None;
 
-    let claude_entry = enabled_providers.iter().find(|(p, _)| *p == LlmProvider::Claude);
+    let claude_entry = enabled_providers
+        .iter()
+        .find(|(p, _)| *p == LlmProvider::Claude);
     if let Some((_, claude_key)) = claude_entry {
-        let v3_prompt = v3_config.summary_prompt(&best_article.source, &best_article.title, &truncated_text);
-        let v3_options = LlmOptions { temperature: Some(0.3), ..Default::default() };
+        let v3_prompt =
+            v3_config.summary_prompt(&best_article.source, &best_article.title, &truncated_text);
+        let v3_options = LlmOptions {
+            temperature: Some(0.3),
+            ..Default::default()
+        };
 
-        match call_llm(&http_client, LlmProvider::Claude, claude_key, v3_prompt, &v3_options).await {
+        match call_llm(
+            &http_client,
+            LlmProvider::Claude,
+            claude_key,
+            v3_prompt,
+            &v3_options,
+        )
+        .await
+        {
             Ok(response) => {
                 let json_str = response.trim();
                 // Strip markdown code fences if present
                 // Extract JSON: find first { and last } to handle preamble or code fences
-                let clean_json = if let (Some(start), Some(end)) = (json_str.find('{'), json_str.rfind('}')) {
-                    json_str[start..=end].to_string()
-                } else {
-                    json_str.to_string()
-                };
+                let clean_json =
+                    if let (Some(start), Some(end)) = (json_str.find('{'), json_str.rfind('}')) {
+                        json_str[start..=end].to_string()
+                    } else {
+                        json_str.to_string()
+                    };
 
                 match serde_json::from_str::<serde_json::Value>(&clean_json) {
-                    Ok(parsed) if parsed.get("key_idea").is_some() && parsed.get("deep_dive").is_some() => {
+                    Ok(parsed)
+                        if parsed.get("key_idea").is_some()
+                            && parsed.get("deep_dive").is_some() =>
+                    {
                         let object_path = format!("summaries/v3/{}.json", today);
                         let public_url = gcs_public_url(&bucket_name, &object_path);
 
-                        match gcs_client.upload_object(
-                            &UploadObjectRequest {
-                                bucket: bucket_name.clone(),
-                                ..Default::default()
-                            },
-                            clean_json.as_bytes().to_vec(),
-                            &UploadType::Simple(Media::new(object_path.clone())),
-                        ).await {
+                        match gcs_client
+                            .upload_object(
+                                &UploadObjectRequest {
+                                    bucket: bucket_name.clone(),
+                                    ..Default::default()
+                                },
+                                clean_json.as_bytes().to_vec(),
+                                &UploadType::Simple(Media::new(object_path.clone())),
+                            )
+                            .await
+                        {
                             Ok(_) => {
                                 let snippet = parsed["key_idea"].as_str().unwrap_or("").to_string();
-                                let snippet_truncated = if snippet.chars().count() > SUMMARY_SNIPPET_CHARS {
-                                    format!("{}...", snippet.chars().take(SUMMARY_SNIPPET_CHARS - 3).collect::<String>())
-                                } else {
-                                    snippet
-                                };
+                                let snippet_truncated =
+                                    if snippet.chars().count() > SUMMARY_SNIPPET_CHARS {
+                                        format!(
+                                            "{}...",
+                                            snippet
+                                                .chars()
+                                                .take(SUMMARY_SNIPPET_CHARS - 3)
+                                                .collect::<String>()
+                                        )
+                                    } else {
+                                        snippet
+                                    };
 
                                 new_manifest_entries.push(ManifestEntry {
                                     date: today.clone(),
@@ -711,29 +846,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         // Shadow lane: same prompt, candidate model; never enters the manifest.
         if let Some(shadow) = shadow_model() {
-            let shadow_prompt = v3_config.summary_prompt(&best_article.source, &best_article.title, &truncated_text);
+            let shadow_prompt = v3_config.summary_prompt(
+                &best_article.source,
+                &best_article.title,
+                &truncated_text,
+            );
             // Opus 5 adaptive thinking tokens count against max_tokens; raise
             // the cap so the JSON answer isn't truncated. Prod paths keep the
             // 4096 default.
-            let shadow_options = LlmOptions { model: Some(shadow.clone()), max_tokens: Some(16000), ..Default::default() };
+            let shadow_options = LlmOptions {
+                model: Some(shadow.clone()),
+                max_tokens: Some(16000),
+                ..Default::default()
+            };
 
-            match call_llm(&http_client, LlmProvider::Claude, claude_key, shadow_prompt, &shadow_options).await {
+            match call_llm(
+                &http_client,
+                LlmProvider::Claude,
+                claude_key,
+                shadow_prompt,
+                &shadow_options,
+            )
+            .await
+            {
                 Ok(response) => {
                     let json_str = response.trim();
-                    let clean_json = if let (Some(start), Some(end)) = (json_str.find('{'), json_str.rfind('}')) {
+                    let clean_json = if let (Some(start), Some(end)) =
+                        (json_str.find('{'), json_str.rfind('}'))
+                    {
                         json_str[start..=end].to_string()
                     } else {
                         json_str.to_string()
                     };
 
                     match serde_json::from_str::<serde_json::Value>(&clean_json) {
-                        Ok(parsed) if parsed.get("key_idea").is_some() && parsed.get("deep_dive").is_some() => {
+                        Ok(parsed)
+                            if parsed.get("key_idea").is_some()
+                                && parsed.get("deep_dive").is_some() =>
+                        {
                             let object_path = format!("summaries/v3-shadow/{}.json", today);
-                            match gcs_client.upload_object(
-                                &UploadObjectRequest { bucket: bucket_name.clone(), ..Default::default() },
-                                clean_json.as_bytes().to_vec(),
-                                &UploadType::Simple(Media::new(object_path.clone())),
-                            ).await {
+                            match gcs_client
+                                .upload_object(
+                                    &UploadObjectRequest {
+                                        bucket: bucket_name.clone(),
+                                        ..Default::default()
+                                    },
+                                    clean_json.as_bytes().to_vec(),
+                                    &UploadType::Simple(Media::new(object_path.clone())),
+                                )
+                                .await
+                            {
                                 Ok(_) => {
                                     info!(model = %shadow, "Shadow V3 brief uploaded to {}", object_path);
                                     shadow_v3_json = Some(clean_json);
@@ -752,12 +914,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     // --- Build calibration context from already-loaded feedback ---
-    let calibration_context = build_calibration_context(&recent_feedback, &gcs_client, &bucket_name, &manifest).await;
+    let calibration_context =
+        build_calibration_context(&recent_feedback, &gcs_client, &bucket_name, &manifest).await;
 
     // --- Stage 4: Eval (dual pass with calibration) ---
     // Use Gemini as judge to avoid self-preference bias (Claude judging Claude summaries)
-    let eval_entry = enabled_providers.iter().find(|(p, _)| *p == LlmProvider::Gemini)
-        .or(enabled_providers.iter().find(|(p, _)| *p == LlmProvider::Claude));
+    let eval_entry = enabled_providers
+        .iter()
+        .find(|(p, _)| *p == LlmProvider::Gemini)
+        .or(enabled_providers
+            .iter()
+            .find(|(p, _)| *p == LlmProvider::Claude));
     if let Some((eval_provider, eval_key)) = eval_entry {
         info!(provider = %eval_provider.as_str(), "Starting eval stage");
 
@@ -768,27 +935,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let summary_id = entry.summary_id();
 
             // Download the summary we just uploaded
-            match gcs_client.download_object(
-                &GetObjectRequest {
-                    bucket: bucket_name.to_string(),
-                    object: gcs_object_path(&entry.url, &bucket_name).to_string(),
-                    ..Default::default()
-                },
-                &Range::default()
-            ).await {
+            match gcs_client
+                .download_object(
+                    &GetObjectRequest {
+                        bucket: bucket_name.to_string(),
+                        object: gcs_object_path(&entry.url, &bucket_name).to_string(),
+                        ..Default::default()
+                    },
+                    &Range::default(),
+                )
+                .await
+            {
                 Ok(data) => {
                     if let Ok(content) = String::from_utf8(data) {
                         eval_summaries.push((summary_id, content));
                     }
                 }
-                Err(e) => warn!(summary_id = %summary_id, error = %e, "Failed to download summary for eval"),
+                Err(e) => {
+                    warn!(summary_id = %summary_id, error = %e, "Failed to download summary for eval")
+                }
             }
         }
 
         // Split summaries into V1 (markdown) and V3 (insight-brief) for separate eval rubrics
-        let (v1_summaries, v3_summaries): (Vec<_>, Vec<_>) = eval_summaries.iter().partition(|(id, _)| {
-            !new_manifest_entries.iter().any(|e| e.summary_id() == *id && e.format.as_deref() == Some("insight-brief-v3"))
-        });
+        let (v1_summaries, v3_summaries): (Vec<_>, Vec<_>) =
+            eval_summaries.iter().partition(|(id, _)| {
+                !new_manifest_entries.iter().any(|e| {
+                    e.summary_id() == *id && e.format.as_deref() == Some("insight-brief-v3")
+                })
+            });
 
         // Eval V1 summaries with standard rubric
         if !v1_summaries.is_empty() {
@@ -808,8 +983,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 section.push_str(&format!("--- Summary: {} ---\n{}\n\n", id, content));
             }
             if let Some(json) = run_eval_pass(
-                &http_client, *eval_provider, eval_key, format!("{}{}", v1_prompt, section), &gcs_client, &bucket_name, &today, "eval"
-            ).await {
+                &http_client,
+                *eval_provider,
+                eval_key,
+                format!("{}{}", v1_prompt, section),
+                &gcs_client,
+                &bucket_name,
+                &today,
+                "eval",
+            )
+            .await
+            {
                 apply_eval_scores(&json, &mut new_manifest_entries);
             }
         }
@@ -831,13 +1015,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 section.push_str(&format!("--- Summary: {} ---\n{}\n\n", id, content));
             }
             if let Some(json) = &shadow_v3_json {
-                section.push_str(&format!("--- Summary: {} ---\n{}\n\n", SHADOW_SUMMARY_ID, json));
+                section.push_str(&format!(
+                    "--- Summary: {} ---\n{}\n\n",
+                    SHADOW_SUMMARY_ID, json
+                ));
             }
             if let Some(json) = run_eval_pass(
-                &http_client, *eval_provider, eval_key,
-                format!("{}{}{}", v3_prompt, pairwise_instruction(shadow_v3_json.is_some()), section),
-                &gcs_client, &bucket_name, &today, "eval-v3"
-            ).await {
+                &http_client,
+                *eval_provider,
+                eval_key,
+                format!(
+                    "{}{}{}",
+                    v3_prompt,
+                    pairwise_instruction(shadow_v3_json.is_some()),
+                    section
+                ),
+                &gcs_client,
+                &bucket_name,
+                &today,
+                "eval-v3",
+            )
+            .await
+            {
                 apply_eval_scores(&json, &mut new_manifest_entries);
             }
         }
@@ -858,8 +1057,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
                 let calibrated_prompt = format!("{}{}\n{}", v1_prompt, cal_context, section);
                 if let Some(cal_json) = run_eval_pass(
-                    &http_client, *eval_provider, eval_key, calibrated_prompt, &gcs_client, &bucket_name, &today, "eval-calibrated"
-                ).await {
+                    &http_client,
+                    *eval_provider,
+                    eval_key,
+                    calibrated_prompt,
+                    &gcs_client,
+                    &bucket_name,
+                    &today,
+                    "eval-calibrated",
+                )
+                .await
+                {
                     apply_eval_scores(&cal_json, &mut new_manifest_entries);
                     log_calibration_agreement(&recent_feedback, &cal_json, &new_manifest_entries);
                 }
@@ -878,14 +1086,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // be prepended ahead of newer ones. Stable sort preserves intra-date order.
     manifest.sort_by(|a, b| b.date.cmp(&a.date));
     let manifest_json = serde_json::to_vec_pretty(&manifest)?;
-    gcs_client.upload_object(
-        &UploadObjectRequest {
-            bucket: bucket_name.to_string(),
-            ..Default::default()
-        },
-        manifest_json,
-        &UploadType::Simple(Media::new("manifest.json".to_string()))
-    ).await?;
+    gcs_client
+        .upload_object(
+            &UploadObjectRequest {
+                bucket: bucket_name.to_string(),
+                ..Default::default()
+            },
+            manifest_json,
+            &UploadType::Simple(Media::new("manifest.json".to_string())),
+        )
+        .await?;
 
     info!(date = %today, "Manifest updated successfully");
     info!("SE Daily Agent completed successfully");
@@ -894,12 +1104,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 #[instrument(skip(client, url), fields(url_domain = %extract_domain(url)))]
-async fn fetch_article_content(client: &reqwest::Client, url: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+async fn fetch_article_content(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let response = client.get(url).send().await?;
     let html_content = response.text().await?;
 
-    let parsed_url = url::Url::parse(url)
-        .map_err(|e| format!("URL parse error: {:?}", e))?;
+    let parsed_url = url::Url::parse(url).map_err(|e| format!("URL parse error: {:?}", e))?;
 
     let mut reader = Cursor::new(html_content.as_bytes());
     let product = extractor::extract(&mut reader, &parsed_url)
@@ -941,13 +1153,19 @@ mod tests {
     #[test]
     fn test_parse_run_mode_smoke_takes_precedence_over_date() {
         // A deploy smoke check must never accidentally run a real backfill.
-        assert_eq!(parse_run_mode(&args(&["--date", "2026-05-26", "--smoke"])), Ok(RunMode::Smoke));
+        assert_eq!(
+            parse_run_mode(&args(&["--date", "2026-05-26", "--smoke"])),
+            Ok(RunMode::Smoke)
+        );
     }
 
     #[test]
     fn test_parse_run_mode_backfill() {
         let d = chrono::NaiveDate::from_ymd_opt(2026, 5, 26).unwrap();
-        assert_eq!(parse_run_mode(&args(&["--date", "2026-05-26"])), Ok(RunMode::Backfill(d)));
+        assert_eq!(
+            parse_run_mode(&args(&["--date", "2026-05-26"])),
+            Ok(RunMode::Backfill(d))
+        );
     }
 
     #[test]
@@ -1045,7 +1263,10 @@ mod tests {
     #[test]
     fn test_shadow_model_reads_env() {
         // Pure precedence check via the helper's inner fn.
-        assert_eq!(shadow_model_from(Some("claude-opus-5".to_string())), Some("claude-opus-5".to_string()));
+        assert_eq!(
+            shadow_model_from(Some("claude-opus-5".to_string())),
+            Some("claude-opus-5".to_string())
+        );
         assert_eq!(shadow_model_from(Some(String::new())), None); // empty = off
         assert_eq!(shadow_model_from(None), None);
     }
@@ -1060,15 +1281,17 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_run_smoke_fails_when_shadow_model_smoke_call_fails() {
-        use wiremock::{Mock, MockServer, ResponseTemplate};
         use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
 
         // Prod smoke call (default model, no override) succeeds.
         Mock::given(method("POST"))
             .and(path("/messages"))
-            .and(body_partial_json(serde_json::json!({"model": "claude-opus-4-8"})))
+            .and(body_partial_json(
+                serde_json::json!({"model": "claude-opus-4-8"}),
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "content": [{"text": "OK"}]
             })))
@@ -1080,7 +1303,9 @@ mod tests {
         // would, fails.
         Mock::given(method("POST"))
             .and(path("/messages"))
-            .and(body_partial_json(serde_json::json!({"model": "claude-bad-shadow"})))
+            .and(body_partial_json(
+                serde_json::json!({"model": "claude-bad-shadow"}),
+            ))
             .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
                 "error": {"message": "model: claude-bad-shadow not found"}
             })))
@@ -1111,8 +1336,8 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_run_smoke_passes_when_shadow_model_smoke_call_succeeds() {
-        use wiremock::{Mock, MockServer, ResponseTemplate};
         use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
 

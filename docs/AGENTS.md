@@ -8,11 +8,10 @@ Eng Pulse is an AI-powered daily engineering digest system with these components
 
 | Component | Location | Language | Purpose |
 |-----------|----------|----------|---------|
-| `gemini-engine` | `libs/gemini-engine/` | Rust | Shared Gemini API client |
+| `llm-client` | `libs/llm-client/` | Rust | Shared LLM API client |
 | `daily-agent` | `apps/daily-agent/` | Rust | Daily article summarization |
 | `explorer-agent` | `apps/explorer-agent/` | Rust | Source discovery/management |
 | `notifier` | `functions/notifier/` | Python | Email notifications |
-| `mobile` | `apps/mobile/` | Flutter/Dart | Cross-platform mobile app |
 | `mobile-swift` | `apps/mobile-swift/` | Swift | Native iOS app with TTS |
 
 ## Architecture Decisions
@@ -53,10 +52,10 @@ let content = fetch_article(&url).await.unwrap();
 
 ### Gemini API Calls
 
-Always use the shared `gemini-engine` crate:
+Always use the shared `llm-client` crate:
 
 ```rust
-use gemini_engine::call_gemini_with_retry;
+use llm_client::call_gemini_with_retry;
 
 let response = call_gemini_with_retry(&client, &api_key, prompt).await?;
 ```
@@ -72,25 +71,6 @@ info!(article_count = articles.len(), "Fetched articles");
 warn!(source = %source.name, "Source returned no articles");
 error!(error = %e, "Failed to fetch from GCS");
 ```
-
-### Flutter Services
-
-Services use static methods and Hive for persistence:
-
-```dart
-// Initialize in main()
-await CacheService.init();
-
-// Use statically
-final summaries = CacheService.getCachedSummaries();
-```
-
-### Firebase (Optional - Flutter)
-
-Firebase is optional in the Flutter app. When not configured:
-- App runs normally without push notifications
-- `NotificationService.isAvailable` returns `false`
-- Use `flutterfire configure` to enable Firebase
 
 ### Swift App Patterns
 
@@ -133,13 +113,6 @@ When modifying:
 - Request structured output (JSON, "yes/no")
 - Test with multiple inputs locally
 
-### Adding Flutter Features
-
-1. Create model in `lib/models/` if needed
-2. Add service method in `lib/services/`
-3. Create/update screen in `lib/screens/`
-4. Follow existing widget patterns in `lib/widgets/`
-
 ### Adding Swift Features
 
 1. Create model in `EngPulse/Models/` if needed
@@ -162,7 +135,6 @@ chmod +x .git/hooks/pre-commit
 The hook automatically:
 - Checks Rust compilation and clippy for modified crates
 - Validates Python syntax for modified `.py` files
-- Runs Flutter analyze for modified `.dart` files
 - Only runs checks for files in the staged commit
 
 ### Full Validation Script
@@ -170,7 +142,7 @@ The hook automatically:
 Run all checks manually:
 
 ```bash
-# Full validation (includes Flutter - slower)
+# Full validation
 ./scripts/validate.sh
 
 # Quick validation (Rust + Python only)
@@ -187,14 +159,6 @@ cargo test
 cargo clippy -- -D warnings
 ```
 
-### Flutter
-
-```bash
-cd apps/mobile
-flutter test
-flutter analyze
-```
-
 ### Local End-to-End
 
 ```bash
@@ -203,9 +167,6 @@ cd apps/daily-agent && cargo run
 
 # 2. Check GCS for output
 gsutil cat gs://bucket/manifest.json
-
-# 3. Run mobile app
-cd apps/mobile && flutter run
 ```
 
 ## Known Technical Debt
@@ -213,12 +174,10 @@ cd apps/mobile && flutter run
 See GitHub Issues for active issues.
 
 Resolved:
-- ~~#6~~ - Environment-based API URL configuration (RESOLVED: `--dart-define=GCS_BUCKET`)
-- ~~#7~~ - FCM token registration (CLOSED: Swift uses APNs, Flutter optional)
+- ~~#7~~ - FCM token registration (CLOSED: Swift uses APNs)
 - ~~#8~~ - Observability infrastructure (RESOLVED: monitoring script + structured logging)
 - ~~#9~~ - Docker versioned tags (RESOLVED: git SHA tags)
-- ~~#12~~ - Shared code duplicated (RESOLVED: gemini-engine in libs/)
-- ~~#13~~ - Flutter unit tests (CLOSED)
+- ~~#12~~ - Shared code duplicated (RESOLVED: llm-client in libs/)
 
 ## File Naming Conventions
 
@@ -326,11 +285,10 @@ severity="ERROR"
 
 | File | Purpose |
 |------|---------|
-| `libs/gemini-engine/src/lib.rs` | Core Gemini API logic |
+| `libs/llm-client/src/lib.rs` | Core LLM API logic |
 | `apps/daily-agent/src/main.rs` | Daily agent orchestration |
 | `apps/daily-agent/src/fetcher.rs` | RSS/HN fetching logic |
 | `apps/explorer-agent/src/main.rs` | Source discovery logic |
-| `apps/mobile/lib/services/api_service.dart` | Flutter API client |
 | `apps/mobile-swift/EngPulse/EngPulseApp.swift` | Swift app entry point |
 | `apps/mobile-swift/EngPulse/Services/` | Swift services (API, Cache, TTS) |
 | `scripts/setup-monitoring.sh` | Observability setup (alerts, dashboard) |
@@ -395,9 +353,6 @@ chmod +x .git/hooks/pre-commit
 # Rust agent
 cd apps/daily-agent && cargo run
 
-# Flutter app
-cd apps/mobile && flutter run
-
 # Swift app (open in Xcode)
 cd apps/mobile-swift && open EngPulse.xcodeproj
 ```
@@ -417,9 +372,6 @@ cd apps/mobile-swift && open EngPulse.xcodeproj
 ```bash
 # Rust
 cargo build && cargo test && cargo clippy
-
-# Flutter
-flutter pub get && flutter test && flutter analyze
 ```
 
 ### Deploy

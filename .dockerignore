@@ -1,0 +1,6 @@
+target/
+.git/
+apps/mobile-swift/
+docs/
+.superpowers/
+infra/

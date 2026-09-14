@@ -1,0 +1,14 @@
+{
+  "date": "2026-09-01",
+  "feeds": [
+    {
+      "article_url": "https://example.com/post",
+      "error": null,
+      "est_cost_usd": 0.049,
+      "feed_slug": "engineering",
+      "input_tokens": 2845,
+      "output_tokens": 1410,
+      "status": "ok"
+    }
+  ]
+}

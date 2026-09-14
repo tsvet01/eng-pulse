@@ -41,8 +41,17 @@ impl ManifestEntry {
     pub(crate) fn summary_id(&self) -> String {
         let provider = self.model.as_deref().unwrap_or("unknown");
         let version = self.prompt_version.as_deref().unwrap_or("v1");
-        let suffix = if self.url.contains("-selection.md") { "-selection" } else { "" };
-        format!("{}-{}{}", version, provider.split('-').next().unwrap_or(provider), suffix)
+        let suffix = if self.url.contains("-selection.md") {
+            "-selection"
+        } else {
+            ""
+        };
+        format!(
+            "{}-{}{}",
+            version,
+            provider.split('-').next().unwrap_or(provider),
+            suffix
+        )
     }
 }
 
@@ -67,25 +76,41 @@ mod tests {
 
     #[test]
     fn test_summary_id_v1_gemini() {
-        let entry = make_entry("summaries/gemini/2026-03-20.md", Some("gemini-3.1-pro-preview"), None);
+        let entry = make_entry(
+            "summaries/gemini/2026-03-20.md",
+            Some("gemini-3.1-pro-preview"),
+            None,
+        );
         assert_eq!(entry.summary_id(), "v1-gemini");
     }
 
     #[test]
     fn test_summary_id_v1_claude() {
-        let entry = make_entry("summaries/claude/2026-03-20.md", Some("claude-opus-4-8"), None);
+        let entry = make_entry(
+            "summaries/claude/2026-03-20.md",
+            Some("claude-opus-4-8"),
+            None,
+        );
         assert_eq!(entry.summary_id(), "v1-claude");
     }
 
     #[test]
     fn test_summary_id_v2_beta() {
-        let entry = make_entry("summaries/beta/claude/2026-03-20.md", Some("claude-opus-4-8"), Some("v2"));
+        let entry = make_entry(
+            "summaries/beta/claude/2026-03-20.md",
+            Some("claude-opus-4-8"),
+            Some("v2"),
+        );
         assert_eq!(entry.summary_id(), "v2-claude");
     }
 
     #[test]
     fn test_summary_id_v2_selection() {
-        let entry = make_entry("summaries/beta/claude/2026-03-20-selection.md", Some("claude-opus-4-8"), Some("v2"));
+        let entry = make_entry(
+            "summaries/beta/claude/2026-03-20-selection.md",
+            Some("claude-opus-4-8"),
+            Some("v2"),
+        );
         assert_eq!(entry.summary_id(), "v2-claude-selection");
     }
 
@@ -106,7 +131,10 @@ mod tests {
     #[test]
     fn test_gcs_object_path_strips_prefix() {
         let url = "https://storage.googleapis.com/my-bucket/summaries/gemini/2026-03-20.md";
-        assert_eq!(gcs_object_path(url, "my-bucket"), "summaries/gemini/2026-03-20.md");
+        assert_eq!(
+            gcs_object_path(url, "my-bucket"),
+            "summaries/gemini/2026-03-20.md"
+        );
     }
 
     #[test]

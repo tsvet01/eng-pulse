@@ -1,9 +1,9 @@
-use wiremock::{MockServer, Mock, ResponseTemplate};
-use wiremock::matchers::{method, path};
 use llm_client::{call_llm_with_retry, LlmProvider};
-use std::time::Duration;
 use reqwest::Client;
 use serial_test::serial;
+use std::time::Duration;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// Helper to setup a mock server and run a test for a specific provider
 async fn test_provider_mock(
@@ -24,21 +24,23 @@ async fn test_provider_mock(
         .await;
 
     // 3. Configure Environment
-    unsafe { std::env::set_var(base_url_env_var, mock_server.uri()); }
+    unsafe {
+        std::env::set_var(base_url_env_var, mock_server.uri());
+    }
     if let Some((key, value)) = extra_env_setup {
-        unsafe { std::env::set_var(key, value); }
+        unsafe {
+            std::env::set_var(key, value);
+        }
     }
 
     // 4. Create Client
-    let client = Client::builder().timeout(Duration::from_secs(5)).build().unwrap();
+    let client = Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
 
     // 5. Call API
-    let result = call_llm_with_retry(
-        &client,
-        provider,
-        "test-key",
-        "Hello".to_string()
-    ).await;
+    let result = call_llm_with_retry(&client, provider, "test-key", "Hello".to_string()).await;
 
     // 6. Verify
     assert!(result.is_ok());
@@ -66,8 +68,9 @@ async fn test_gemini_api_mocking() {
         "/v1beta/models/gemini-pro:generateContent",
         response,
         "GEMINI_BASE_URL",
-        Some(("GEMINI_MODEL", "gemini-pro"))
-    ).await;
+        Some(("GEMINI_MODEL", "gemini-pro")),
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -84,8 +87,9 @@ async fn test_openai_api_mocking() {
         "/chat/completions",
         response,
         "OPENAI_BASE_URL",
-        None
-    ).await;
+        None,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -100,6 +104,7 @@ async fn test_claude_api_mocking() {
         "/messages",
         response,
         "CLAUDE_BASE_URL",
-        None
-    ).await;
+        None,
+    )
+    .await;
 }

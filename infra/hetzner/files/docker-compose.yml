@@ -1,0 +1,32 @@
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+  pulse-api:
+    image: ${PULSE_API_IMAGE}:${PULSE_API_TAG:-latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://pulse:${POSTGRES_PASSWORD}@postgres:5432/pulse
+    ports: ["127.0.0.1:8080:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pulse
+      POSTGRES_DB: pulse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes: ["${PG_DATA}:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  caddy_data:

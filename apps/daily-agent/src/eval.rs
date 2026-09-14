@@ -1,20 +1,30 @@
+use gcloud_storage::client::Client;
+use gcloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
+use llm_client::{call_llm, LlmOptions, LlmProvider};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
-use gcloud_storage::client::Client;
-use gcloud_storage::http::objects::upload::{UploadObjectRequest, UploadType, Media};
-use llm_client::{call_llm, LlmProvider, LlmOptions};
 
-use crate::manifest::ManifestEntry;
 use crate::feedback::{FeedbackEntry, CALIBRATION_AGREEMENT_THRESHOLD};
+use crate::manifest::ManifestEntry;
 
-pub(crate) const SCORE_KEYS: &[&str] = &["clarity", "actionability", "information_density", "faithfulness"];
+pub(crate) const SCORE_KEYS: &[&str] = &[
+    "clarity",
+    "actionability",
+    "information_density",
+    "faithfulness",
+];
 pub(crate) const EVAL_DEFAULT_SCORE: u64 = 3;
 pub(crate) const EVAL_MAX_TOTAL: f64 = 20.0;
 
 pub(crate) fn score_total(score: &serde_json::Value) -> f64 {
     let total: f64 = SCORE_KEYS
         .iter()
-        .map(|&key| score.get(key).and_then(|v| v.as_u64()).unwrap_or(EVAL_DEFAULT_SCORE) as f64)
+        .map(|&key| {
+            score
+                .get(key)
+                .and_then(|v| v.as_u64())
+                .unwrap_or(EVAL_DEFAULT_SCORE) as f64
+        })
         .sum();
     total / EVAL_MAX_TOTAL
 }
@@ -81,7 +91,10 @@ pub(crate) async fn run_eval_pass(
     today: &str,
     report_prefix: &str,
 ) -> Option<serde_json::Value> {
-    let eval_opts = LlmOptions { temperature: Some(0.3), ..Default::default() };
+    let eval_opts = LlmOptions {
+        temperature: Some(0.3),
+        ..Default::default()
+    };
     match call_llm(http_client, provider, api_key, prompt, &eval_opts).await {
         Ok(eval_response) => {
             let cleaned = eval_response
@@ -96,13 +109,21 @@ pub(crate) async fn run_eval_pass(
                     // Upload eval report
                     let eval_object = format!("{}/{}.json", report_prefix, today);
                     if let Ok(eval_json) = serde_json::to_vec_pretty(&json) {
-                        match gcs_client.upload_object(
-                            &UploadObjectRequest { bucket: bucket_name.to_string(), ..Default::default() },
-                            eval_json,
-                            &UploadType::Simple(Media::new(eval_object)),
-                        ).await {
+                        match gcs_client
+                            .upload_object(
+                                &UploadObjectRequest {
+                                    bucket: bucket_name.to_string(),
+                                    ..Default::default()
+                                },
+                                eval_json,
+                                &UploadType::Simple(Media::new(eval_object)),
+                            )
+                            .await
+                        {
                             Ok(_) => info!(prefix = %report_prefix, "Eval report uploaded"),
-                            Err(e) => warn!(prefix = %report_prefix, error = %e, "Failed to upload eval report"),
+                            Err(e) => {
+                                warn!(prefix = %report_prefix, error = %e, "Failed to upload eval report")
+                            }
                         }
                     }
                     Some(json)
@@ -132,7 +153,11 @@ pub(crate) fn apply_eval_scores(json: &serde_json::Value, entries: &mut [Manifes
                     } else {
                         score_total(score)
                     };
-                    let reasoning = score.get("reasoning").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                    let reasoning = score
+                        .get("reasoning")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     info!(summary_id = %summary_id, total = %total, reasoning = %reasoning, "Eval score");
                     entry.eval_score = Some(total);
                 }
@@ -151,10 +176,13 @@ pub(crate) fn log_calibration_agreement(
         .get("scores")
         .and_then(|s| s.as_array())
         .map(|scores| {
-            scores.iter().filter_map(|s| {
-                let id = s.get("summary_id")?.as_str()?;
-                Some((id.to_string(), score_total(s)))
-            }).collect()
+            scores
+                .iter()
+                .filter_map(|s| {
+                    let id = s.get("summary_id")?.as_str()?;
+                    Some((id.to_string(), score_total(s)))
+                })
+                .collect()
         })
         .unwrap_or_default();
 
@@ -258,8 +286,16 @@ mod tests {
             }]
         });
         let mut entries = vec![
-            make_entry("summaries/gemini/2026-03-20.md", Some("gemini-3.1-pro-preview"), None),
-            make_entry("summaries/claude/2026-03-20.md", Some("claude-opus-4-8"), None),
+            make_entry(
+                "summaries/gemini/2026-03-20.md",
+                Some("gemini-3.1-pro-preview"),
+                None,
+            ),
+            make_entry(
+                "summaries/claude/2026-03-20.md",
+                Some("claude-opus-4-8"),
+                None,
+            ),
         ];
 
         apply_eval_scores(&json, &mut entries);
@@ -273,7 +309,11 @@ mod tests {
         let json = serde_json::json!({
             "scores": [{"summary_id": "v1-nonexistent", "clarity": 5, "actionability": 5, "information_density": 5, "faithfulness": 5}]
         });
-        let mut entries = vec![make_entry("summaries/gemini/2026-03-20.md", Some("gemini-3.1-pro-preview"), None)];
+        let mut entries = vec![make_entry(
+            "summaries/gemini/2026-03-20.md",
+            Some("gemini-3.1-pro-preview"),
+            None,
+        )];
         apply_eval_scores(&json, &mut entries);
         assert!(entries[0].eval_score.is_none());
     }

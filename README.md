@@ -21,24 +21,27 @@ Eng Pulse is a complete system for curating, summarizing, and delivering daily s
                         │  (Data Store)   │
                         └─────────────────┘
                                  │
-                 ┌───────────────┴───────────────┐
-                 ▼                               ▼
-        ┌─────────────────┐             ┌─────────────────┐
-        │  Mobile App     │             │  Mobile App     │
-        │  (Flutter)      │             │  (Swift/iOS)    │
-        └─────────────────┘             └─────────────────┘
+                 │
+                 ▼
+        ┌─────────────────┐
+        │  Mobile App     │
+        │  (Swift/iOS)    │
+        └─────────────────┘
 ```
 
 ## Components
 
 | Component | Description | Tech Stack |
 |-----------|-------------|------------|
-| [gemini-engine](./libs/gemini-engine/) | Shared Gemini API client with retry logic | Rust |
+| [llm-client](./libs/llm-client/) | Shared LLM API client with retry logic | Rust |
+| [pulse-core](./libs/pulse-core/) | Shared contract types + fixture generator (`docs/contracts/`) | Rust |
 | [daily-agent](./apps/daily-agent/) | Daily article selection and summarization | Rust |
 | [explorer-agent](./apps/explorer-agent/) | RSS/blog source discovery and management | Rust |
+| [pulse-api](./apps/pulse-api/) | Multi-user API skeleton (`/healthz`, sqlx migrations) | Rust |
 | [notifier](./functions/notifier/) | Email notification on new summaries | Python |
-| [mobile](./apps/mobile/) | Cross-platform mobile app | Flutter |
+| mobile-android | Native Kotlin/Compose app | Kotlin (planned, Phase 5) |
 | [mobile-swift](./apps/mobile-swift/) | Native iOS app with TTS and CarPlay | Swift |
+| [infra/](./infra/hetzner/) | Terraform: Hetzner box + Cloudflare DNS for `pulse-api` | Terraform |
 
 ## Quick Start
 
@@ -46,7 +49,6 @@ Eng Pulse is a complete system for curating, summarizing, and delivering daily s
 
 - Rust 1.83+
 - Python 3.11+
-- Flutter 3.x+ (for Flutter app)
 - Xcode 15+ (for Swift app)
 - Google Cloud SDK
 - Gemini API key
@@ -75,10 +77,6 @@ cargo run
 # Explorer Agent (manages sources)
 cd apps/explorer-agent
 cargo run
-
-# Mobile App (Flutter)
-cd apps/mobile
-flutter run
 
 # Mobile App (Swift) - requires Xcode
 cd apps/mobile-swift
@@ -128,8 +126,10 @@ cd functions/notifier && ./deploy.sh
 ### CI/CD
 
 GitHub Actions automatically:
-- **On PR**: Runs `cargo check`, `cargo clippy`, `cargo test`, `flutter analyze`, `flutter test`
+- **On PR**: Runs `cargo check`, `cargo clippy`, `cargo test`
 - **On merge to main**: Deploys all components to Google Cloud
+
+A single path-filtered workflow (`.github/workflows/ci.yml`) also gates and deploys `pulse-core`/`pulse-api`: `fixtures` fails on `docs/contracts/` drift or untracked fixture files, `api-it` boots `pulse-api` against a real Postgres and checks `/healthz`, and `terraform-plan`/`terraform-apply` plan and (with `production`-environment approval) apply the `infra/hetzner` Terraform stack.
 
 Credentials are stored in GCP Secret Manager and GitHub Secrets.
 
@@ -171,10 +171,9 @@ eng-pulse/
 ├── apps/
 │   ├── daily-agent/       # Daily summarization agent (Rust)
 │   ├── explorer-agent/    # Source discovery agent (Rust)
-│   ├── mobile/            # Flutter mobile app
 │   └── mobile-swift/      # Native iOS app (Swift)
 ├── libs/
-│   └── gemini-engine/     # Shared Rust crate
+│   └── llm-client/        # Shared Rust crate
 ├── functions/
 │   └── notifier/          # Email notification (Python)
 ├── scripts/               # Utility scripts
@@ -186,12 +185,9 @@ eng-pulse/
 
 ```bash
 # Rust tests
-cd libs/gemini-engine && cargo test
+cd libs/llm-client && cargo test
 cd apps/daily-agent && cargo test
 cd apps/explorer-agent && cargo test
-
-# Flutter tests
-cd apps/mobile && flutter test
 ```
 
 ### Code Quality
@@ -199,9 +195,6 @@ cd apps/mobile && flutter test
 ```bash
 # Rust linting
 cargo clippy -- -D warnings
-
-# Flutter analysis
-flutter analyze
 ```
 
 ## Contributing

@@ -1,0 +1,6 @@
+api.eng-pulse.tsvetkov.org {
+	reverse_proxy pulse-api:8080
+}
+eng-pulse.tsvetkov.org {
+	respond "eng-pulse" 200
+}

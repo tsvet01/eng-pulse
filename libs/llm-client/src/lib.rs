@@ -1,8 +1,8 @@
+use backoff::{future::retry, ExponentialBackoff};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info, warn, instrument};
-use tracing_subscriber::{fmt, EnvFilter};
-use backoff::{ExponentialBackoff, future::retry};
 use std::time::Duration;
+use tracing::{debug, error, info, instrument, warn};
+use tracing_subscriber::{fmt, EnvFilter};
 use url::Url;
 
 const MAX_RETRY_ELAPSED_SECS: u64 = 120;
@@ -125,8 +125,7 @@ fn resolve_model_from(
 pub fn init_logging() {
     let is_production = std::env::var("RUST_LOG").is_ok();
 
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     if is_production {
         let _ = fmt()
@@ -138,10 +137,7 @@ pub fn init_logging() {
             .with_line_number(true)
             .try_init();
     } else {
-        let _ = fmt()
-            .with_env_filter(filter)
-            .with_target(false)
-            .try_init();
+        let _ = fmt().with_env_filter(filter).with_target(false).try_init();
     }
 }
 
@@ -212,8 +208,8 @@ fn is_transient_error(err: &str) -> bool {
         "timed out",
         "connection",
         "rate limit",
-        "408",  // Request Timeout
-        "429",  // Too Many Requests
+        "408", // Request Timeout
+        "429", // Too Many Requests
         "500",
         "502",
         "503",
@@ -250,7 +246,12 @@ fn is_transient_boxed(err: &(dyn std::error::Error + Send + Sync + 'static)) -> 
     is_transient_error(&message)
 }
 
-async fn call_gemini(client: &reqwest::Client, api_key: &str, text: String, options: &LlmOptions) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+async fn call_gemini(
+    client: &reqwest::Client,
+    api_key: &str,
+    text: String,
+    options: &LlmOptions,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let model = resolve_model_from(
         options.model.as_deref(),
         std::env::var("GEMINI_MODEL").ok(),
@@ -261,25 +262,23 @@ async fn call_gemini(client: &reqwest::Client, api_key: &str, text: String, opti
     let base_url = std::env::var("GEMINI_BASE_URL")
         .unwrap_or_else(|_| "https://generativelanguage.googleapis.com".to_string());
 
-    let url = format!(
-        "{}/v1beta/models/{}:generateContent",
-        base_url, model
-    );
+    let url = format!("{}/v1beta/models/{}:generateContent", base_url, model);
 
-    let generation_config = options.temperature.map(|t| GeminiGenerationConfig { temperature: Some(t) });
+    let generation_config = options.temperature.map(|t| GeminiGenerationConfig {
+        temperature: Some(t),
+    });
 
     let request = GeminiRequest {
-        contents: vec![
-            GeminiContent {
-                parts: vec![ GeminiPart { text } ]
-            }
-        ],
+        contents: vec![GeminiContent {
+            parts: vec![GeminiPart { text }],
+        }],
         generation_config,
     };
 
     debug!("Sending request to Gemini API");
 
-    let res = client.post(&url)
+    let res = client
+        .post(&url)
         .header("x-goog-api-key", api_key)
         .json(&request)
         .send()
@@ -366,7 +365,12 @@ pub async fn call_openai_with_retry(
     call_llm_with_retry(client, LlmProvider::OpenAI, api_key, prompt).await
 }
 
-async fn call_openai(client: &reqwest::Client, api_key: &str, text: String, options: &LlmOptions) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+async fn call_openai(
+    client: &reqwest::Client,
+    api_key: &str,
+    text: String,
+    options: &LlmOptions,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let model = resolve_model_from(
         options.model.as_deref(),
         std::env::var("OPENAI_MODEL").ok(),
@@ -379,9 +383,15 @@ async fn call_openai(client: &reqwest::Client, api_key: &str, text: String, opti
 
     let mut messages = Vec::new();
     if let Some(ref system) = options.system {
-        messages.push(OpenAIMessage { role: "system".to_string(), content: system.clone() });
+        messages.push(OpenAIMessage {
+            role: "system".to_string(),
+            content: system.clone(),
+        });
     }
-    messages.push(OpenAIMessage { role: "user".to_string(), content: text });
+    messages.push(OpenAIMessage {
+        role: "user".to_string(),
+        content: text,
+    });
 
     let request = OpenAIRequest {
         model,
@@ -391,7 +401,8 @@ async fn call_openai(client: &reqwest::Client, api_key: &str, text: String, opti
 
     debug!("Sending request to OpenAI API");
 
-    let res = client.post(format!("{}/chat/completions", base_url))
+    let res = client
+        .post(format!("{}/chat/completions", base_url))
         .header("Authorization", format!("Bearer {}", api_key))
         .json(&request)
         .send()
@@ -493,7 +504,12 @@ fn first_text_block(content: &[ClaudeContentBlock]) -> Option<&str> {
     content.iter().find_map(|b| b.text.as_deref())
 }
 
-async fn call_claude(client: &reqwest::Client, api_key: &str, text: String, options: &LlmOptions) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+async fn call_claude(
+    client: &reqwest::Client,
+    api_key: &str,
+    text: String,
+    options: &LlmOptions,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let model = resolve_model_from(
         options.model.as_deref(),
         std::env::var("CLAUDE_MODEL").ok(),
@@ -508,7 +524,8 @@ async fn call_claude(client: &reqwest::Client, api_key: &str, text: String, opti
 
     debug!("Sending request to Claude API");
 
-    let res = client.post(format!("{}/messages", base_url))
+    let res = client
+        .post(format!("{}/messages", base_url))
         .header("x-api-key", api_key)
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
@@ -744,7 +761,9 @@ mod tests {
     fn test_transient_detected_via_source_chain() {
         // Regression: a reqwest-shaped timeout error is NOT transient by its
         // top-level message alone (this is the bug that killed the explorer job).
-        assert!(!is_transient_error("error sending request for url (https://example.com)"));
+        assert!(!is_transient_error(
+            "error sending request for url (https://example.com)"
+        ));
         // Walking the source chain must surface the real cause and retry.
         let err: Box<dyn std::error::Error + Send + Sync> = Box::new(WrappedRequestError {
             cause: "operation timed out".into(),
@@ -828,8 +847,14 @@ mod tests {
     #[test]
     fn test_extract_domain_valid_url() {
         assert_eq!(extract_domain("https://example.com/path"), "example.com");
-        assert_eq!(extract_domain("http://blog.example.org/article?id=1"), "blog.example.org");
-        assert_eq!(extract_domain("https://sub.domain.co.uk/"), "sub.domain.co.uk");
+        assert_eq!(
+            extract_domain("http://blog.example.org/article?id=1"),
+            "blog.example.org"
+        );
+        assert_eq!(
+            extract_domain("https://sub.domain.co.uk/"),
+            "sub.domain.co.uk"
+        );
     }
 
     #[test]
@@ -923,7 +948,10 @@ mod tests {
     fn test_get_api_key_env_var() {
         assert_eq!(get_api_key_env_var(LlmProvider::Gemini), "GEMINI_API_KEY");
         assert_eq!(get_api_key_env_var(LlmProvider::OpenAI), "OPENAI_API_KEY");
-        assert_eq!(get_api_key_env_var(LlmProvider::Claude), "ANTHROPIC_API_KEY");
+        assert_eq!(
+            get_api_key_env_var(LlmProvider::Claude),
+            "ANTHROPIC_API_KEY"
+        );
     }
 
     #[test]
@@ -1011,17 +1039,27 @@ mod tests {
         // Regression: Opus 4.7+ deprecated `temperature` and rejects it with a
         // 400 invalid_request_error. It must NEVER be serialized for Claude, even
         // when a caller sets one (e.g. eval passes Some(0.3)).
-        let options = LlmOptions { temperature: Some(0.3), ..Default::default() };
-        let request = build_claude_request("claude-opus-4-8".to_string(), "Hi".to_string(), &options);
+        let options = LlmOptions {
+            temperature: Some(0.3),
+            ..Default::default()
+        };
+        let request =
+            build_claude_request("claude-opus-4-8".to_string(), "Hi".to_string(), &options);
         let json = serde_json::to_string(&request).unwrap();
-        assert!(!json.contains("temperature"), "temperature must not be sent to Claude, got: {json}");
+        assert!(
+            !json.contains("temperature"),
+            "temperature must not be sent to Claude, got: {json}"
+        );
     }
 
     #[test]
     fn test_build_claude_request_honors_max_tokens_override() {
         // Opus 5 adaptive thinking counts against max_tokens, so callers that
         // expect thinking must be able to raise the cap above the 4096 default.
-        let options = LlmOptions { max_tokens: Some(16000), ..Default::default() };
+        let options = LlmOptions {
+            max_tokens: Some(16000),
+            ..Default::default()
+        };
         let request = build_claude_request("claude-opus-5".to_string(), "Hi".to_string(), &options);
         assert_eq!(request.max_tokens, 16000);
     }
@@ -1029,7 +1067,8 @@ mod tests {
     #[test]
     fn test_build_claude_request_default_max_tokens_when_none() {
         let options = LlmOptions::default();
-        let request = build_claude_request("claude-opus-4-8".to_string(), "Hi".to_string(), &options);
+        let request =
+            build_claude_request("claude-opus-4-8".to_string(), "Hi".to_string(), &options);
         assert_eq!(request.max_tokens, 4096);
     }
 
@@ -1076,7 +1115,9 @@ mod tests {
         // Opus 5 adaptive thinking: first block can be a thinking block with no text.
         let blocks = vec![
             ClaudeContentBlock { text: None },
-            ClaudeContentBlock { text: Some("answer".to_string()) },
+            ClaudeContentBlock {
+                text: Some("answer".to_string()),
+            },
         ];
         assert_eq!(first_text_block(&blocks), Some("answer"));
     }
