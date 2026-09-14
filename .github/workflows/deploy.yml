@@ -56,7 +56,7 @@ jobs:
         gcloud run jobs update se-daily-agent-job \
           --region ${{ env.REGION }} \
           --project ${{ env.PROJECT_ID }} \
-          --remove-env-vars GEMINI_API_KEY,ANTHROPIC_API_KEY \
+          --remove-env-vars GEMINI_API_KEY,ANTHROPIC_API_KEY,SHADOW_MODEL \
           --clear-secrets || true
         # Then deploy with all LLM provider secrets
         gcloud run jobs deploy se-daily-agent-job \
@@ -64,7 +64,6 @@ jobs:
           --region ${{ env.REGION }} \
           --project ${{ env.PROJECT_ID }} \
           --set-secrets GEMINI_API_KEY=gemini-api-key:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest \
-          --update-env-vars=SHADOW_MODEL=claude-opus-5 \
           --task-timeout 10m
 
     # --- Explorer Agent ---

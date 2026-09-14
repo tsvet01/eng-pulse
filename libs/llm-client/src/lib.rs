@@ -17,7 +17,7 @@ pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.1-pro-preview";
 pub const DEFAULT_OPENAI_MODEL: &str = "gpt-5.2-2025-12-11";
 
 /// Default Claude model to use
-pub const DEFAULT_CLAUDE_MODEL: &str = "claude-opus-4-8";
+pub const DEFAULT_CLAUDE_MODEL: &str = "claude-opus-5";
 
 // Re-export for backwards compatibility
 pub const DEFAULT_MODEL: &str = DEFAULT_GEMINI_MODEL;
