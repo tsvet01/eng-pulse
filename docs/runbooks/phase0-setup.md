@@ -35,20 +35,20 @@ Set these at **Settings → Secrets and variables → Actions → New repository
 - [ ] **`CLOUDFLARE_API_TOKEN`**: Cloudflare account → API Tokens → create token with scope `Zone:DNS:Edit` for the `tsvetkov.org` zone
 - [ ] **`CLOUDFLARE_ZONE_ID`**: from Cloudflare zone overview for `tsvetkov.org`
 - [ ] **`ADMIN_CIDR`**: your home IP range or corporate network (e.g., `1.2.3.4/32`)
-- [ ] **`SSH_PUBLIC_KEY`**: SSH public key (contents of `~/.ssh/id_ed25519.pub`) for Hetzner box
+- [x] **`SSH_PUBLIC_KEY`**: public half of the dedicated deploy keypair `~/.ssh/pulse-deploy` on Anton's Mac (generated 2026-09-14; use `ssh -i ~/.ssh/pulse-deploy deploy@<host>` for manual access)
 - [ ] **`GCP_CREDENTIALS`**: GCP service account JSON (for backup and Cloud Run deployments)
 
 ### Production environment secrets
 Set these at **Settings → Environments → production → Environment secrets** (repository-level secrets are inherited; set only these three):
 
-- [ ] **`DEPLOY_SSH_KEY`**: SSH private key for `deploy` user on production box (contents of `~/.ssh/id_ed25519`). The public half (`SSH_PUBLIC_KEY`) is installed by cloud-init on the box.
+- [x] **`DEPLOY_SSH_KEY`**: private half of `~/.ssh/pulse-deploy`. The public half (`SSH_PUBLIC_KEY`) is installed by cloud-init on the box.
 - [ ] **`DEPLOY_HOST_FINGERPRINT`**: the box's SSH host key fingerprint, so `appleboy/ssh-action` verifies it instead of trusting on first connect. Capture it **after the first `terraform apply`**, once `server_ipv4` is known:
   ```bash
   ssh-keygen -lf <(ssh-keyscan -t ed25519 <server_ipv4> 2>/dev/null) | awk '{print $2}'
   ```
   The output looks like `SHA256:AbCdEf...` — that whole `SHA256:...` string (not the raw key) is what `appleboy/ssh-action`'s `fingerprint:` input expects. Set it as this secret.
 - [ ] **`PULSE_ENV`**: environment file body (see section 3 below)
-- [ ] **`GCS_BACKUP_SA_JSON`**: GCS service account JSON for database backups
+- [x] **`GCS_BACKUP_SA_JSON`**: key for `pulse-backup@tsvet01.iam.gserviceaccount.com` (objectAdmin on `tsvet01-pulse-backups` only; set 2026-09-14). Rotate with `gcloud iam service-accounts keys create` and re-set the secret.
 
 ---
 
