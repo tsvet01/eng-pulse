@@ -167,6 +167,7 @@ jobs:
     - run: terraform init -input=false
     - run: terraform validate
     - id: plan
+      shell: bash
       run: terraform plan -no-color -input=false -out=tfplan 2>&1 | tee plan.txt
     - name: Upload full plan as artifact
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -178,7 +179,8 @@ jobs:
         retention-days: 7
     - name: Summarize plan (no full plan text leaves the job logs/artifact)
       if: github.event_name == 'pull_request'
-      run: grep -E '^(Plan:|No changes|  # )' plan.txt > plan-summary.txt || true
+      run: |
+        grep -E '^(Plan:|No changes|  # )' plan.txt > plan-summary.txt || true
     - name: Post plan summary on PR
       if: github.event_name == 'pull_request'
       uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
