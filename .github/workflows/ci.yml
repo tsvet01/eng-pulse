@@ -307,6 +307,7 @@ jobs:
           umask 077
           cd /opt/pulse
           printf '%s\n' "$PULSE_ENV" > .env
+          bad=$(grep -nvE '^[A-Z_]+=[^[:space:]]*$' .env | cut -d: -f1 | tr '\n' ' '); [ -z "$bad" ] || { echo "PULSE_ENV malformed at line(s) $bad: expected KEY=value with no spaces"; exit 1; }
           cat .env.defaults >> .env                      # compose interpolates only from .env
           echo "PULSE_API_TAG=$IMAGE_TAG" >> .env
           printf '%s\n' "$GCS_BACKUP_SA_JSON" > gcs-backup-sa.json
