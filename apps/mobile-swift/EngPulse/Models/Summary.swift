@@ -76,8 +76,6 @@ struct Summary: Identifiable, Codable, Equatable, Hashable {
             .components(separatedBy: ".").first?.capitalized ?? host
     }
 
-    var isBeta: Bool { promptVersion != nil }
-
     var isInsightBrief: Bool {
         format == "insight-brief-v3"
     }

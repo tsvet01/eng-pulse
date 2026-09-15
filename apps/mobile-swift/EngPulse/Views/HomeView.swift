@@ -1,52 +1,15 @@
 import SwiftUI
 
-// Model filter options
-enum ModelFilter: String, CaseIterable {
-    case all = "All"
-    case gemini = "Gemini"
-    case claude = "Claude"
-    case gpt = "GPT"
-
-    func matches(_ modelString: String?) -> Bool {
-        if self == .all { return true }
-        guard let model = modelString?.lowercased() else { return false }
-        return switch self {
-        case .all: true
-        case .gemini: model.contains("gemini")
-        case .claude: model.contains("claude")
-        case .gpt: model.contains("gpt") || model.contains("openai")
-        }
-    }
-}
-
 // MARK: - HomeViewContent
 struct HomeViewContent: View {
     @EnvironmentObject var summariesStore: AppState
     @State private var searchText = ""
     @State private var isSearchActive = false
     @FocusState private var searchFocused: Bool
-    @AppStorage("selectedModelFilter") private var selectedFilter: String = ModelFilter.all.rawValue
-    @AppStorage("promptVersionFilter") private var promptVersionFilter: String = "production"
     @Binding var navigationPath: NavigationPath
-
-    private var modelFilter: ModelFilter {
-        ModelFilter(rawValue: selectedFilter) ?? .all
-    }
 
     var filteredSummaries: [Summary] {
         var result = summariesStore.summaries
-
-        // Filter by prompt version
-        if promptVersionFilter == "production" {
-            result = result.filter { $0.promptVersion == nil }
-        } else if promptVersionFilter == "beta" {
-            result = result.filter { $0.isBeta }
-        }
-        // "both" shows all
-
-        if modelFilter != .all {
-            result = result.filter { modelFilter.matches($0.model) }
-        }
 
         if !searchText.isEmpty {
             result = result.filter { summary in
@@ -175,10 +138,6 @@ struct SummaryCardView: View {
                     .font(.caption2)
                     .foregroundColor(Color.onSurfaceVariant)
 
-                if summary.isBeta {
-                    BetaBadge()
-                }
-
                 Text(summary.source)
                     .font(.caption2)
                     .foregroundColor(Color.onSurfaceVariant)
@@ -216,19 +175,6 @@ struct SummaryCardView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(isRead ? Color.containerLow.opacity(0.6) : Color.container)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
-    }
-}
-
-// MARK: - Beta Badge
-struct BetaBadge: View {
-    var body: some View {
-        Text("Beta")
-            .font(.system(size: 9, weight: .medium))
-            .foregroundColor(Color.tertiaryAccent)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1)
-            .background(Color.tertiaryAccent.opacity(0.12))
-            .clipShape(Capsule())
     }
 }
 
