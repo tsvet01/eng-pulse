@@ -47,8 +47,11 @@ Terraform's job stops at the box existing: server, volume, firewall, DNS,
 and the cloud-init payload that installs Docker and seeds
 `/opt/pulse/docker-compose.yml`. It does **not** push application releases.
 Once the host is up, GitHub Actions CI owns deploys — it builds and pushes
-the `pulse-api` image, writes `/opt/pulse/.env` over SSH, and restarts the
-`pulse.service` systemd unit. Re-running `terraform apply` should be a no-op
+the `pulse-api` image, syncs `docker-compose.yml`, `Caddyfile` and
+`backup.sh` from `infra/hetzner/files` to `/opt/pulse`, writes `.env`, and
+runs `docker compose up -d`. The server ignores later `user_data` drift
+(`lifecycle.ignore_changes`), so editing those files never replaces the box;
+to rebuild it on purpose use `terraform apply -replace=hcloud_server.pulse`. Re-running `terraform apply` should be a no-op
 between infrastructure changes; it must never be part of the normal release
 path.
 

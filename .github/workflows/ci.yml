@@ -300,18 +300,26 @@ jobs:
         tags: ${{ env.API_IMAGE }}:${{ env.IMAGE_TAG }},${{ env.API_IMAGE }}:latest
         cache-from: type=gha
         cache-to: type=gha,mode=max
-    - name: Write runtime env on the box, pull, restart, health-check
+    - name: Load runtime files for the box
+      run: |
+        { echo 'FILE_COMPOSE<<PULSE_EOF'; cat infra/hetzner/files/docker-compose.yml; echo PULSE_EOF; } >> "$GITHUB_ENV"
+        { echo 'FILE_CADDY<<PULSE_EOF'; cat infra/hetzner/files/Caddyfile; echo PULSE_EOF; } >> "$GITHUB_ENV"
+        { echo 'FILE_BACKUP<<PULSE_EOF'; cat infra/hetzner/files/backup.sh; echo PULSE_EOF; } >> "$GITHUB_ENV"
+    - name: Sync runtime files, write env, pull, restart, health-check
       uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
       with:
         host: api.eng-pulse.tsvetkov.org
         username: deploy
         key: ${{ secrets.DEPLOY_SSH_KEY }}
         fingerprint: ${{ secrets.DEPLOY_HOST_FINGERPRINT }}
-        envs: PULSE_ENV,GCS_BACKUP_SA_JSON,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR
+        envs: PULSE_ENV,GCS_BACKUP_SA_JSON,IMAGE_TAG,GITHUB_TOKEN,GITHUB_ACTOR,FILE_COMPOSE,FILE_CADDY,FILE_BACKUP
         script: |
           set -e
           umask 077
           cd /opt/pulse
+          printf '%s\n' "$FILE_COMPOSE" > docker-compose.yml
+          printf '%s\n' "$FILE_CADDY" > Caddyfile
+          printf '%s\n' "$FILE_BACKUP" > backup.sh && chmod 755 backup.sh
           printf '%s\n' "$PULSE_ENV" > .env
           cat .env.defaults >> .env                      # compose interpolates only from .env
           echo "PULSE_API_TAG=$IMAGE_TAG" >> .env

@@ -66,6 +66,8 @@ resource "hcloud_server" "pulse" {
     caddyfile      = file("${path.module}/files/Caddyfile")
     backup_sh      = file("${path.module}/files/backup.sh")
   })
+  # cloud-init seeds first boot only; deploy-api syncs compose/Caddyfile/backup.sh afterwards.
+  lifecycle { ignore_changes = [user_data] }
 }
 
 resource "hcloud_volume_attachment" "pg" {
