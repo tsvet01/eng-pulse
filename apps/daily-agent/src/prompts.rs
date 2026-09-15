@@ -15,10 +15,9 @@ fn inject_context(
 }
 
 /// Prompt configuration for article selection and summarization.
-/// V1 = production (current prompts). V2 = beta (persona-driven, structured). V3 = beta (persona-driven selection + structured JSON summary).
+/// V1 = production (current prompts). V3 = persona-driven selection + structured JSON summary.
 pub enum PromptConfig {
     V1,
-    V2,
     V3,
 }
 
@@ -27,7 +26,6 @@ impl PromptConfig {
     pub fn version(&self) -> &'static str {
         match self {
             Self::V1 => "v1",
-            Self::V2 => "v2",
             Self::V3 => "v3",
         }
     }
@@ -36,7 +34,6 @@ impl PromptConfig {
     pub fn selection_prompt(&self, articles_text: &str) -> String {
         match self {
             Self::V1 => self.v1_selection_prompt(articles_text),
-            Self::V2 => self.v2_selection_prompt(articles_text),
             Self::V3 => self.v2_selection_prompt(articles_text),
         }
     }
@@ -45,7 +42,6 @@ impl PromptConfig {
     pub fn shortlist_prompt(&self, articles_text: &str) -> String {
         match self {
             Self::V1 => self.v1_shortlist_prompt(articles_text),
-            Self::V2 => self.v2_shortlist_prompt(articles_text),
             Self::V3 => self.v2_shortlist_prompt(articles_text),
         }
     }
@@ -54,7 +50,6 @@ impl PromptConfig {
     pub fn final_selection_prompt(&self, candidates_text: &str) -> String {
         match self {
             Self::V1 => self.v1_final_selection_prompt(candidates_text),
-            Self::V2 => self.v2_final_selection_prompt(candidates_text),
             Self::V3 => self.v2_final_selection_prompt(candidates_text),
         }
     }
@@ -63,7 +58,6 @@ impl PromptConfig {
     pub fn summary_prompt(&self, source: &str, title: &str, content: &str) -> String {
         match self {
             Self::V1 => self.v1_summary_prompt(source, title, content),
-            Self::V2 => self.v2_summary_prompt(source, title, content),
             Self::V3 => self.v3_summary_prompt(source, title, content),
         }
     }
@@ -196,27 +190,6 @@ Reply ONLY with the index number (e.g., '3'). No explanation."#,
         )
     }
 
-    fn v2_summary_prompt(&self, source: &str, title: &str, content: &str) -> String {
-        format!(
-            r#"Summarize this article for a senior engineering leader who builds developer platforms at a hedge fund (C++/Rust, low-latency, AI tooling). They'll read this on their phone in 2-3 minutes.
-
-Lead with a one-line hook: why this matters to them specifically. Then cover the key insights — use bold lead phrases and bullets for scannability, but match the structure to the content. Some articles warrant 3 bullets; others need 2 paragraphs.
-
-If the article suggests something concrete to try or evaluate this week, end with that. If it doesn't, don't invent action items.
-
-Rules:
-- Be compact — say it in fewer words, not more
-- No fluff: no "in conclusion", no "in summary", no filler transitions
-- Be direct and opinionated — state what matters, skip the hedging
-- Ignore promotional content
-
-Article Source: {}
-Title: {}
-Content: {}"#,
-            source, title, content
-        )
-    }
-
     fn v3_summary_prompt(&self, source: &str, title: &str, content: &str) -> String {
         format!(
             r#"You are writing an insight brief for a senior engineering leader who builds developer platforms at a hedge fund (C++/Rust, low-latency, AI tooling). They'll read this on their phone in 2-3 minutes.
@@ -263,28 +236,10 @@ mod tests {
     }
 
     #[test]
-    fn test_v2_selection_prompt_contains_persona() {
-        let prompt = PromptConfig::V2.selection_prompt("0. [HN] Test Article");
-        assert!(prompt.contains("hedge fund"));
-        assert!(prompt.contains("prefer actionability over novelty"));
-        assert!(prompt.contains("0. [HN] Test Article"));
-    }
-
-    #[test]
     fn test_v1_summary_prompt_contains_article() {
         let prompt = PromptConfig::V1.summary_prompt("HN", "Title", "Content");
         assert!(prompt.contains("Article Source: HN"));
         assert!(prompt.contains("Title: Title"));
-    }
-
-    #[test]
-    fn test_v2_summary_prompt_has_persona_and_rules() {
-        let prompt = PromptConfig::V2.summary_prompt("HN", "Title", "Content");
-        assert!(prompt.contains("senior engineering leader who builds developer platforms"));
-        assert!(prompt.contains("bold lead phrases and bullets"));
-        assert!(prompt.contains("don't invent action items"));
-        assert!(prompt.contains("Be compact"));
-        assert!(prompt.contains("Article Source: HN"));
     }
 
     #[test]
@@ -293,9 +248,10 @@ mod tests {
     }
 
     #[test]
-    fn test_v3_selection_uses_v2_persona() {
+    fn test_v3_selection_prompt_contains_persona() {
         let prompt = PromptConfig::V3.selection_prompt("0. [HN] Test Article");
         assert!(prompt.contains("hedge fund"));
+        assert!(prompt.contains("prefer actionability over novelty"));
         assert!(prompt.contains("0. [HN] Test Article"));
     }
 
