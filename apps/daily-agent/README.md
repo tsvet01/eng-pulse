@@ -1,176 +1,21 @@
-# Daily Agent
+# daily-agent
 
-Rust-based Cloud Run job that generates daily software engineering article summaries.
-
-> Part of [Eng Pulse](../../README.md) - see root README for system overview.
-
-## What It Does
-
-1. **Fetches articles** from configured RSS feeds and Hacker News
-2. **Filters** to articles published in the last 24 hours
-3. **Asks Gemini** to select the single most valuable article
-4. **Scrapes** the full article content using readability extraction
-5. **Generates** a comprehensive summary with Gemini
-6. **Uploads** the summary to GCS and updates the manifest
-
-## Usage
-
-### Local Development
-
-```bash
-# Set environment variables
-export GEMINI_API_KEY=your_api_key
-export GCS_BUCKET=your-bucket-name  # Optional, defaults to tsvet01-agent-brain
-
-# Run
-cargo run
-```
-
-### Deployment
-
-```bash
-./deploy.sh
-```
-
-This deploys to Google Cloud Run as a scheduled job.
-
-## Configuration
-
-### Environment Variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | Yes | - | Claude API key (selection and Insight Brief); startup fails without it |
-| `GEMINI_API_KEY` | Yes | - | Google Gemini API key (judge); startup fails without it |
-| `GCS_BUCKET` | No | `tsvet01-agent-brain` | GCS bucket for storage |
-| `GEMINI_MODEL` | No | `gemini-2.0-flash` | Gemini model to use |
-| `RUST_LOG` | No | `info` | Log level (debug, info, warn, error) |
-
-### Constants
-
-| Constant | Value | Description |
-|----------|-------|-------------|
-| `HTTP_TIMEOUT_SECS` | 60 | HTTP request timeout |
-| `MAX_ARTICLE_CHARS` | 50,000 | Max article length for summarization |
-| `SUMMARY_SNIPPET_CHARS` | 100 | Snippet length in manifest |
-
-## Data Flow
+Runs once a day (Cloud Run Job, 06:00 UTC). Loads `config/sources.json`, fetches recent articles, shortlists by headline then picks one by content (Claude), writes the V3 Insight Brief to `summaries/v3/<date>.json`, scores it with a Gemini judge into `eval-v3/<date>.json`, and appends one entry to `manifest.json`.
 
 ```
-sources.json (GCS)
-       │
-       ▼
-┌─────────────────┐
-│  Fetch Articles │ ── RSS feeds, HackerNews API
-└─────────────────┘
-       │
-       ▼
-┌─────────────────┐
-│ Gemini Selection│ ── "Which article is most valuable?"
-└─────────────────┘
-       │
-       ▼
-┌─────────────────┐
-│ Scrape Content  │ ── readability extraction
-└─────────────────┘
-       │
-       ▼
-┌─────────────────┐
-│ Gemini Summary  │ ── Structured summary generation
-└─────────────────┘
-       │
-       ▼
-summaries/v3/YYYY-MM-DD.json (GCS)   # the Insight Brief
-eval-v3/YYYY-MM-DD.json (GCS)        # Gemini judge report
-manifest.json (GCS)                  # one entry per run
+cargo run -p daily-agent               # real run against GCS_BUCKET
+cargo run -p daily-agent -- --smoke    # one tiny call per provider, no side effects (deploy gate)
+cargo run -p daily-agent -- --date 2026-09-10   # backfill one day
+cargo test -p daily-agent
 ```
 
-## Source Types
+| Env | Required | Default |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | yes | |
+| `GEMINI_API_KEY` | yes (judge) | |
+| `GCS_BUCKET` | no | `tsvet01-agent-brain` |
+| `CLAUDE_MODEL`, `GEMINI_MODEL` | no | see `libs/llm-client` |
+| `SHADOW_MODEL` | no | unset; when set, a second brief is generated with that model and judged pairwise against production (`eval-v3` gets `pairwise_winner`) |
+| `RUST_LOG` | no | `info` |
 
-### RSS Feeds
-
-Standard RSS/Atom feeds. Filters to articles from last 24 hours.
-
-```json
-{
-  "name": "Engineering Blog",
-  "type": "rss",
-  "url": "https://blog.example.com/feed.xml"
-}
-```
-
-### Hacker News
-
-Fetches top 10 stories, filters by recency and point threshold.
-
-```json
-{
-  "name": "Hacker News",
-  "type": "hackernews",
-  "url": "https://hacker-news.firebaseio.com/v0/topstories.json"
-}
-```
-
-## Output Format
-
-### Summary (Markdown)
-
-```markdown
-# Article Title
-
-**Source:** Blog Name | **Date:** 2024-01-15
-
-## Summary
-[AI-generated summary]
-
-## Key Points
-- Point 1
-- Point 2
-- Point 3
-
-## Why This Matters
-[Relevance explanation]
-
----
-[Original Article](https://...)
-```
-
-### Manifest Entry
-
-```json
-{
-  "date": "2024-01-15",
-  "url": "https://storage.googleapis.com/bucket/summaries/v3/2024-01-15.json",
-  "title": "Article Title",
-  "summary_snippet": "First 100 chars of summary...",
-  "original_url": "https://original-article.com"
-}
-```
-
-## Error Handling
-
-- **No articles found**: Logs warning, exits successfully (no summary generated)
-- **Gemini failures**: Retries with exponential backoff via gemini-engine
-- **Article scrape failure**: Falls back to title-only summary
-- **GCS failures**: Propagates error, job fails
-
-## Logging
-
-Uses `tracing` with JSON output in production:
-
-```bash
-# Development (pretty logs)
-cargo run
-
-# Production (JSON logs)
-RUST_LOG=info cargo run
-```
-
-## Dependencies
-
-- `gemini-engine` - Shared Gemini API client
-- `reqwest` - HTTP client
-- `google-cloud-storage` - GCS operations
-- `readability` - Article extraction
-- `rss` - RSS parsing
-- `tracing` - Structured logging
+Limits: articles under 200 chars are skipped, over 50,000 chars are truncated; HTTP timeout 60 s. Prompts live in `src/prompts.rs`; their wording is a tuned production artifact, change it only with an eval note. Deploy happens from CI on merge to `main` (`deploy-agents`), which also runs the smoke gate.

@@ -1,205 +1,63 @@
 # Eng Pulse
 
 [![CI](https://github.com/tsvet01/eng-pulse/actions/workflows/ci.yml/badge.svg)](https://github.com/tsvet01/eng-pulse/actions/workflows/ci.yml)
-[![Deploy](https://github.com/tsvet01/eng-pulse/actions/workflows/deploy.yml/badge.svg)](https://github.com/tsvet01/eng-pulse/actions/workflows/deploy.yml)
 
-AI-powered daily engineering digest system that curates and delivers the best software engineering content.
+One engineering article a day, turned into an Insight Brief, delivered to an iOS app with text-to-speech and CarPlay, email and push.
 
-## Overview
-
-Eng Pulse is a complete system for curating, summarizing, and delivering daily software engineering articles. It uses Google's Gemini AI to select the most relevant content and generate concise summaries.
+## What runs today
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  Explorer Agent │────▶│  Daily Agent    │────▶│    Notifier     │
-│  (Source Mgmt)  │     │  (Summarizer)   │     │  (Email/Push)   │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-         │                       │                       │
-         │                       ▼                       │
-         │              ┌─────────────────┐              │
-         └─────────────▶│   GCS Bucket    │◀─────────────┘
-                        │  (Data Store)   │
-                        └─────────────────┘
-                                 │
-                 │
-                 ▼
-        ┌─────────────────┐
-        │  Mobile App     │
-        │  (Swift/iOS)    │
-        └─────────────────┘
+sources.json ─▶ daily-agent (06:00 UTC, Cloud Run Job) ─▶ GCS bucket ─▶ iOS app / email / APNs
+                  select (Claude) · brief (Claude Opus 5) · judge (Gemini)
+explorer-agent (weekly) ─▶ sources.json
 ```
 
-## Components
+- **daily-agent** picks one article (headline shortlist, then full-text pick), writes `summaries/v3/<date>.json` (Insight Brief), scores it with a Gemini judge into `eval-v3/<date>.json`, and appends one entry to `manifest.json`.
+- **explorer-agent** validates candidate feeds (`config/user_candidates.json`), drops stale sources, asks the model for new ones.
+- **functions/** (Python, Cloud Functions): email notifier, APNs/FCM token registration, feedback receiver.
+- **apps/mobile-swift** reads `manifest.json` from the public bucket `tsvet01-agent-brain`.
 
-| Component | Description | Tech Stack |
-|-----------|-------------|------------|
-| [llm-client](./libs/llm-client/) | Shared LLM API client with retry logic | Rust |
-| [pulse-core](./libs/pulse-core/) | Shared contract types + fixture generator (`docs/contracts/`) | Rust |
-| [daily-agent](./apps/daily-agent/) | Daily article selection and summarization | Rust |
-| [explorer-agent](./apps/explorer-agent/) | RSS/blog source discovery and management | Rust |
-| [pulse-api](./apps/pulse-api/) | Multi-user API skeleton (`/healthz`, sqlx migrations) | Rust |
-| [notifier](./functions/notifier/) | Email notification on new summaries | Python |
-| mobile-android | Native Kotlin/Compose app | Kotlin (planned, Phase 5) |
-| [mobile-swift](./apps/mobile-swift/) | Native iOS app with TTS and CarPlay | Swift |
-| [infra/](./infra/hetzner/) | Terraform: Hetzner box + Cloudflare DNS for `pulse-api` | Terraform |
+## Where it is going
 
-## Quick Start
+Multi-user with interest feeds: Supabase for identity, `apps/pulse-api` (Rust/axum + Postgres 18) on a Hetzner box provisioned by `infra/hetzner` (Terraform, Cloudflare DNS). Phase 0 is live: `https://api.eng-pulse.tsvetkov.org/healthz`. Design: `docs/superpowers/specs/2026-09-01-multiuser-cohorts-design.md`. Android (Kotlin/Compose) comes after the API.
 
-### Prerequisites
+## Layout
 
-- Rust 1.83+
-- Python 3.11+
-- Xcode 15+ (for Swift app)
-- Google Cloud SDK
-- Gemini API key
+| Path | What |
+|---|---|
+| `libs/llm-client` | Claude/Gemini client: retries, usage logging |
+| `libs/pulse-core` | Contract types; fixtures in `docs/contracts/` (CI drift guard) |
+| `apps/daily-agent`, `apps/explorer-agent` | Pipeline jobs |
+| `apps/pulse-api` | API (`/healthz`, sqlx migrations) |
+| `apps/mobile-swift` | iOS app |
+| `functions/*` | Python cloud functions |
+| `infra/hetzner` | Terraform for the API box |
+| `docs/runbooks` | Setup and operations; `docs/superpowers` specs and plans |
 
-### Environment Setup
+## Develop
 
-```bash
-# Clone repository
-git clone https://github.com/tsvet01/eng-pulse.git
-cd eng-pulse
-
-# Create .env file
-cat > .env << EOF
-GEMINI_API_KEY=your_api_key_here
-GCS_BUCKET=your-bucket-name
-EOF
-```
-
-### Run Locally
-
-```bash
-# Daily Agent (generates today's summary)
-cd apps/daily-agent
-cargo run
-
-# Explorer Agent (manages sources)
-cd apps/explorer-agent
-cargo run
-
-# Mobile App (Swift) - requires Xcode
-cd apps/mobile-swift
-open EngPulse.xcodeproj
-# Then build and run from Xcode
-```
-
-## Architecture
-
-### Data Flow
-
-1. **Explorer Agent** (weekly): Discovers new RSS/blog sources, validates freshness, removes stale sources
-2. **Daily Agent** (daily): Fetches articles from sources, uses Gemini to select best article, generates summary
-3. **Notifier** (triggered): Sends email when new summary is uploaded to GCS
-4. **Mobile App**: Fetches manifest.json from GCS, displays summaries with offline support
-
-### GCS Bucket Structure
+Rust 1.98, Python 3.12, Xcode for the app.
 
 ```
-bucket/
-├── config/
-│   └── sources.json       # List of RSS/blog sources
-├── user_candidates.json   # User-submitted source candidates
-├── manifest.json          # Article manifest for mobile app
-└── summaries/
-    └── YYYY-MM-DD.md      # Daily summaries
+./scripts/validate.sh --quick     # fmt, clippy -D warnings, tests, fixtures drift
+cargo test --workspace
+for f in notifier apns-notifier fcm-tokens; do (cd functions/$f && python -m pytest test_main.py -q); done
 ```
 
-## Deployment
+Run the pipeline locally with `ANTHROPIC_API_KEY` and `GEMINI_API_KEY` set: `cargo run -p daily-agent -- --smoke` checks both providers without side effects; `cargo run -p daily-agent` does a real run against `GCS_BUCKET` (default `tsvet01-agent-brain`). The API: start Postgres 18, then `DATABASE_URL=postgres://pulse:pulse@localhost:5432/pulse cargo run -p pulse-api`.
 
-### Cloud Run Jobs (Rust Agents)
+## Deploy
 
-```bash
-# Deploy Daily Agent
-cd apps/daily-agent && ./deploy.sh
+One path-filtered workflow, `.github/workflows/ci.yml`. PRs run the checks for what changed. On `main`: `deploy-agents` (Cloud Build → Cloud Run Jobs, then a `--smoke` run), `deploy-functions`, `terraform-apply` and `deploy-api` (GHCR image → SSH to the box), the last two behind the `production` environment approval. Manual API deploy: run the workflow with `deploy_api=true`.
 
-# Deploy Explorer Agent
-cd apps/explorer-agent && ./deploy.sh
-```
+Secrets live in GCP Secret Manager (pipeline) and GitHub environments (Hetzner); none in the repo. First-time setup: `docs/runbooks/phase0-setup.md`. Cloud agents: `docs/runbooks/cloud-agents.md`.
 
-### Cloud Function (Notifier)
+## Operations
 
-```bash
-cd functions/notifier && ./deploy.sh
-```
-
-### CI/CD
-
-GitHub Actions automatically:
-- **On PR**: Runs `cargo check`, `cargo clippy`, `cargo test`
-- **On merge to main**: Deploys all components to Google Cloud
-
-A single path-filtered workflow (`.github/workflows/ci.yml`) also gates and deploys `pulse-core`/`pulse-api`: `fixtures` fails on `docs/contracts/` drift or untracked fixture files, `api-it` boots `pulse-api` against a real Postgres and checks `/healthz`, and `terraform-plan`/`terraform-apply` plan and (with `production`-environment approval) apply the `infra/hetzner` Terraform stack.
-
-Credentials are stored in GCP Secret Manager and GitHub Secrets.
-
-## Configuration
-
-### Environment Variables
-
-For local development, set these environment variables:
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `GEMINI_API_KEY` | Google Gemini API key | Yes |
-| `GCS_BUCKET` | GCS bucket name | No (default: tsvet01-agent-brain) |
-| `GEMINI_MODEL` | Gemini model to use | No (default: gemini-2.0-flash) |
-| `GMAIL_USER` | Gmail address for notifications | Notifier only |
-| `GMAIL_APP_PASSWORD` | Gmail app password | Notifier only |
-| `DEST_EMAIL` | Notification recipient | Notifier only |
-
-### Production Secrets (GCP Secret Manager)
-
-In production, credentials are stored in GCP Secret Manager:
-- `gemini-api-key` - Gemini API key for agents
-- `gmail-user` - Gmail sender address
-- `gmail-app-password` - Gmail app password
-- `dest-email` - Notification recipient
-
-### Scheduling
-
-- **Daily Agent**: Cloud Scheduler triggers daily at 6 AM UTC
-- **Explorer Agent**: Cloud Scheduler triggers weekly on Sundays
-
-## Development
-
-### Project Structure
-
-```
-eng-pulse/
-├── .github/workflows/     # CI/CD pipelines
-├── apps/
-│   ├── daily-agent/       # Daily summarization agent (Rust)
-│   ├── explorer-agent/    # Source discovery agent (Rust)
-│   └── mobile-swift/      # Native iOS app (Swift)
-├── libs/
-│   └── llm-client/        # Shared Rust crate
-├── functions/
-│   └── notifier/          # Email notification (Python)
-├── scripts/               # Utility scripts
-└── docs/
-    └── AGENTS.md          # Guide for AI coding agents
-```
-
-### Running Tests
-
-```bash
-# Rust tests
-cd libs/llm-client && cargo test
-cd apps/daily-agent && cargo test
-cd apps/explorer-agent && cargo test
-```
-
-### Code Quality
-
-```bash
-# Rust linting
-cargo clippy -- -D warnings
-```
-
-## Contributing
-
-See [AGENTS.md](./docs/AGENTS.md) for guidelines on working with this codebase, especially for AI coding assistants.
+- Schedules: daily 06:00 UTC, explorer Sundays 08:00 UTC (Cloud Scheduler).
+- Alerts: job failure, "no summary in 25h", fatal-error log match (`scripts/setup-monitoring.sh`).
+- Model changes are verified with a real run; the shadow lane (`SHADOW_MODEL`) compares a candidate model against production with a pairwise judge (`scripts/shadow-eval-report.sh N`).
+- Postgres backups: nightly `pg_dump` from the box to `gs://tsvet01-pulse-backups`.
 
 ## License
 
