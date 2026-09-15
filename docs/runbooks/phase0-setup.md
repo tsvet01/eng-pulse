@@ -44,9 +44,9 @@ Set these at **Settings → Environments → production → Environment secrets*
 - [x] **`DEPLOY_SSH_KEY`**: private half of `~/.ssh/pulse-deploy`. The public half (`SSH_PUBLIC_KEY`) is installed by cloud-init on the box.
 - [ ] **`DEPLOY_HOST_FINGERPRINT`**: the box's SSH host key fingerprint, so `appleboy/ssh-action` verifies it instead of trusting on first connect. Capture it **after the first `terraform apply`**, once `server_ipv4` is known:
   ```bash
-  ssh-keygen -lf <(ssh-keyscan -t ed25519 <server_ipv4> 2>/dev/null) | awk '{print $2}'
+  ssh-keygen -lf <(ssh-keyscan -t ecdsa <server_ipv4> 2>/dev/null) | awk '{print $2}'
   ```
-  The output looks like `SHA256:AbCdEf...` — that whole `SHA256:...` string (not the raw key) is what `appleboy/ssh-action`'s `fingerprint:` input expects. Set it as this secret.
+  The output looks like `SHA256:AbCdEf...`; set that whole string as this secret. It must be the ECDSA key: `appleboy/ssh-action` negotiates ECDSA before ed25519, and a fingerprint of another key type fails with `host key fingerprint mismatch`.
 - [ ] **`PULSE_ENV`**: environment file body (see section 3 below)
 - [x] **`GCS_BACKUP_SA_JSON`**: key for `pulse-backup@tsvet01.iam.gserviceaccount.com` (objectAdmin on `tsvet01-pulse-backups` only; set 2026-09-14). Rotate with `gcloud iam service-accounts keys create` and re-set the secret.
 
