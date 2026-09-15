@@ -194,7 +194,7 @@ jobs:
   # ---------------- main only ----------------
   deploy-agents:
     needs: [changes, rust, fixtures]
-    if: github.ref == 'refs/heads/main' && needs.changes.outputs.agents == 'true'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' && needs.changes.outputs.agents == 'true'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
@@ -231,7 +231,7 @@ jobs:
 
   deploy-functions:
     needs: [changes, python]
-    if: github.ref == 'refs/heads/main' && needs.changes.outputs.functions == 'true'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' && needs.changes.outputs.functions == 'true'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
@@ -286,6 +286,7 @@ jobs:
     - uses: actions/checkout@v6
     - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
       with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+    - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
     - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
       with:
         context: .
@@ -324,7 +325,7 @@ jobs:
 
   terraform-apply:
     needs: [changes, terraform-plan]
-    if: github.ref == 'refs/heads/main' && needs.changes.outputs.infra == 'true'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' && needs.changes.outputs.infra == 'true'
     runs-on: ubuntu-latest
     environment: production          # required reviewer = Anton → click to approve
     defaults: { run: { working-directory: infra/hetzner } }
