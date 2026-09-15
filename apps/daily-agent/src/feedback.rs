@@ -11,20 +11,12 @@ use crate::manifest::ManifestEntry;
 pub(crate) const FEEDBACK_MIN_ENTRIES: usize = 5;
 pub(crate) const FEEDBACK_LOOKBACK_DAYS: i64 = 30;
 
+/// The fields of a feedback record the selector uses; other fields are ignored.
 #[derive(Deserialize, Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct FeedbackEntry {
     pub(crate) summary_url: String,
     #[serde(default)]
-    pub(crate) feedback: Option<String>,
-    #[serde(default)]
     pub(crate) selection_feedback: Option<String>,
-    #[serde(default)]
-    pub(crate) summary_feedback: Option<String>,
-    #[serde(default)]
-    pub(crate) prompt_version: Option<String>,
-    pub(crate) uid: String,
-    pub(crate) timestamp: String,
 }
 
 /// Load recent user feedback from GCS, scanning backwards up to FEEDBACK_LOOKBACK_DAYS.
@@ -111,12 +103,7 @@ mod tests {
     fn test_build_selection_context_with_feedback() {
         let feedback = vec![FeedbackEntry {
             summary_url: "https://example.com/a".to_string(),
-            feedback: None,
             selection_feedback: Some("up".to_string()),
-            summary_feedback: None,
-            prompt_version: None,
-            uid: "u1".to_string(),
-            timestamp: "2026-04-01T00:00:00Z".to_string(),
         }];
         let manifest = vec![ManifestEntry {
             date: "2026-04-01".to_string(),
@@ -133,6 +120,15 @@ mod tests {
         let ctx = build_selection_context(&feedback, &manifest);
         assert!(ctx.is_some());
         assert!(ctx.unwrap().contains("Liked: \"Great Article\""));
+    }
+
+    #[test]
+    fn test_feedback_entry_ignores_unused_fields() {
+        let json = r#"[{"summary_url": "https://example.com/a", "feedback": "up",
+            "selection_feedback": "down", "summary_feedback": null,
+            "prompt_version": "v3", "uid": "u1", "timestamp": "2026-04-01T00:00:00Z"}]"#;
+        let entries: Vec<FeedbackEntry> = serde_json::from_str(json).unwrap();
+        assert_eq!(entries[0].selection_feedback.as_deref(), Some("down"));
     }
 
     #[test]

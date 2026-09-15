@@ -116,15 +116,16 @@ fn is_daily_pick(entry: &ManifestEntry) -> bool {
     matches!(entry.prompt_version.as_deref(), None | Some("v3"))
 }
 
-/// One line per recent day so the selector avoids repeating topics. Expects
-/// the manifest newest-first.
+/// One line per recent day so the selector avoids repeating topics. Takes the
+/// first entry seen for each of the first `max_days` distinct dates.
 fn build_recent_picks_context(manifest: &[ManifestEntry], max_days: usize) -> Option<String> {
+    let mut seen_dates = std::collections::HashSet::new();
     let mut recent: Vec<&ManifestEntry> = Vec::new();
     for entry in manifest.iter().filter(|e| is_daily_pick(e)) {
         if recent.len() >= max_days {
             break;
         }
-        if recent.last().is_none_or(|last| last.date != entry.date) {
+        if seen_dates.insert(entry.date.as_str()) {
             recent.push(entry);
         }
     }
@@ -557,7 +558,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     debug!(char_count = truncated_text.len(), "Article text truncated");
 
     // --- V3 Insight Brief ---
-    // The brief is the run's only product: a failure here fails the run.
+    // The brief is the run's only product: a failure here (after call_llm's
+    // transient-error retries) fails the run.
     info!("Generating V3 Insight Brief");
     let v3_prompt =
         prompts::summary_prompt(&best_article.source, &best_article.title, &truncated_text);
