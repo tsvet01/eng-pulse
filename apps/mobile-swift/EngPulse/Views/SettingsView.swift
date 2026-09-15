@@ -35,8 +35,6 @@ struct SettingsView: View {
     @AppStorage("ttsPitch") private var pitch: Double = 1.0
     @AppStorage("ttsVoice") private var selectedVoice: String = Neural2Voice.maleJ.rawValue
 
-    @AppStorage("selectedModelFilter") private var selectedFilter: String = ModelFilter.all.rawValue
-    @AppStorage("promptVersionFilter") private var promptVersionFilter: String = "production"
     @State private var showClearCacheAlert = false
     @State private var readCount: Int = 0
     @State private var cacheSize: String = "—"
@@ -44,57 +42,6 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: DesignTokens.sectionSpacing) {
-
-                // Intelligence
-                SettingsSection(title: "Intelligence", icon: "sparkles") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Model Filter")
-                            .font(.caption)
-                            .foregroundColor(.onSurfaceVariant)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(ModelFilter.allCases, id: \.rawValue) { filter in
-                                    let selected = selectedFilter == filter.rawValue
-                                    Button {
-                                        selectedFilter = filter.rawValue
-                                    } label: {
-                                        Text(filter.rawValue)
-                                            .font(.subheadline)
-                                            .foregroundColor(selected ? .accentColor : .onSurfaceVariant)
-                                            .padding(.horizontal, 16)
-                                            .padding(.vertical, 8)
-                                            .background(selected ? Color.accentColor.opacity(0.2) : Color.containerHigh)
-                                            .clipShape(Capsule())
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Prompt Version")
-                            .font(.caption)
-                            .foregroundColor(.onSurfaceVariant)
-                        HStack(spacing: 8) {
-                            ForEach([("v1", "production"), ("v2", "beta"), ("Both", "both")], id: \.1) { label, value in
-                                let selected = promptVersionFilter == value
-                                Button {
-                                    promptVersionFilter = value
-                                } label: {
-                                    Text(label)
-                                        .font(.subheadline)
-                                        .foregroundColor(selected ? .accentColor : .onSurfaceVariant)
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 8)
-                                        .background(selected ? Color.accentColor.opacity(0.2) : Color.containerHigh)
-                                        .clipShape(Capsule())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }
 
                 // Listening
                 SettingsSection(title: "Listening", icon: "waveform") {

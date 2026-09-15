@@ -149,14 +149,14 @@ class AppState: ObservableObject {
         // Always show cached data immediately — never wait for network
         if summaries.isEmpty,
            let cached = try? await cacheService.getCachedSummaries(), !cached.isEmpty {
-            summaries = cached
+            summaries = cached.filter(\.isInsightBrief)
         }
 
         // Refresh in background — never set isLoading if we already have data
         if summaries.isEmpty { isLoading = true }
 
         do {
-            let fresh = try await apiService.fetchSummaries()
+            let fresh = try await apiService.fetchSummaries().filter(\.isInsightBrief)
             summaries = fresh
             try? await cacheService.cacheSummaries(fresh)
             isOffline = false
