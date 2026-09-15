@@ -32,7 +32,7 @@ pulse-api against Postgres 16: `DATABASE_URL=postgres://pulse:pulse@localhost:54
 - A model ID change needs a real job run after deploy.
 - Agents never deploy, apply Terraform, or touch GCP/Hetzner; CI does on merge to `main`.
 - Regenerate `docs/contracts/*.json`; never hand-edit.
-- Small PRs. `docs/AGENTS.md` is older; this file wins on conflict.
+- Small PRs.
 
 ## Code Review Rules
 

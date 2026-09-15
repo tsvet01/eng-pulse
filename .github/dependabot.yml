@@ -1,61 +1,35 @@
 version: 2
 updates:
-  # GitHub Actions
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      actions: { patterns: ["*"] }
 
-  # Rust — daily-agent
-  - package-ecosystem: "cargo"
-    directory: "/apps/daily-agent"
-    schedule:
-      interval: "weekly"
+  - package-ecosystem: cargo
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      cargo-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
 
-  # Rust — explorer-agent
-  - package-ecosystem: "cargo"
-    directory: "/apps/explorer-agent"
-    schedule:
-      interval: "weekly"
+  - package-ecosystem: docker
+    directories: [/apps/daily-agent, /apps/explorer-agent, /apps/pulse-api]
+    schedule: { interval: monthly }
+    groups:
+      docker: { patterns: ["*"] }
 
-  # Rust — llm-client
-  - package-ecosystem: "cargo"
-    directory: "/libs/llm-client"
-    schedule:
-      interval: "weekly"
+  - package-ecosystem: docker-compose
+    directory: /infra/hetzner/files
+    schedule: { interval: monthly }
 
-  # Python — notifier
-  - package-ecosystem: "pip"
-    directory: "/functions/notifier"
-    schedule:
-      interval: "monthly"
+  - package-ecosystem: terraform
+    directory: /infra/hetzner
+    schedule: { interval: monthly }
 
-  # Python — apns-notifier
-  - package-ecosystem: "pip"
-    directory: "/functions/apns-notifier"
-    schedule:
-      interval: "monthly"
-
-  # Python — fcm-tokens
-  - package-ecosystem: "pip"
-    directory: "/functions/fcm-tokens"
-    schedule:
-      interval: "monthly"
-
-  # Python — feedback-receiver
-  - package-ecosystem: "pip"
-    directory: "/functions/feedback-receiver"
-    schedule:
-      interval: "monthly"
-
-  # Docker — daily-agent
-  - package-ecosystem: "docker"
-    directory: "/apps/daily-agent"
-    schedule:
-      interval: "monthly"
-
-  # Docker — explorer-agent
-  - package-ecosystem: "docker"
-    directory: "/apps/explorer-agent"
-    schedule:
-      interval: "monthly"
+  - package-ecosystem: pip
+    directories: [/functions/notifier, /functions/apns-notifier, /functions/fcm-tokens, /functions/feedback-receiver, /functions/shared]
+    schedule: { interval: monthly }
+    groups:
+      pip: { patterns: ["*"] }
