@@ -2503,7 +2503,6 @@ dependencies = [
  "atom_syndication",
  "chrono",
  "dotenvy",
- "futures",
  "gcloud-auth",
  "gcloud-storage",
  "llm-client",

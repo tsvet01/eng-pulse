@@ -6,11 +6,6 @@ pub(crate) fn gcs_public_url(bucket: &str, object: &str) -> String {
     format!("https://storage.googleapis.com/{}/{}", bucket, object)
 }
 
-pub(crate) fn gcs_object_path<'a>(public_url: &'a str, bucket: &str) -> &'a str {
-    let prefix = format!("https://storage.googleapis.com/{}/", bucket);
-    public_url.strip_prefix(&prefix).unwrap_or(public_url)
-}
-
 // --- Manifest Struct ---
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct ManifestEntry {
@@ -26,7 +21,7 @@ pub(crate) struct ManifestEntry {
     /// Which model selected this article from the candidates
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) selected_by: Option<String>,
-    /// Which prompt version generated this summary ("v2" for beta, null for prod)
+    /// Which prompt version generated this summary ("v3"; null for legacy V1 markdown)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) prompt_version: Option<String>,
     /// Quality score from LLM judge (0.0-1.0)
@@ -126,20 +121,5 @@ mod tests {
             gcs_public_url("my-bucket", "path/to/file.md"),
             "https://storage.googleapis.com/my-bucket/path/to/file.md"
         );
-    }
-
-    #[test]
-    fn test_gcs_object_path_strips_prefix() {
-        let url = "https://storage.googleapis.com/my-bucket/summaries/gemini/2026-03-20.md";
-        assert_eq!(
-            gcs_object_path(url, "my-bucket"),
-            "summaries/gemini/2026-03-20.md"
-        );
-    }
-
-    #[test]
-    fn test_gcs_object_path_wrong_bucket_returns_full_url() {
-        let url = "https://storage.googleapis.com/other-bucket/file.md";
-        assert_eq!(gcs_object_path(url, "my-bucket"), url);
     }
 }
