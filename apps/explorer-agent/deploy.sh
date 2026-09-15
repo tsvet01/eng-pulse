@@ -19,8 +19,8 @@ if [ -f .env ]; then
   set +a
 fi
 
-if [ -z "$GEMINI_API_KEY" ]; then
-  echo "Error: GEMINI_API_KEY is not set."
+if [ -z "$ANTHROPIC_API_KEY" ]; then
+  echo "Error: ANTHROPIC_API_KEY is not set."
   exit 1
 fi
 
@@ -44,7 +44,7 @@ gcloud run jobs deploy $SERVICE_NAME \
   --image $IMAGE_URI \
   --region $REGION \
   --project $PROJECT_ID \
-  --set-secrets GEMINI_API_KEY=gemini-api-key:latest \
+  --set-secrets ANTHROPIC_API_KEY=anthropic-api-key:latest \
   --max-retries 1 \
   --task-timeout 30m
 
