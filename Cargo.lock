@@ -1565,10 +1565,12 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "serial_test",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "url",
+ "wiremock",
 ]
 
 [[package]]
@@ -2503,7 +2505,6 @@ dependencies = [
  "atom_syndication",
  "chrono",
  "dotenvy",
- "futures",
  "gcloud-auth",
  "gcloud-storage",
  "llm-client",

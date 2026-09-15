@@ -91,18 +91,17 @@ use gcloud_storage::http::objects::download::Range;
 use gcloud_storage::http::objects::get::GetObjectRequest;
 use gcloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
 use llm_client::{
-    call_llm, call_llm_with_retry, extract_domain, get_api_key_env_var, init_logging, LlmOptions,
-    LlmProvider, DEFAULT_BUCKET,
+    call_llm, extract_domain, get_api_key_env_var, init_logging, LlmOptions, LlmProvider,
+    DEFAULT_BUCKET,
 };
 use readability::extractor;
 use std::io::Cursor;
 use std::time::Duration;
 use tracing::{debug, error, info, instrument, warn};
 
-use crate::eval::{apply_eval_scores, log_calibration_agreement, run_eval_pass};
-use crate::feedback::{build_calibration_context, build_selection_context, load_recent_feedback};
-use crate::manifest::{gcs_object_path, gcs_public_url, ManifestEntry, SUMMARY_SNIPPET_CHARS};
-use futures::future::join_all;
+use crate::eval::{apply_eval_scores, run_eval_pass};
+use crate::feedback::{build_selection_context, load_recent_feedback};
+use crate::manifest::{gcs_public_url, ManifestEntry, SUMMARY_SNIPPET_CHARS};
 
 // --- Configuration Constants ---
 const HTTP_TIMEOUT_SECS: u64 = 60;
@@ -111,12 +110,25 @@ const MAX_ARTICLE_CHARS: usize = 50_000;
 /// Pages below this threshold are likely JS-rendered SPAs or paywalled.
 const MIN_ARTICLE_CHARS: usize = 200;
 
+/// The entry that represents a day's pick: the V3 brief, or the V1 summary
+/// on days before V3 existed. Excludes beta lanes.
+fn is_daily_pick(entry: &ManifestEntry) -> bool {
+    matches!(entry.prompt_version.as_deref(), None | Some("v3"))
+}
+
+/// One line per recent day so the selector avoids repeating topics. Takes the
+/// first entry seen for each of the first `max_days` distinct dates.
 fn build_recent_picks_context(manifest: &[ManifestEntry], max_days: usize) -> Option<String> {
-    let recent: Vec<&ManifestEntry> = manifest
-        .iter()
-        .filter(|e| e.prompt_version.is_none()) // Only production picks
-        .take(max_days)
-        .collect();
+    let mut seen_dates = std::collections::HashSet::new();
+    let mut recent: Vec<&ManifestEntry> = Vec::new();
+    for entry in manifest.iter().filter(|e| is_daily_pick(e)) {
+        if recent.len() >= max_days {
+            break;
+        }
+        if seen_dates.insert(entry.date.as_str()) {
+            recent.push(entry);
+        }
+    }
 
     if recent.is_empty() {
         return None;
@@ -130,56 +142,82 @@ fn build_recent_picks_context(manifest: &[ManifestEntry], max_days: usize) -> Op
     Some(context)
 }
 
-/// Get list of enabled LLM providers based on available API keys.
-/// Claude is first for article selection, others follow for summary generation.
-/// Minimal end-to-end check used as a post-deploy gate: make one real LLM call
-/// per enabled provider and fail if any provider rejects the request. Catches
-/// API/model contract breakage (a deprecated parameter, a bad model id, an auth
-/// problem) at deploy time instead of on the next nightly run. No GCS or
-/// notification side effects.
-async fn run_smoke(
-    http_client: &reqwest::Client,
-    providers: &[(LlmProvider, String)],
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut failures = Vec::new();
-    for (provider, key) in providers {
-        let prompt = "Reply with the single word: OK".to_string();
-        match call_llm(http_client, *provider, key, prompt, &LlmOptions::default()).await {
-            Ok(resp) => {
-                info!(provider = %provider.as_str(), reply = %resp.trim(), "Smoke check passed")
-            }
-            Err(e) => {
-                error!(provider = %provider.as_str(), error = %e, "Smoke check FAILED");
-                failures.push(format!("{}: {}", provider.as_str(), e));
-            }
+/// API keys the pipeline needs: Claude writes the brief, Gemini judges it.
+#[derive(Debug, Clone, PartialEq)]
+struct ApiKeys {
+    claude: String,
+    gemini: String,
+}
+
+/// Both keys are required; an empty value counts as missing.
+fn api_keys_from(claude: Option<String>, gemini: Option<String>) -> Result<ApiKeys, String> {
+    let claude = claude.filter(|k| !k.is_empty());
+    let gemini = gemini.filter(|k| !k.is_empty());
+    match (claude, gemini) {
+        (Some(claude), Some(gemini)) => Ok(ApiKeys { claude, gemini }),
+        (claude, gemini) => {
+            let missing: Vec<&str> = [
+                (claude.is_none(), LlmProvider::Claude),
+                (gemini.is_none(), LlmProvider::Gemini),
+            ]
+            .into_iter()
+            .filter(|(missing, _)| *missing)
+            .map(|(_, provider)| get_api_key_env_var(provider))
+            .collect();
+            Err(format!(
+                "Missing required API key(s): {}",
+                missing.join(", ")
+            ))
         }
     }
+}
 
-    // Also smoke-check the shadow model, if configured, so a bad SHADOW_MODEL
-    // id fails the deploy gate instead of surfacing as a nightly warn.
-    if let Some(shadow) = shadow_model() {
-        if let Some((_, claude_key)) = providers.iter().find(|(p, _)| *p == LlmProvider::Claude) {
-            let prompt = "Reply with the single word: OK".to_string();
-            let options = LlmOptions {
-                model: Some(shadow.clone()),
-                ..Default::default()
-            };
-            match call_llm(
-                http_client,
-                LlmProvider::Claude,
-                claude_key,
-                prompt,
-                &options,
-            )
-            .await
-            {
-                Ok(resp) => {
-                    info!(provider = "claude", model = %shadow, reply = %resp.trim(), "Shadow smoke check passed")
-                }
-                Err(e) => {
-                    error!(provider = "claude", model = %shadow, error = %e, "Shadow smoke check FAILED");
-                    failures.push(format!("shadow({}): {}", shadow, e));
-                }
+fn load_api_keys() -> Result<ApiKeys, String> {
+    api_keys_from(
+        std::env::var(get_api_key_env_var(LlmProvider::Claude)).ok(),
+        std::env::var(get_api_key_env_var(LlmProvider::Gemini)).ok(),
+    )
+}
+
+/// Minimal end-to-end check used as a post-deploy gate: one real LLM call per
+/// provider, failing if any rejects the request. Catches API/model contract
+/// breakage (a deprecated parameter, a bad model id, an auth problem) at
+/// deploy time instead of on the next nightly run. No GCS or notification
+/// side effects.
+async fn run_smoke(
+    http_client: &reqwest::Client,
+    keys: &ApiKeys,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // The shadow model, if configured, is checked too so a bad SHADOW_MODEL id
+    // fails the deploy gate instead of surfacing as a nightly warn.
+    let shadow = shadow_model();
+    let checks = [
+        (LlmProvider::Claude, keys.claude.as_str(), None),
+        (LlmProvider::Gemini, keys.gemini.as_str(), None),
+    ]
+    .into_iter()
+    .chain(
+        shadow
+            .as_deref()
+            .map(|m| (LlmProvider::Claude, keys.claude.as_str(), Some(m))),
+    );
+
+    let mut failures = Vec::new();
+    for (provider, key, model) in checks {
+        let label = match model {
+            Some(m) => format!("shadow({})", m),
+            None => provider.as_str().to_string(),
+        };
+        let options = LlmOptions {
+            model: model.map(String::from),
+            ..Default::default()
+        };
+        let prompt = "Reply with the single word: OK".to_string();
+        match call_llm(http_client, provider, key, prompt, &options).await {
+            Ok(resp) => info!(check = %label, reply = %resp.trim(), "Smoke check passed"),
+            Err(e) => {
+                error!(check = %label, error = %e, "Smoke check FAILED");
+                failures.push(format!("{}: {}", label, e));
             }
         }
     }
@@ -192,161 +230,39 @@ async fn run_smoke(
     }
 }
 
-fn get_enabled_providers() -> Vec<(LlmProvider, String)> {
-    let providers = [LlmProvider::Claude, LlmProvider::Gemini];
-    let mut enabled = Vec::new();
-
-    for provider in providers {
-        let env_var = get_api_key_env_var(provider);
-        if let Ok(key) = std::env::var(env_var) {
-            if !key.is_empty() {
-                info!(provider = %provider.as_str(), "Provider enabled");
-                enabled.push((provider, key));
-            }
-        }
-    }
-
-    enabled
+/// A validated Insight Brief: the JSON object as uploaded plus its key idea.
+struct InsightBrief {
+    json: String,
+    key_idea: String,
 }
 
-// --- Backfill Beta ---
+/// Extract the JSON object from an LLM response (tolerating preamble or code
+/// fences) and require the brief's mandatory fields.
+fn parse_insight_brief(response: &str) -> Option<InsightBrief> {
+    let start = response.find('{')?;
+    let end = response.rfind('}')?;
+    let json = response.get(start..=end)?;
+    let parsed: serde_json::Value = serde_json::from_str(json).ok()?;
+    parsed.get("deep_dive")?;
+    let key_idea = parsed.get("key_idea")?.as_str().unwrap_or("").to_string();
+    Some(InsightBrief {
+        json: json.to_string(),
+        key_idea,
+    })
+}
 
-/// Re-generate V2 beta summaries for recent days using existing manifest entries.
-/// Reads the manifest, finds prod entries for the target dates, fetches original articles,
-/// generates new V2 summaries, and updates the manifest.
-async fn backfill_beta(
-    days: usize,
-    http_client: &reqwest::Client,
-    gcs_client: &Client,
-    bucket_name: &str,
-    claude_key: &str,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let now = Utc::now();
-    let target_dates: Vec<String> = (1..=days)
-        .map(|d| {
-            (now - chrono::Duration::days(d as i64))
-                .format("%Y-%m-%d")
-                .to_string()
-        })
-        .collect();
-
-    info!(dates = ?target_dates, "Backfilling beta summaries");
-
-    // Download manifest
-    let mut manifest: Vec<ManifestEntry> = {
-        let data = gcs_client
-            .download_object(
-                &GetObjectRequest {
-                    bucket: bucket_name.to_string(),
-                    object: "manifest.json".to_string(),
-                    ..Default::default()
-                },
-                &Range::default(),
-            )
-            .await?;
-        serde_json::from_slice(&data)?
-    };
-
-    let beta_config = prompts::PromptConfig::V2;
-
-    for date in &target_dates {
-        // Find a prod entry for this date (prompt_version is None for v1)
-        let prod_entry = manifest
-            .iter()
-            .find(|e| e.date == *date && e.prompt_version.is_none() && e.original_url.is_some());
-
-        let (title, original_url) = match prod_entry {
-            Some(e) => (e.title.clone(), e.original_url.clone().unwrap()),
-            None => {
-                warn!(date = %date, "No prod entry found, skipping");
-                continue;
-            }
-        };
-
-        info!(date = %date, title = %title, "Backfilling beta summary");
-
-        // Fetch original article content
-        let article_text = match fetch_article_content(http_client, &original_url).await {
-            Ok(content) => content,
-            Err(e) => {
-                warn!(date = %date, error = %e, "Failed to fetch article, skipping");
-                continue;
-            }
-        };
-        let truncated: String = article_text.chars().take(MAX_ARTICLE_CHARS).collect();
-        let source = extract_domain(&original_url);
-
-        let prompt = beta_config.summary_prompt(&source, &title, &truncated);
-        match call_llm_with_retry(http_client, LlmProvider::Claude, claude_key, prompt).await {
-            Ok(summary) => {
-                let summary_snippet: String = summary.chars().take(SUMMARY_SNIPPET_CHARS).collect();
-                let object_name = format!("summaries/beta/claude/{}.md", date);
-                let summary_bytes = summary.into_bytes();
-
-                match gcs_client
-                    .upload_object(
-                        &UploadObjectRequest {
-                            bucket: bucket_name.to_string(),
-                            ..Default::default()
-                        },
-                        summary_bytes,
-                        &UploadType::Simple(Media::new(object_name.clone())),
-                    )
-                    .await
-                {
-                    Ok(_) => {
-                        let public_url = gcs_public_url(bucket_name, &object_name);
-
-                        // Remove old beta entries for this date
-                        manifest.retain(|e| {
-                            !(e.date == *date && e.prompt_version.as_deref() == Some("v2"))
-                        });
-
-                        // Find insertion point: after the last entry for this date
-                        let insert_idx = manifest
-                            .iter()
-                            .position(|e| e.date < *date)
-                            .unwrap_or(manifest.len());
-                        manifest.insert(
-                            insert_idx,
-                            ManifestEntry {
-                                date: date.clone(),
-                                url: public_url,
-                                title: title.clone(),
-                                summary_snippet,
-                                original_url: Some(original_url.clone()),
-                                model: Some(LlmProvider::Claude.model_name().to_string()),
-                                selected_by: None,
-                                prompt_version: Some(beta_config.version().to_string()),
-                                eval_score: None,
-                                format: None,
-                            },
-                        );
-
-                        info!(date = %date, "Beta summary backfilled");
-                    }
-                    Err(e) => warn!(date = %date, error = %e, "Failed to upload backfill summary"),
-                }
-            }
-            Err(e) => warn!(date = %date, error = %e, "Failed to generate backfill summary"),
-        }
-    }
-
-    // Upload updated manifest
-    let manifest_json = serde_json::to_vec_pretty(&manifest)?;
-    gcs_client
-        .upload_object(
-            &UploadObjectRequest {
-                bucket: bucket_name.to_string(),
-                ..Default::default()
-            },
-            manifest_json,
-            &UploadType::Simple(Media::new("manifest.json".to_string())),
+/// Truncate text to the manifest snippet length, marking the cut.
+fn manifest_snippet(text: &str) -> String {
+    if text.chars().count() > SUMMARY_SNIPPET_CHARS {
+        format!(
+            "{}...",
+            text.chars()
+                .take(SUMMARY_SNIPPET_CHARS - 3)
+                .collect::<String>()
         )
-        .await?;
-
-    info!(days = days, "Beta backfill complete");
-    Ok(())
+    } else {
+        text.to_string()
+    }
 }
 
 // --- Main ---
@@ -358,20 +274,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let bucket_name = std::env::var("GCS_BUCKET").unwrap_or_else(|_| DEFAULT_BUCKET.to_string());
 
-    // Get enabled providers
-    let enabled_providers = get_enabled_providers();
-    if enabled_providers.is_empty() {
-        error!(
-            "No LLM providers configured. Set at least one of: GEMINI_API_KEY, ANTHROPIC_API_KEY"
-        );
-        return Err("No LLM providers configured".into());
-    }
+    let keys = load_api_keys().map_err(|e| {
+        error!(error = %e, "LLM credentials not configured");
+        e
+    })?;
 
-    info!(
-        bucket = %bucket_name,
-        providers = ?enabled_providers.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(),
-        "Starting SE Daily Agent"
-    );
+    info!(bucket = %bucket_name, "Starting SE Daily Agent");
 
     // 0. Initialize shared HTTP client (reused for connection pooling)
     let http_client = reqwest::Client::builder()
@@ -386,23 +294,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     })?;
     if run_mode == RunMode::Smoke {
         info!("Running in smoke-test mode (no GCS/notification side effects)");
-        return run_smoke(&http_client, &enabled_providers).await;
+        return run_smoke(&http_client, &keys).await;
     }
 
     // Initialize GCS Client
     let config = ClientConfig::default().with_auth().await?;
     let gcs_client = Client::new(config);
-
-    // --- Backfill mode: regenerate V2 beta summaries for recent days ---
-    if let Ok(days_str) = std::env::var("BACKFILL_BETA_DAYS") {
-        let days: usize = days_str.parse().unwrap_or(3);
-        let claude_key = enabled_providers
-            .iter()
-            .find(|(p, _)| *p == LlmProvider::Claude)
-            .map(|(_, k)| k.as_str())
-            .ok_or("BACKFILL_BETA_DAYS requires ANTHROPIC_API_KEY")?;
-        return backfill_beta(days, &http_client, &gcs_client, &bucket_name, claude_key).await;
-    }
 
     // Resolve the run date and the publish-date window for fetching. Backfill
     // restricts to a single past UTC day so only articles actually published
@@ -421,9 +318,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             fetcher::FetchWindow::last_24h(),
         ),
     };
-
-    // Use first provider for article selection (Claude preferred)
-    let (selection_provider, selection_key) = enabled_providers.first().unwrap().clone();
 
     // 1. Load Sources from GCS
     info!("Fetching sources.json from GCS");
@@ -506,7 +400,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         .map(|d| d.format("%Y-%m-%d").to_string())
                         .unwrap_or_default()
             })
-            .filter(|e| e.prompt_version.is_none()) // only dedup against v1 (prod) picks
+            .filter(|e| is_daily_pick(e))
             .filter_map(|e| e.original_url.clone())
             .collect()
     };
@@ -526,9 +420,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         return Ok(());
     }
 
-    // Remove existing entries for today (all models)
+    // Remove existing entries for today
     manifest.retain(|e| e.date != today);
-    let mut new_manifest_entries: Vec<ManifestEntry> = Vec::new();
 
     // --- Load user feedback early (needed for selection context) ---
     let recent_feedback = load_recent_feedback(&gcs_client, &bucket_name).await;
@@ -536,29 +429,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let recent_picks = build_recent_picks_context(&manifest, 5);
 
     // 3. Two-phase selection: shortlist by headlines, then pick by content
-    info!(provider = %selection_provider.as_str(), "Phase 1: Shortlisting top candidates from headlines");
+    info!(
+        provider = "claude",
+        "Phase 1: Shortlisting top candidates from headlines"
+    );
 
     let mut articles_text = String::new();
     for (i, article) in all_articles.iter().enumerate() {
         articles_text.push_str(&format!("{}. [{}] {}\n", i, article.source, article.title));
     }
 
-    let prod_config = prompts::PromptConfig::V1;
     let selection_opts = LlmOptions {
         temperature: Some(0.3),
         ..Default::default()
     };
 
     // Phase 1: Shortlist top 5 from headlines
-    let shortlist_prompt = prod_config.shortlist_prompt_with_context(
+    let shortlist_prompt = prompts::shortlist_prompt_with_context(
         &articles_text,
         selection_context.as_deref(),
         recent_picks.as_deref(),
     );
     let shortlist_response = call_llm(
         &http_client,
-        selection_provider,
-        &selection_key,
+        LlmProvider::Claude,
+        &keys.claude,
         shortlist_prompt,
         &selection_opts,
     )
@@ -568,11 +463,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Fallback: if shortlist parsing fails, use single-shot selection
     if shortlist.is_empty() {
         warn!(response = %shortlist_response.trim(), "Failed to parse shortlist, falling back to single-shot");
-        let fallback_prompt = prod_config.selection_prompt(&articles_text);
+        let fallback_prompt = prompts::selection_prompt(&articles_text);
         let fallback = call_llm(
             &http_client,
-            selection_provider,
-            &selection_key,
+            LlmProvider::Claude,
+            &keys.claude,
             fallback_prompt,
             &selection_opts,
         )
@@ -612,15 +507,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             ));
         }
 
-        let final_prompt = prod_config.final_selection_prompt_with_context(
+        let final_prompt = prompts::final_selection_prompt_with_context(
             &candidates_text,
             selection_context.as_deref(),
             recent_picks.as_deref(),
         );
         let final_response = call_llm(
             &http_client,
-            selection_provider,
-            &selection_key,
+            LlmProvider::Claude,
+            &keys.claude,
             final_prompt,
             &selection_opts,
         )
@@ -662,427 +557,153 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let truncated_text: String = article_text.chars().take(MAX_ARTICLE_CHARS).collect();
     debug!(char_count = truncated_text.len(), "Article text truncated");
 
-    let summary_prompt =
-        prod_config.summary_prompt(&best_article.source, &best_article.title, &truncated_text);
+    // --- V3 Insight Brief ---
+    // The brief is the run's only product: a failure here (after call_llm's
+    // transient-error retries) fails the run.
+    info!("Generating V3 Insight Brief");
+    let v3_prompt =
+        prompts::summary_prompt(&best_article.source, &best_article.title, &truncated_text);
+    let v3_options = LlmOptions {
+        temperature: Some(0.3),
+        ..Default::default()
+    };
+    let response = call_llm(
+        &http_client,
+        LlmProvider::Claude,
+        &keys.claude,
+        v3_prompt,
+        &v3_options,
+    )
+    .await
+    .map_err(|e| format!("V3 Insight Brief generation failed: {}", e))?;
+    let brief = parse_insight_brief(&response)
+        .ok_or("V3 response is not a valid Insight Brief (invalid JSON or missing fields)")?;
 
-    // --- Stage 2: Prod (v1) — parallel LLM calls ---
+    let object_path = format!("summaries/v3/{}.json", today);
+    gcs_client
+        .upload_object(
+            &UploadObjectRequest {
+                bucket: bucket_name.clone(),
+                ..Default::default()
+            },
+            brief.json.as_bytes().to_vec(),
+            &UploadType::Simple(Media::new(object_path.clone())),
+        )
+        .await
+        .map_err(|e| format!("Failed to upload V3 Insight Brief: {}", e))?;
+    info!("V3 Insight Brief uploaded to {}", object_path);
 
-    info!(
-        "Generating summaries in parallel across {} provider(s)",
-        enabled_providers.len()
-    );
+    let mut entry = ManifestEntry {
+        date: today.clone(),
+        url: gcs_public_url(&bucket_name, &object_path),
+        title: best_article.title.clone(),
+        summary_snippet: manifest_snippet(&brief.key_idea),
+        original_url: Some(best_article.url.clone()),
+        model: Some(LlmProvider::Claude.model_name().to_string()),
+        selected_by: Some(LlmProvider::Claude.model_name().to_string()),
+        prompt_version: Some(prompts::PROMPT_VERSION.to_string()),
+        eval_score: None,
+        format: Some("insight-brief-v3".to_string()),
+    };
 
-    let summary_futures: Vec<_> = enabled_providers
-        .iter()
-        .map(|(provider, api_key)| {
-            let client = http_client.clone();
-            let key = api_key.clone();
-            let prompt = summary_prompt.clone();
-            let p = *provider;
-            async move {
-                let result = call_llm_with_retry(&client, p, &key, prompt).await;
-                (p, result)
-            }
-        })
-        .collect();
-
-    let llm_results = join_all(summary_futures).await;
-
-    // GCS uploads happen sequentially after all LLM calls complete
-    for (provider, result) in llm_results {
-        match result {
-            Ok(summary) => {
-                info!(provider = %provider.as_str(), "Summary generated successfully");
-                debug!(provider = %provider.as_str(), summary_length = summary.len(), "Summary details");
-
-                // Create snippet BEFORE converting summary to bytes
-                let summary_snippet: String = summary.chars().take(SUMMARY_SNIPPET_CHARS).collect();
-
-                // Upload Summary to GCS (provider-specific path)
-                // Metadata (original_url, model, selected_by) lives in manifest.json
-                let object_name = format!("summaries/{}/{}.md", provider.as_str(), today);
-                let summary_bytes = summary.into_bytes();
-
-                info!(provider = %provider.as_str(), object = %object_name, "Uploading summary to GCS");
-
-                let upload_type = UploadType::Simple(Media::new(object_name.clone()));
-                match gcs_client
-                    .upload_object(
-                        &UploadObjectRequest {
-                            bucket: bucket_name.to_string(),
-                            ..Default::default()
-                        },
-                        summary_bytes,
-                        &upload_type,
-                    )
-                    .await
-                {
-                    Ok(_) => {
-                        info!(provider = %provider.as_str(), "Summary upload complete");
-
-                        let public_url = gcs_public_url(&bucket_name, &object_name);
-                        new_manifest_entries.push(ManifestEntry {
-                            date: today.clone(),
-                            url: public_url,
-                            title: best_article.title.clone(),
-                            summary_snippet,
-                            original_url: Some(best_article.url.clone()),
-                            model: Some(provider.model_name().to_string()),
-                            selected_by: Some(selection_provider.model_name().to_string()),
-                            prompt_version: None,
-                            eval_score: None,
-                            format: None,
-                        });
-                    }
-                    Err(e) => {
-                        error!(provider = %provider.as_str(), error = %e, "Failed to upload summary");
-                    }
-                }
-            }
-            Err(e) => {
-                warn!(provider = %provider.as_str(), error = %e, "Summary generation failed");
-            }
-        }
-    }
-
-    if new_manifest_entries.is_empty() {
-        error!("No summaries were generated successfully");
-        return Err("No summaries generated".into());
-    }
-
-    // --- Stage 3: V3 Insight Brief ---
-    info!("=== Stage 3: V3 Insight Brief ===");
-    let v3_config = prompts::PromptConfig::V3;
+    // Shadow lane: same prompt, candidate model; never enters the manifest.
     let mut shadow_v3_json: Option<String> = None;
-
-    let claude_entry = enabled_providers
-        .iter()
-        .find(|(p, _)| *p == LlmProvider::Claude);
-    if let Some((_, claude_key)) = claude_entry {
-        let v3_prompt =
-            v3_config.summary_prompt(&best_article.source, &best_article.title, &truncated_text);
-        let v3_options = LlmOptions {
-            temperature: Some(0.3),
+    if let Some(shadow) = shadow_model() {
+        let shadow_prompt =
+            prompts::summary_prompt(&best_article.source, &best_article.title, &truncated_text);
+        // Opus 5 adaptive thinking tokens count against max_tokens; raise
+        // the cap so the JSON answer isn't truncated. Prod paths keep the
+        // 4096 default.
+        let shadow_options = LlmOptions {
+            model: Some(shadow.clone()),
+            max_tokens: Some(16000),
             ..Default::default()
         };
 
         match call_llm(
             &http_client,
             LlmProvider::Claude,
-            claude_key,
-            v3_prompt,
-            &v3_options,
+            &keys.claude,
+            shadow_prompt,
+            &shadow_options,
         )
         .await
         {
-            Ok(response) => {
-                let json_str = response.trim();
-                // Strip markdown code fences if present
-                // Extract JSON: find first { and last } to handle preamble or code fences
-                let clean_json =
-                    if let (Some(start), Some(end)) = (json_str.find('{'), json_str.rfind('}')) {
-                        json_str[start..=end].to_string()
-                    } else {
-                        json_str.to_string()
-                    };
-
-                match serde_json::from_str::<serde_json::Value>(&clean_json) {
-                    Ok(parsed)
-                        if parsed.get("key_idea").is_some()
-                            && parsed.get("deep_dive").is_some() =>
+            Ok(response) => match parse_insight_brief(&response) {
+                Some(shadow_brief) => {
+                    let object_path = format!("summaries/v3-shadow/{}.json", today);
+                    match gcs_client
+                        .upload_object(
+                            &UploadObjectRequest {
+                                bucket: bucket_name.clone(),
+                                ..Default::default()
+                            },
+                            shadow_brief.json.as_bytes().to_vec(),
+                            &UploadType::Simple(Media::new(object_path.clone())),
+                        )
+                        .await
                     {
-                        let object_path = format!("summaries/v3/{}.json", today);
-                        let public_url = gcs_public_url(&bucket_name, &object_path);
-
-                        match gcs_client
-                            .upload_object(
-                                &UploadObjectRequest {
-                                    bucket: bucket_name.clone(),
-                                    ..Default::default()
-                                },
-                                clean_json.as_bytes().to_vec(),
-                                &UploadType::Simple(Media::new(object_path.clone())),
-                            )
-                            .await
-                        {
-                            Ok(_) => {
-                                let snippet = parsed["key_idea"].as_str().unwrap_or("").to_string();
-                                let snippet_truncated =
-                                    if snippet.chars().count() > SUMMARY_SNIPPET_CHARS {
-                                        format!(
-                                            "{}...",
-                                            snippet
-                                                .chars()
-                                                .take(SUMMARY_SNIPPET_CHARS - 3)
-                                                .collect::<String>()
-                                        )
-                                    } else {
-                                        snippet
-                                    };
-
-                                new_manifest_entries.push(ManifestEntry {
-                                    date: today.clone(),
-                                    url: public_url,
-                                    title: best_article.title.clone(),
-                                    summary_snippet: snippet_truncated,
-                                    original_url: Some(best_article.url.clone()),
-                                    model: Some(LlmProvider::Claude.model_name().to_string()),
-                                    selected_by: Some(selection_provider.model_name().to_string()),
-                                    prompt_version: Some("v3".to_string()),
-                                    eval_score: None,
-                                    format: Some("insight-brief-v3".to_string()),
-                                });
-                                info!("V3 Insight Brief uploaded to {}", object_path);
-                            }
-                            Err(e) => warn!(error = %e, "Failed to upload V3 Insight Brief"),
+                        Ok(_) => {
+                            info!(model = %shadow, "Shadow V3 brief uploaded to {}", object_path);
+                            shadow_v3_json = Some(shadow_brief.json);
                         }
-                    }
-                    Ok(_) => warn!("V3 response missing required fields, skipping"),
-                    Err(e) => warn!(error = %e, "V3 response is not valid JSON, skipping"),
-                }
-            }
-            Err(e) => warn!(error = %e, "V3 summary generation failed"),
-        }
-
-        // Shadow lane: same prompt, candidate model; never enters the manifest.
-        if let Some(shadow) = shadow_model() {
-            let shadow_prompt = v3_config.summary_prompt(
-                &best_article.source,
-                &best_article.title,
-                &truncated_text,
-            );
-            // Opus 5 adaptive thinking tokens count against max_tokens; raise
-            // the cap so the JSON answer isn't truncated. Prod paths keep the
-            // 4096 default.
-            let shadow_options = LlmOptions {
-                model: Some(shadow.clone()),
-                max_tokens: Some(16000),
-                ..Default::default()
-            };
-
-            match call_llm(
-                &http_client,
-                LlmProvider::Claude,
-                claude_key,
-                shadow_prompt,
-                &shadow_options,
-            )
-            .await
-            {
-                Ok(response) => {
-                    let json_str = response.trim();
-                    let clean_json = if let (Some(start), Some(end)) =
-                        (json_str.find('{'), json_str.rfind('}'))
-                    {
-                        json_str[start..=end].to_string()
-                    } else {
-                        json_str.to_string()
-                    };
-
-                    match serde_json::from_str::<serde_json::Value>(&clean_json) {
-                        Ok(parsed)
-                            if parsed.get("key_idea").is_some()
-                                && parsed.get("deep_dive").is_some() =>
-                        {
-                            let object_path = format!("summaries/v3-shadow/{}.json", today);
-                            match gcs_client
-                                .upload_object(
-                                    &UploadObjectRequest {
-                                        bucket: bucket_name.clone(),
-                                        ..Default::default()
-                                    },
-                                    clean_json.as_bytes().to_vec(),
-                                    &UploadType::Simple(Media::new(object_path.clone())),
-                                )
-                                .await
-                            {
-                                Ok(_) => {
-                                    info!(model = %shadow, "Shadow V3 brief uploaded to {}", object_path);
-                                    shadow_v3_json = Some(clean_json);
-                                }
-                                Err(e) => warn!(error = %e, "Failed to upload shadow V3 brief"),
-                            }
-                        }
-                        _ => warn!(model = %shadow, "Shadow V3 response invalid, skipping"),
+                        Err(e) => warn!(error = %e, "Failed to upload shadow V3 brief"),
                     }
                 }
-                Err(e) => warn!(model = %shadow, error = %e, "Shadow V3 generation failed"),
-            }
+                None => warn!(model = %shadow, "Shadow V3 response invalid, skipping"),
+            },
+            Err(e) => warn!(model = %shadow, error = %e, "Shadow V3 generation failed"),
         }
-    } else {
-        info!("Skipping V3: no Claude API key available");
     }
 
-    // --- Build calibration context from already-loaded feedback ---
-    let calibration_context =
-        build_calibration_context(&recent_feedback, &gcs_client, &bucket_name, &manifest).await;
-
-    // --- Stage 4: Eval (dual pass with calibration) ---
-    // Use Gemini as judge to avoid self-preference bias (Claude judging Claude summaries)
-    let eval_entry = enabled_providers
-        .iter()
-        .find(|(p, _)| *p == LlmProvider::Gemini)
-        .or(enabled_providers
-            .iter()
-            .find(|(p, _)| *p == LlmProvider::Claude));
-    if let Some((eval_provider, eval_key)) = eval_entry {
-        info!(provider = %eval_provider.as_str(), "Starting eval stage");
-
-        // Collect all summaries generated today for evaluation
-        let mut eval_summaries: Vec<(String, String)> = Vec::new(); // (summary_id, content)
-
-        for entry in &new_manifest_entries {
-            let summary_id = entry.summary_id();
-
-            // Download the summary we just uploaded
-            match gcs_client
-                .download_object(
-                    &GetObjectRequest {
-                        bucket: bucket_name.to_string(),
-                        object: gcs_object_path(&entry.url, &bucket_name).to_string(),
-                        ..Default::default()
-                    },
-                    &Range::default(),
-                )
-                .await
-            {
-                Ok(data) => {
-                    if let Ok(content) = String::from_utf8(data) {
-                        eval_summaries.push((summary_id, content));
-                    }
-                }
-                Err(e) => {
-                    warn!(summary_id = %summary_id, error = %e, "Failed to download summary for eval")
-                }
-            }
-        }
-
-        // Split summaries into V1 (markdown) and V3 (insight-brief) for separate eval rubrics
-        let (v1_summaries, v3_summaries): (Vec<_>, Vec<_>) =
-            eval_summaries.iter().partition(|(id, _)| {
-                !new_manifest_entries.iter().any(|e| {
-                    e.summary_id() == *id && e.format.as_deref() == Some("insight-brief-v3")
-                })
-            });
-
-        // Eval V1 summaries with standard rubric
-        if !v1_summaries.is_empty() {
-            let v1_prompt = String::from(
-                "You are evaluating article summaries for quality. Score each summary on these criteria (1-5):\n\n\
-                1. Clarity: How easy is it to scan and understand on a mobile phone?\n\
-                2. Actionability: Does it provide concrete takeaways the reader can act on this week?\n\
-                3. Information density: What is the signal-to-noise ratio? Is every sentence valuable?\n\
-                4. Faithfulness: Does the summary accurately represent the source without adding unsupported claims or forced conclusions?\n\n\
-                The reader is a senior engineering leader. They have 2-3 minutes on their phone.\n\
-                Judge the content quality, not whether it uses any particular formatting style.\n\n\
-                For each summary below, return ONLY a JSON object (no markdown fences):\n\
-                {\"scores\": [{\"summary_id\": \"id\", \"clarity\": N, \"actionability\": N, \"information_density\": N, \"faithfulness\": N, \"reasoning\": \"...\"}]}\n\n"
-            );
-            let mut section = String::new();
-            for (id, content) in &v1_summaries {
-                section.push_str(&format!("--- Summary: {} ---\n{}\n\n", id, content));
-            }
-            if let Some(json) = run_eval_pass(
-                &http_client,
-                *eval_provider,
-                eval_key,
-                format!("{}{}", v1_prompt, section),
-                &gcs_client,
-                &bucket_name,
-                &today,
-                "eval",
-            )
-            .await
-            {
-                apply_eval_scores(&json, &mut new_manifest_entries);
-            }
-        }
-
-        // Eval V3 summaries with insight-brief rubric
-        if !v3_summaries.is_empty() || shadow_v3_json.is_some() {
-            let v3_prompt = String::from(
-                "You are evaluating Insight Brief summaries for a senior engineering leader (C++/Rust, hedge fund, low-latency systems).\n\n\
-                Score each summary on these criteria (1-5 scale):\n\
-                1. key_idea_clarity: Is the key insight distilled into one clear, non-hedging sentence?\n\
-                2. why_it_matters_relevance: Does it connect to the reader's specific context?\n\
-                3. deep_dive_depth: Is the technical analysis substantive, with evidence and nuance?\n\
-                4. action_quality: If present, is the action concrete and genuinely useful? (Score 3 if no action item.)\n\n\
-                For each summary below, return ONLY a JSON object (no markdown fences):\n\
-                {\"scores\": [{\"summary_id\": \"id\", \"key_idea_clarity\": N, \"why_it_matters_relevance\": N, \"deep_dive_depth\": N, \"action_quality\": N, \"reasoning\": \"...\"}]}\n\n"
-            );
-            let mut section = String::new();
-            for (id, content) in &v3_summaries {
-                section.push_str(&format!("--- Summary: {} ---\n{}\n\n", id, content));
-            }
-            if let Some(json) = &shadow_v3_json {
-                section.push_str(&format!(
-                    "--- Summary: {} ---\n{}\n\n",
-                    SHADOW_SUMMARY_ID, json
-                ));
-            }
-            if let Some(json) = run_eval_pass(
-                &http_client,
-                *eval_provider,
-                eval_key,
-                format!(
-                    "{}{}{}",
-                    v3_prompt,
-                    pairwise_instruction(shadow_v3_json.is_some()),
-                    section
-                ),
-                &gcs_client,
-                &bucket_name,
-                &today,
-                "eval-v3",
-            )
-            .await
-            {
-                apply_eval_scores(&json, &mut new_manifest_entries);
-            }
-        }
-
-        // Calibrated eval pass (V1 only — calibration feedback is based on V1 format)
-        if !v1_summaries.is_empty() {
-            if let Some(ref cal_context) = calibration_context {
-                info!("Running calibrated eval pass");
-                let v1_prompt = String::from(
-                    "You are evaluating article summaries for quality. Score each summary on these criteria (1-5):\n\n\
-                    1. Clarity\n2. Actionability\n3. Information density\n4. Faithfulness\n\n\
-                    The reader is a senior engineering leader. They have 2-3 minutes on their phone.\n\
-                    Return ONLY JSON: {\"scores\": [{\"summary_id\": \"id\", \"clarity\": N, \"actionability\": N, \"information_density\": N, \"faithfulness\": N, \"reasoning\": \"...\"}]}\n\n"
-                );
-                let mut section = String::new();
-                for (id, content) in &v1_summaries {
-                    section.push_str(&format!("--- Summary: {} ---\n{}\n\n", id, content));
-                }
-                let calibrated_prompt = format!("{}{}\n{}", v1_prompt, cal_context, section);
-                if let Some(cal_json) = run_eval_pass(
-                    &http_client,
-                    *eval_provider,
-                    eval_key,
-                    calibrated_prompt,
-                    &gcs_client,
-                    &bucket_name,
-                    &today,
-                    "eval-calibrated",
-                )
-                .await
-                {
-                    apply_eval_scores(&cal_json, &mut new_manifest_entries);
-                    log_calibration_agreement(&recent_feedback, &cal_json, &new_manifest_entries);
-                }
-            }
-        }
-    } else {
-        info!("No LLM provider available for eval, skipping eval stage");
+    // --- Eval ---
+    // Gemini judges to avoid self-preference bias (Claude judging Claude).
+    info!(provider = "gemini", "Starting eval stage");
+    let v3_eval_prompt = String::from(
+        "You are evaluating Insight Brief summaries for a senior engineering leader (C++/Rust, hedge fund, low-latency systems).\n\n\
+        Score each summary on these criteria (1-5 scale):\n\
+        1. key_idea_clarity: Is the key insight distilled into one clear, non-hedging sentence?\n\
+        2. why_it_matters_relevance: Does it connect to the reader's specific context?\n\
+        3. deep_dive_depth: Is the technical analysis substantive, with evidence and nuance?\n\
+        4. action_quality: If present, is the action concrete and genuinely useful? (Score 3 if no action item.)\n\n\
+        For each summary below, return ONLY a JSON object (no markdown fences):\n\
+        {\"scores\": [{\"summary_id\": \"id\", \"key_idea_clarity\": N, \"why_it_matters_relevance\": N, \"deep_dive_depth\": N, \"action_quality\": N, \"reasoning\": \"...\"}]}\n\n"
+    );
+    let mut section = format!(
+        "--- Summary: {} ---\n{}\n\n",
+        entry.summary_id(),
+        brief.json
+    );
+    if let Some(json) = &shadow_v3_json {
+        section.push_str(&format!(
+            "--- Summary: {} ---\n{}\n\n",
+            SHADOW_SUMMARY_ID, json
+        ));
+    }
+    if let Some(json) = run_eval_pass(
+        &http_client,
+        LlmProvider::Gemini,
+        &keys.gemini,
+        format!(
+            "{}{}{}",
+            v3_eval_prompt,
+            pairwise_instruction(shadow_v3_json.is_some()),
+            section
+        ),
+        &gcs_client,
+        &bucket_name,
+        &today,
+        "eval-v3",
+    )
+    .await
+    {
+        apply_eval_scores(&json, std::slice::from_mut(&mut entry));
     }
 
-    // --- Final: Upload manifest (all stages have appended to new_manifest_entries) ---
-    for entry in new_manifest_entries.into_iter().rev() {
-        manifest.insert(0, entry);
-    }
+    // --- Final: Upload manifest ---
+    manifest.insert(0, entry);
     // Keep the manifest newest-first by date regardless of insertion order. This
-    // matters for backfill (--date), where a past day's entries would otherwise
+    // matters for backfill (--date), where a past day's entry would otherwise
     // be prepended ahead of newer ones. Stable sort preserves intra-date order.
     manifest.sort_by(|a, b| b.date.cmp(&a.date));
     let manifest_json = serde_json::to_vec_pretty(&manifest)?;
@@ -1271,12 +892,152 @@ mod tests {
         assert_eq!(shadow_model_from(None), None);
     }
 
-    // --- run_smoke: shadow model gating (finding 5) ---
+    // --- Startup credentials ---
+
+    #[test]
+    fn test_api_keys_from_both_present() {
+        let keys = api_keys_from(Some("c".to_string()), Some("g".to_string())).unwrap();
+        assert_eq!(
+            keys,
+            ApiKeys {
+                claude: "c".to_string(),
+                gemini: "g".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_api_keys_from_missing_gemini_fails() {
+        let err = api_keys_from(Some("c".to_string()), None).unwrap_err();
+        assert!(err.contains("GEMINI_API_KEY"), "{err}");
+        assert!(!err.contains("ANTHROPIC_API_KEY"), "{err}");
+    }
+
+    #[test]
+    fn test_api_keys_from_empty_claude_counts_as_missing() {
+        let err = api_keys_from(Some(String::new()), Some("g".to_string())).unwrap_err();
+        assert!(err.contains("ANTHROPIC_API_KEY"), "{err}");
+    }
+
+    #[test]
+    fn test_api_keys_from_both_missing_names_both() {
+        let err = api_keys_from(None, None).unwrap_err();
+        assert!(err.contains("ANTHROPIC_API_KEY"), "{err}");
+        assert!(err.contains("GEMINI_API_KEY"), "{err}");
+    }
+
+    // --- Insight Brief parsing ---
+
+    #[test]
+    fn test_parse_insight_brief_strips_fences_and_preamble() {
+        let response =
+            "Here you go:\n```json\n{\"key_idea\": \"Idea\", \"deep_dive\": \"Body\"}\n```";
+        let brief = parse_insight_brief(response).unwrap();
+        assert_eq!(
+            brief.json,
+            "{\"key_idea\": \"Idea\", \"deep_dive\": \"Body\"}"
+        );
+        assert_eq!(brief.key_idea, "Idea");
+    }
+
+    #[test]
+    fn test_parse_insight_brief_requires_fields() {
+        assert!(parse_insight_brief("{\"key_idea\": \"Idea\"}").is_none());
+        assert!(parse_insight_brief("{\"deep_dive\": \"Body\"}").is_none());
+    }
+
+    #[test]
+    fn test_parse_insight_brief_rejects_invalid_json() {
+        assert!(parse_insight_brief("not json").is_none());
+        assert!(parse_insight_brief("{\"key_idea\": ").is_none());
+        assert!(parse_insight_brief("} then {").is_none());
+    }
+
+    #[test]
+    fn test_manifest_snippet_truncates_long_text() {
+        let long = "x".repeat(SUMMARY_SNIPPET_CHARS + 20);
+        let snippet = manifest_snippet(&long);
+        assert_eq!(snippet.chars().count(), SUMMARY_SNIPPET_CHARS);
+        assert!(snippet.ends_with("..."));
+        assert_eq!(manifest_snippet("short"), "short");
+    }
+
+    // --- Recent picks context ---
+
+    fn pick(date: &str, title: &str, prompt_version: Option<&str>) -> ManifestEntry {
+        ManifestEntry {
+            date: date.to_string(),
+            url: format!("https://example.com/{}", title),
+            title: title.to_string(),
+            summary_snippet: String::new(),
+            original_url: None,
+            model: None,
+            selected_by: None,
+            prompt_version: prompt_version.map(String::from),
+            eval_score: None,
+            format: None,
+        }
+    }
+
+    #[test]
+    fn test_is_daily_pick_accepts_v1_and_v3_only() {
+        assert!(is_daily_pick(&pick("2026-09-15", "a", None)));
+        assert!(is_daily_pick(&pick("2026-09-15", "a", Some("v3"))));
+        assert!(!is_daily_pick(&pick("2026-09-15", "a", Some("v2"))));
+    }
+
+    #[test]
+    fn test_recent_picks_one_line_per_day_across_v1_and_v3() {
+        // Newest-first, with a legacy day carrying two V1 entries plus a V3
+        // entry for the same pick, and a V2 beta entry that must be ignored.
+        let manifest = vec![
+            pick("2026-09-15", "Today", Some("v3")),
+            pick("2026-09-14", "Yesterday", Some("v3")),
+            pick("2026-09-13", "Legacy", None),
+            pick("2026-09-13", "Legacy", None),
+            pick("2026-09-13", "Legacy", Some("v3")),
+            pick("2026-09-13", "Beta", Some("v2")),
+            pick("2026-09-12", "Older", Some("v3")),
+        ];
+        let ctx = build_recent_picks_context(&manifest, 3).unwrap();
+        assert_eq!(ctx.matches("\n- ").count(), 3, "{ctx}");
+        assert!(ctx.contains("2026-09-15: \"Today\""));
+        assert!(ctx.contains("2026-09-14: \"Yesterday\""));
+        assert!(ctx.contains("2026-09-13: \"Legacy\""));
+        assert!(!ctx.contains("Beta"));
+        assert!(!ctx.contains("Older"));
+    }
+
+    #[test]
+    fn test_recent_picks_empty_manifest() {
+        assert!(build_recent_picks_context(&[], 5).is_none());
+    }
+
+    // --- run_smoke: both providers plus the optional shadow model ---
     //
     // A bad SHADOW_MODEL id must fail the deploy smoke gate instead of only
     // surfacing as a nightly warn once the real run tries the shadow lane.
-    // #[serial] because these tests mutate process env vars (CLAUDE_BASE_URL,
-    // SHADOW_MODEL) shared with other tests in this binary.
+    // #[serial] because these tests mutate process env vars shared with other
+    // tests in this binary.
+
+    fn test_keys() -> ApiKeys {
+        ApiKeys {
+            claude: "test-claude-key".to_string(),
+            gemini: "test-gemini-key".to_string(),
+        }
+    }
+
+    async fn mount_gemini_ok(server: &wiremock::MockServer) {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, ResponseTemplate};
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/v1beta/models/.*:generateContent$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "candidates": [{"content": {"parts": [{"text": "OK"}]}}]
+            })))
+            .mount(server)
+            .await;
+    }
 
     #[tokio::test]
     #[serial]
@@ -1285,12 +1046,13 @@ mod tests {
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
+        mount_gemini_ok(&mock_server).await;
 
         // Prod smoke call (default model, no override) succeeds.
         Mock::given(method("POST"))
             .and(path("/messages"))
             .and(body_partial_json(
-                serde_json::json!({"model": "claude-opus-4-8"}),
+                serde_json::json!({"model": llm_client::DEFAULT_CLAUDE_MODEL}),
             ))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "content": [{"text": "OK"}]
@@ -1315,14 +1077,15 @@ mod tests {
 
         unsafe {
             std::env::set_var("CLAUDE_BASE_URL", mock_server.uri());
+            std::env::set_var("GEMINI_BASE_URL", mock_server.uri());
             std::env::set_var("SHADOW_MODEL", "claude-bad-shadow");
         }
 
-        let providers = vec![(LlmProvider::Claude, "test-key".to_string())];
-        let result = run_smoke(&reqwest::Client::new(), &providers).await;
+        let result = run_smoke(&reqwest::Client::new(), &test_keys()).await;
 
         unsafe {
             std::env::remove_var("CLAUDE_BASE_URL");
+            std::env::remove_var("GEMINI_BASE_URL");
             std::env::remove_var("SHADOW_MODEL");
         }
 
@@ -1331,6 +1094,49 @@ mod tests {
             err.to_string().contains("claude-bad-shadow"),
             "error should name the shadow model, got: {err}"
         );
+        assert!(
+            !err.to_string().contains("gemini:"),
+            "gemini check should have passed, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_run_smoke_fails_when_gemini_rejects() {
+        use wiremock::matchers::{method, path, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "content": [{"text": "OK"}]
+            })))
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/v1beta/models/.*:generateContent$"))
+            .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
+                "error": {"message": "API key not valid"}
+            })))
+            .mount(&mock_server)
+            .await;
+
+        unsafe {
+            std::env::set_var("CLAUDE_BASE_URL", mock_server.uri());
+            std::env::set_var("GEMINI_BASE_URL", mock_server.uri());
+            std::env::remove_var("SHADOW_MODEL");
+        }
+
+        let result = run_smoke(&reqwest::Client::new(), &test_keys()).await;
+
+        unsafe {
+            std::env::remove_var("CLAUDE_BASE_URL");
+            std::env::remove_var("GEMINI_BASE_URL");
+        }
+
+        let err = result.expect_err("a failing Gemini smoke call must fail the gate");
+        assert!(err.to_string().contains("gemini:"), "{err}");
     }
 
     #[tokio::test]
@@ -1340,6 +1146,7 @@ mod tests {
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
+        mount_gemini_ok(&mock_server).await;
 
         Mock::given(method("POST"))
             .and(path("/messages"))
@@ -1351,14 +1158,15 @@ mod tests {
 
         unsafe {
             std::env::set_var("CLAUDE_BASE_URL", mock_server.uri());
+            std::env::set_var("GEMINI_BASE_URL", mock_server.uri());
             std::env::set_var("SHADOW_MODEL", "claude-opus-5");
         }
 
-        let providers = vec![(LlmProvider::Claude, "test-key".to_string())];
-        let result = run_smoke(&reqwest::Client::new(), &providers).await;
+        let result = run_smoke(&reqwest::Client::new(), &test_keys()).await;
 
         unsafe {
             std::env::remove_var("CLAUDE_BASE_URL");
+            std::env::remove_var("GEMINI_BASE_URL");
             std::env::remove_var("SHADOW_MODEL");
         }
 
