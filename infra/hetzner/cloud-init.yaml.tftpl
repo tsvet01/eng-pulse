@@ -55,6 +55,7 @@ write_files:
       PG_DATA=/mnt/HC_Volume_${volume_id}/postgres
 runcmd:
   - chown -R deploy:deploy /opt/pulse
+  - install -o deploy -g deploy -m 0644 /dev/null /var/log/pulse-backup.log
   - systemctl enable docker
   - systemctl daemon-reload
   - systemctl enable pulse.service
