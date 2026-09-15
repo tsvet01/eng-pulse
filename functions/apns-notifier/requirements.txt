@@ -1,6 +1,6 @@
-functions-framework==3.10.1
-google-cloud-firestore==2.26.0
-google-cloud-secret-manager==2.27.0
-PyJWT==2.12.1
-cryptography==46.0.6
+functions-framework==3.10.2
+google-cloud-firestore==2.30.0
+google-cloud-secret-manager==2.30.0
+PyJWT==2.14.0
+cryptography==50.0.1
 httpx[http2]==0.28.1
