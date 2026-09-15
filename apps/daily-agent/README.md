@@ -40,7 +40,8 @@ This deploys to Google Cloud Run as a scheduled job.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `GEMINI_API_KEY` | Yes | - | Google Gemini API key |
+| `ANTHROPIC_API_KEY` | Yes | - | Claude API key (selection and Insight Brief); startup fails without it |
+| `GEMINI_API_KEY` | Yes | - | Google Gemini API key (judge); startup fails without it |
 | `GCS_BUCKET` | No | `tsvet01-agent-brain` | GCS bucket for storage |
 | `GEMINI_MODEL` | No | `gemini-2.0-flash` | Gemini model to use |
 | `RUST_LOG` | No | `info` | Log level (debug, info, warn, error) |
@@ -79,8 +80,9 @@ sources.json (GCS)
 └─────────────────┘
        │
        ▼
-summaries/YYYY-MM-DD.md (GCS)
-manifest.json (GCS)
+summaries/v3/YYYY-MM-DD.json (GCS)   # the Insight Brief
+eval-v3/YYYY-MM-DD.json (GCS)        # Gemini judge report
+manifest.json (GCS)                  # one entry per run
 ```
 
 ## Source Types
@@ -138,7 +140,7 @@ Fetches top 10 stories, filters by recency and point threshold.
 ```json
 {
   "date": "2024-01-15",
-  "url": "https://storage.googleapis.com/bucket/summaries/2024-01-15.md",
+  "url": "https://storage.googleapis.com/bucket/summaries/v3/2024-01-15.json",
   "title": "Article Title",
   "summary_snippet": "First 100 chars of summary...",
   "original_url": "https://original-article.com"
