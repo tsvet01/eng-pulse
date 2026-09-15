@@ -7,8 +7,8 @@ Runs weekly (Cloud Run Job, Sundays 08:00 UTC). Maintains `config/sources.json` 
 3. Drops sources with no post in 90 days.
 
 ```
-cargo run -p explorer-agent
-cargo test -p explorer-agent
+cargo run -p se-explorer-agent
+cargo test -p se-explorer-agent
 ```
 
 | Env | Required | Default |

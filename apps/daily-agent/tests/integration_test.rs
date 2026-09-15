@@ -45,32 +45,10 @@ async fn test_provider_mock(
     // 6. Verify
     assert!(result.is_ok());
     let expected_response = match provider {
-        LlmProvider::Gemini => "Mocked Gemini Response",
         LlmProvider::OpenAI => "Mocked OpenAI Response",
         LlmProvider::Claude => "Mocked Claude Response",
     };
     assert_eq!(result.unwrap(), expected_response);
-}
-
-#[tokio::test]
-#[serial]
-async fn test_gemini_api_mocking() {
-    let response = serde_json::json!({
-        "candidates": [{
-            "content": {
-                "parts": [{ "text": "Mocked Gemini Response" }]
-            }
-        }]
-    });
-
-    test_provider_mock(
-        LlmProvider::Gemini,
-        "/v1beta/models/gemini-pro:generateContent",
-        response,
-        "GEMINI_BASE_URL",
-        Some(("GEMINI_MODEL", "gemini-pro")),
-    )
-    .await;
 }
 
 #[tokio::test]

@@ -20,15 +20,15 @@ if [ -f .env ]; then
 fi
 
 # Check required API keys
-if [ -z "$GEMINI_API_KEY" ]; then
-  echo "Error: GEMINI_API_KEY is not set. Please check your .env file."
-  exit 1
-fi
+for key in ANTHROPIC_API_KEY OPENAI_API_KEY; do
+  if [ -z "${!key}" ]; then
+    echo "Error: $key is not set. Please check your .env file."
+    exit 1
+  fi
+done
 
 echo "🚀 Starting deployment to GCP Project: $PROJECT_ID"
-echo "   Enabled providers:"
-echo "   - Gemini: ✓"
-[ -n "$ANTHROPIC_API_KEY" ] && echo "   - Claude: ✓" || echo "   - Claude: (not configured)"
+echo "   Providers: Claude (selection + brief), OpenAI (judge)"
 
 # 1. Enable APIs
 echo "Enabling APIs..."
@@ -94,15 +94,13 @@ create_or_update_secret() {
   fi
 }
 
-create_or_update_secret "gemini-api-key" "$GEMINI_API_KEY"
 create_or_update_secret "anthropic-api-key" "$ANTHROPIC_API_KEY"
+create_or_update_secret "openai-api-key" "$OPENAI_API_KEY"
 
 # 6. Deploy Cloud Run Job with all configured secrets
 echo "Deploying Cloud Run Job..."
 
-# Build secrets flag dynamically based on available keys
-SECRETS_FLAG="GEMINI_API_KEY=gemini-api-key:latest"
-[ -n "$ANTHROPIC_API_KEY" ] && SECRETS_FLAG="$SECRETS_FLAG,ANTHROPIC_API_KEY=anthropic-api-key:latest"
+SECRETS_FLAG="ANTHROPIC_API_KEY=anthropic-api-key:latest,OPENAI_API_KEY=openai-api-key:latest"
 
 gcloud run jobs deploy $SERVICE_NAME \
   --image $IMAGE_URI \
