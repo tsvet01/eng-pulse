@@ -23,6 +23,16 @@ pub(crate) fn v3_score_total(score: &serde_json::Value) -> f64 {
     weighted_sum / 5.0 // Normalize to 0.0-1.0 (max score per criterion is 5)
 }
 
+/// Judge call options: moderate reasoning, with an output cap large enough
+/// for the reasoning tokens plus the JSON verdict.
+pub(crate) fn judge_options() -> LlmOptions {
+    LlmOptions {
+        effort: Some("medium".to_string()),
+        max_tokens: Some(8000),
+        ..Default::default()
+    }
+}
+
 /// Run a single eval pass: send prompt to LLM, parse JSON response, upload report.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_eval_pass(
@@ -35,10 +45,7 @@ pub(crate) async fn run_eval_pass(
     today: &str,
     report_prefix: &str,
 ) -> Option<serde_json::Value> {
-    let eval_opts = LlmOptions {
-        temperature: Some(0.3),
-        ..Default::default()
-    };
+    let eval_opts = judge_options();
     match call_llm(http_client, provider, api_key, prompt, &eval_opts).await {
         Ok(eval_response) => {
             let cleaned = eval_response
@@ -163,6 +170,14 @@ mod tests {
         )];
         apply_eval_scores(&json, &mut entries);
         assert!(entries[0].eval_score.is_none());
+    }
+
+    #[test]
+    fn test_judge_options_use_reasoning_effort_and_cap() {
+        let opts = judge_options();
+        assert_eq!(opts.effort.as_deref(), Some("medium"));
+        assert_eq!(opts.max_tokens, Some(8000));
+        assert!(opts.model.is_none());
     }
 
     #[test]
