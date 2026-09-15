@@ -20,7 +20,7 @@
 
 ```
                         ┌──────────────────── Hetzner VPS (Terraform) ───────────────────┐
-                        │  Caddy (TLS) → pulse-api (Rust/axum) → Postgres 16 (+ nightly   │
+                        │  Caddy (TLS) → pulse-api (Rust/axum) → Postgres 18 (+ nightly   │
                         │  pg_dump → private GCS bucket)                                   │
                         │  Serves: JWT-authed reads/writes for apps; /internal for the     │
                         │  pipeline; /admin for the owner. Sends email + FCM + APNs.       │
@@ -105,7 +105,7 @@ infra/gcp/       Phase 6: import {} blocks for cloud scheduler jobs, monitoring 
 ```
 
 - DNS: Cloudflare (first-party provider); GoDaddy stays registrar (one-time NS switch if needed).
-- Box runtime via cloud-init → docker compose: `caddy` (auto-TLS) → `pulse-api` (image from GHCR) → `postgres:16` (volume) + `backup` sidecar (nightly `pg_dump` → private GCS bucket, 30-day retention).
+- Box runtime via cloud-init → docker compose: `caddy` (auto-TLS) → `pulse-api` (image from GHCR) → `postgres:18` (volume) + `backup` sidecar (nightly `pg_dump` → private GCS bucket, 30-day retention).
 - **Terraform provisions; CI deploys.** GitHub Actions builds/pushes the API image and SSHes `docker compose pull && up -d`. Cloud Run jobs stay CI-deployed, outside Terraform.
 - **Secrets never enter Terraform state:** `HCLOUD_TOKEN`/Cloudflare token via env; runtime secrets (JWKS URL, service token, SMTP, APNs key, FCM SA JSON) are GitHub Actions secrets written to `/opt/pulse/.env` by the deploy workflow.
 - Monitoring reuses Cloud Monitoring: uptime check on `/healthz` → existing email channel; per-feed staleness later from `runs`.
