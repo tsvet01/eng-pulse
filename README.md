@@ -44,7 +44,7 @@ cargo test --workspace
 for f in notifier apns-notifier fcm-tokens; do (cd functions/$f && python -m pytest test_main.py -q); done
 ```
 
-Run the pipeline locally with `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` set: `cargo run -p daily-agent -- --smoke` checks both providers without side effects; `cargo run -p daily-agent` does a real run against `GCS_BUCKET` (default `tsvet01-agent-brain`). The API: start Postgres 18, then `DATABASE_URL=postgres://pulse:pulse@localhost:5432/pulse cargo run -p pulse-api`.
+Run the pipeline locally with `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` set: `cargo run -p se-daily-agent -- --smoke` checks both providers without side effects; `cargo run -p se-daily-agent` does a real run against `GCS_BUCKET` (default `tsvet01-agent-brain`). The API: start Postgres 18, then `DATABASE_URL=postgres://pulse:pulse@localhost:5432/pulse cargo run -p pulse-api`.
 
 ## Deploy
 

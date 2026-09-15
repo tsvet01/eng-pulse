@@ -22,7 +22,7 @@ cargo run -p pulse-core --bin fixtures && git diff --exit-code docs/contracts
 for f in notifier apns-notifier fcm-tokens; do (cd functions/$f && python -m pytest test_main.py -q); done
 ```
 
-pulse-api against Postgres 16: `DATABASE_URL=postgres://pulse:pulse@localhost:5432/pulse cargo run -p pulse-api`, then `curl localhost:8080/healthz`.
+pulse-api against Postgres 18: `DATABASE_URL=postgres://pulse:pulse@localhost:5432/pulse cargo run -p pulse-api`, then `curl localhost:8080/healthz`.
 
 ## Rules
 
