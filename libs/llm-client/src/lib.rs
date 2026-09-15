@@ -568,7 +568,7 @@ async fn call_claude(
 
 // --- Unified API ---
 
-/// Call any LLM provider with exponential backoff retry
+/// `call_llm` with default options; retries are built into `call_llm` itself.
 #[instrument(skip(client, api_key, prompt), fields(provider = %provider.as_str(), prompt_len = prompt.len()))]
 pub async fn call_llm_with_retry(
     client: &reqwest::Client,
@@ -579,7 +579,9 @@ pub async fn call_llm_with_retry(
     call_llm(client, provider, api_key, prompt, &LlmOptions::default()).await
 }
 
-/// Call any LLM provider with options and exponential backoff retry
+/// Call any LLM provider with options. Transient failures (timeouts,
+/// connection errors, 408/429/5xx) are retried with exponential backoff for
+/// up to MAX_RETRY_ELAPSED_SECS; other errors return immediately.
 #[instrument(skip(client, api_key, prompt, options), fields(provider = %provider.as_str(), prompt_len = prompt.len()))]
 pub async fn call_llm(
     client: &reqwest::Client,
@@ -1126,5 +1128,92 @@ mod tests {
     fn test_first_text_block_none_when_no_text() {
         let blocks = vec![ClaudeContentBlock { text: None }];
         assert_eq!(first_text_block(&blocks), None);
+    }
+
+    // --- call_llm retry behaviour (wiremock) ---
+    //
+    // #[serial] because CLAUDE_BASE_URL is process-global.
+
+    fn claude_ok_body() -> serde_json::Value {
+        serde_json::json!({"content": [{"type": "text", "text": "OK"}]})
+    }
+
+    fn opts_with_model(model: &str) -> LlmOptions {
+        LlmOptions {
+            model: Some(model.to_string()),
+            max_tokens: Some(64),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_call_llm_retries_transient_503_then_succeeds() {
+        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        // First attempt: 503. The mock expires after one match so the retry
+        // falls through to the success mock below.
+        Mock::given(method("POST"))
+            .and(path("/messages"))
+            .respond_with(ResponseTemplate::new(503).set_body_string("overloaded"))
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/messages"))
+            .and(body_partial_json(
+                serde_json::json!({"model": "claude-test-model"}),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(claude_ok_body()))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        unsafe { std::env::set_var("CLAUDE_BASE_URL", server.uri()) };
+        let result = call_llm(
+            &reqwest::Client::new(),
+            LlmProvider::Claude,
+            "key",
+            "hi".to_string(),
+            &opts_with_model("claude-test-model"),
+        )
+        .await;
+        unsafe { std::env::remove_var("CLAUDE_BASE_URL") };
+
+        assert_eq!(result.unwrap(), "OK");
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_call_llm_gives_up_on_400() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/messages"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("bad request"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        unsafe { std::env::set_var("CLAUDE_BASE_URL", server.uri()) };
+        let result = call_llm(
+            &reqwest::Client::new(),
+            LlmProvider::Claude,
+            "key",
+            "hi".to_string(),
+            &opts_with_model("claude-test-model"),
+        )
+        .await;
+        unsafe { std::env::remove_var("CLAUDE_BASE_URL") };
+
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("400"), "{err}");
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
     }
 }
