@@ -438,14 +438,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         articles_text.push_str(&format!("{}. [{}] {}\n", i, article.source, article.title));
     }
 
-    let prod_config = prompts::PromptConfig::V1;
     let selection_opts = LlmOptions {
         temperature: Some(0.3),
         ..Default::default()
     };
 
     // Phase 1: Shortlist top 5 from headlines
-    let shortlist_prompt = prod_config.shortlist_prompt_with_context(
+    let shortlist_prompt = prompts::shortlist_prompt_with_context(
         &articles_text,
         selection_context.as_deref(),
         recent_picks.as_deref(),
@@ -463,7 +462,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Fallback: if shortlist parsing fails, use single-shot selection
     if shortlist.is_empty() {
         warn!(response = %shortlist_response.trim(), "Failed to parse shortlist, falling back to single-shot");
-        let fallback_prompt = prod_config.selection_prompt(&articles_text);
+        let fallback_prompt = prompts::selection_prompt(&articles_text);
         let fallback = call_llm(
             &http_client,
             LlmProvider::Claude,
@@ -507,7 +506,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             ));
         }
 
-        let final_prompt = prod_config.final_selection_prompt_with_context(
+        let final_prompt = prompts::final_selection_prompt_with_context(
             &candidates_text,
             selection_context.as_deref(),
             recent_picks.as_deref(),
@@ -560,9 +559,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // --- V3 Insight Brief ---
     // The brief is the run's only product: a failure here fails the run.
     info!("Generating V3 Insight Brief");
-    let v3_config = prompts::PromptConfig::V3;
     let v3_prompt =
-        v3_config.summary_prompt(&best_article.source, &best_article.title, &truncated_text);
+        prompts::summary_prompt(&best_article.source, &best_article.title, &truncated_text);
     let v3_options = LlmOptions {
         temperature: Some(0.3),
         ..Default::default()
@@ -601,7 +599,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         original_url: Some(best_article.url.clone()),
         model: Some(LlmProvider::Claude.model_name().to_string()),
         selected_by: Some(LlmProvider::Claude.model_name().to_string()),
-        prompt_version: Some(v3_config.version().to_string()),
+        prompt_version: Some(prompts::PROMPT_VERSION.to_string()),
         eval_score: None,
         format: Some("insight-brief-v3".to_string()),
     };
@@ -610,7 +608,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut shadow_v3_json: Option<String> = None;
     if let Some(shadow) = shadow_model() {
         let shadow_prompt =
-            v3_config.summary_prompt(&best_article.source, &best_article.title, &truncated_text);
+            prompts::summary_prompt(&best_article.source, &best_article.title, &truncated_text);
         // Opus 5 adaptive thinking tokens count against max_tokens; raise
         // the cap so the JSON answer isn't truncated. Prod paths keep the
         // 4096 default.
