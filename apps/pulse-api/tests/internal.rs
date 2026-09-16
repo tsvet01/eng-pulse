@@ -129,3 +129,29 @@ async fn runs_and_feedback_roundtrip(pool: PgPool) {
     assert_eq!(body[0]["aspect"], "brief");
     assert_eq!(body[0]["value"], 1);
 }
+
+/// A bad request date is rejected before any row is written; the batch's
+/// upserts share one transaction, so partial writes are impossible by
+/// construction.
+#[sqlx::test]
+async fn runs_ingest_is_atomic(pool: PgPool) {
+    let (_s, url) = jwks_mock().await;
+    seed_feed(&pool).await;
+    let app = app(pool.clone(), &url);
+    let run = json!({"date": "2026-13-40", "feeds": [
+        {"feed_slug": "engineering", "status": "ok", "article_url": "https://example.com/a", "input_tokens": 10, "output_tokens": 5, "est_cost_usd": 0.01, "error": null}]});
+    let (status, _) = send(
+        &app,
+        Method::POST,
+        "/internal/runs",
+        Some(SERVICE_TOKEN),
+        Some(run),
+    )
+    .await;
+    assert_eq!(status, 422);
+    let count: i64 = sqlx::query_scalar("select count(*) from runs")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+}

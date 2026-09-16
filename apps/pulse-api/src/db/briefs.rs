@@ -1,5 +1,5 @@
 use chrono::NaiveDate;
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 #[derive(Debug, sqlx::FromRow)]
@@ -15,9 +15,12 @@ pub struct BriefRow {
 }
 
 /// Returns true when a new row was created.
-pub async fn upsert(pool: &PgPool, feed_id: Uuid, b: &pulse_core::Brief) -> sqlx::Result<bool> {
-    let date = NaiveDate::parse_from_str(&b.date, "%Y-%m-%d")
-        .map_err(|e| sqlx::Error::Protocol(format!("bad date: {e}")))?;
+pub async fn upsert(
+    pool: &PgPool,
+    feed_id: Uuid,
+    date: NaiveDate,
+    b: &pulse_core::Brief,
+) -> sqlx::Result<bool> {
     let payload = serde_json::to_value(&b.payload).expect("brief payload serializes");
     let created: bool = sqlx::query_scalar(
         "insert into briefs (feed_id, date, format, payload, article_url, article_title, model, eval_score) values ($1,$2,$3,$4,$5,$6,$7,$8)
@@ -56,5 +59,16 @@ pub async fn feed_id_by_slug(pool: &PgPool, slug: &str) -> sqlx::Result<Option<U
     sqlx::query_scalar("select id from feeds where slug = $1")
         .bind(slug)
         .fetch_optional(pool)
+        .await
+}
+
+/// Same lookup as `feed_id_by_slug`, run on the caller's open transaction.
+pub async fn feed_id_by_slug_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    slug: &str,
+) -> sqlx::Result<Option<Uuid>> {
+    sqlx::query_scalar("select id from feeds where slug = $1")
+        .bind(slug)
+        .fetch_optional(&mut **tx)
         .await
 }
