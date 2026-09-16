@@ -218,6 +218,7 @@ jobs:
           --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:${{ env.IMAGE_TAG }} \
           --region ${{ env.REGION }} --project ${{ env.PROJECT_ID }} \
           --set-secrets ANTHROPIC_API_KEY=anthropic-api-key:latest,OPENAI_API_KEY=openai-api-key:latest \
+          --update-env-vars=SHADOW_MODEL=claude-fable-5-1 \
           --task-timeout 10m
     - name: Build & deploy explorer-agent
       run: |

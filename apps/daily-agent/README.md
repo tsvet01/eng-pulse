@@ -15,7 +15,7 @@ cargo test -p se-daily-agent
 | `OPENAI_API_KEY` | yes (judge) | |
 | `GCS_BUCKET` | no | `tsvet01-agent-brain` |
 | `CLAUDE_MODEL`, `OPENAI_MODEL` | no | see `libs/llm-client` |
-| `SHADOW_MODEL` | no | unset; when set, a second brief is generated with that model and judged pairwise against production (`eval-v3` gets `pairwise_winner`) |
+| `SHADOW_MODEL` | no | when set, a second brief is generated with that model and judged pairwise against production (`eval-v3` gets `pairwise_winner`). Currently `claude-fable-5-1` in production (set by CI at deploy) |
 | `RUST_LOG` | no | `info` |
 
 Limits: articles under 200 chars are skipped, over 50,000 chars are truncated; HTTP timeout 60 s. Prompts live in `src/prompts.rs`; their wording is a tuned production artifact, change it only with an eval note. Deploy happens from CI on merge to `main` (`deploy-agents`), which also runs the smoke gate.
