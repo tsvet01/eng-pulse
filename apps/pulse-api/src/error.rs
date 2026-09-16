@@ -1,6 +1,3 @@
-// Not yet used outside tests; wired into handlers later.
-#![allow(dead_code)]
-
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},

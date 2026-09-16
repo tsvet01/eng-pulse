@@ -13,13 +13,15 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 dotenvy = "0.15"
 pulse-core = { path = "../../libs/pulse-core" }
-jsonwebtoken = "10"
+# aws_lc_rs: jsonwebtoken 10 needs an explicit backend; reuse the one rustls already pulls in.
+jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 reqwest = { version = "0.13", features = ["json", "rustls"], default-features = false }
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 tower-http = { version = "0.6", features = ["trace"] }
 subtle = "2"
 rand = "0.10"
+urlencoding = "2"
 rss = "2"
 atom_syndication = "0.12"
 
