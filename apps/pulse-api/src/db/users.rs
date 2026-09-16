@@ -23,6 +23,19 @@ pub async fn find_by_email(pool: &PgPool, email: &str) -> sqlx::Result<Option<Us
         .bind(email).fetch_optional(pool).await
 }
 
+/// Same lookup as `find_by_email`, but run on the caller's open transaction
+/// instead of a separate pool connection, so sign-up reads and writes the
+/// `users` row as one atomic unit. Two concurrent sign-ups can still both
+/// miss here and race to insert; the caller must handle the resulting unique
+/// violation.
+pub async fn find_by_email_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    email: &str,
+) -> sqlx::Result<Option<User>> {
+    sqlx::query_as("select id, email::text as email, display_name, is_admin from users where email = $1::citext")
+        .bind(email).fetch_optional(&mut **tx).await
+}
+
 pub async fn insert_user(
     tx: &mut Transaction<'_, Postgres>,
     email: &str,

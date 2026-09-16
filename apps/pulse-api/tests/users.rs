@@ -146,3 +146,68 @@ async fn signup_needs_email_in_token(pool: PgPool) {
     .await;
     assert_eq!(status, 422);
 }
+
+#[sqlx::test]
+async fn duplicate_identity_signup_is_idempotent(pool: PgPool) {
+    let (_s, url) = jwks_mock().await;
+    invite(&pool, "FIRST", 1, false).await;
+    invite(&pool, "SECOND", 1, false).await;
+    let app = app(pool.clone(), &url);
+    let t = user_token("sub-dup", "dup@example.com");
+    let (status, _) = send(
+        &app,
+        Method::POST,
+        "/v1/users",
+        Some(&t),
+        Some(json!({"invite_code": "FIRST"})),
+    )
+    .await;
+    assert_eq!(status, 201);
+    let (status, _) = send(
+        &app,
+        Method::POST,
+        "/v1/users",
+        Some(&t),
+        Some(json!({"invite_code": "SECOND"})),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let used: i32 = sqlx::query_scalar("select used_count from invites where code = 'SECOND'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(used, 0);
+}
+
+#[sqlx::test]
+async fn invite_bounds_are_validated(pool: PgPool) {
+    let (_s, url) = jwks_mock().await;
+    let (_, t) = registered_user(&pool, "admin@example.com", true).await;
+    let app = app(pool, &url);
+    for body in [
+        json!({"expires_in_days": 0}),
+        json!({"expires_in_days": 366}),
+        json!({"max_uses": 0}),
+        json!({"max_uses": 1001}),
+    ] {
+        let (status, resp) = send(
+            &app,
+            Method::POST,
+            "/admin/invites",
+            Some(&t),
+            Some(body.clone()),
+        )
+        .await;
+        assert_eq!(status, 422, "{body}");
+        assert_eq!(resp["error"], "bad_request");
+    }
+    let (status, _) = send(
+        &app,
+        Method::POST,
+        "/admin/invites",
+        Some(&t),
+        Some(json!({"max_uses": 5, "expires_in_days": 7})),
+    )
+    .await;
+    assert_eq!(status, 201);
+}

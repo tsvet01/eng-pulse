@@ -46,13 +46,30 @@ async fn signup(
         .await?
         .ok_or_else(|| ApiError::BadRequest("invite code is invalid, expired or used up".into()))?;
     let is_admin = state.cfg.admin_email.as_deref() == Some(email.as_str());
-    let user = match users::find_by_email(&state.pool, &email).await? {
+    let user = match users::find_by_email_tx(&mut tx, &email).await? {
         Some(existing) => existing,
-        None => users::insert_user(&mut tx, &email, is_admin).await?,
+        None => users::insert_user(&mut tx, &email, is_admin)
+            .await
+            .map_err(conflict_on_unique_violation)?,
     };
-    users::insert_identity(&mut tx, user.id, &claims.iss, &claims.sub).await?;
+    users::insert_identity(&mut tx, user.id, &claims.iss, &claims.sub)
+        .await
+        .map_err(conflict_on_unique_violation)?;
     tx.commit().await?;
     Ok((StatusCode::CREATED, Json(user_json(&user))))
+}
+
+/// Two concurrent sign-ups for the same email (double-tap, retry after a
+/// timeout) can both pass the pre-insert lookup and race on the `users.email`
+/// or `identities` primary key; surface that as a retryable 409 instead of a
+/// raw 500.
+fn conflict_on_unique_violation(e: sqlx::Error) -> ApiError {
+    match e.as_database_error() {
+        Some(db) if db.is_unique_violation() => {
+            ApiError::Conflict("sign-up already in progress, retry")
+        }
+        _ => e.into(),
+    }
 }
 
 async fn me(user: AuthUser) -> Json<Value> {
