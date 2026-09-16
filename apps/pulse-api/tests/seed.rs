@@ -14,6 +14,11 @@ async fn seed_is_idempotent(pool: PgPool) {
             r#type: "hackernews".into(),
             url: "https://hn/top".into(),
         },
+        SourceEntry {
+            name: "One again".into(),
+            r#type: "rss".into(),
+            url: "https://a/feed".into(),
+        },
     ];
     let s1 = apply(&pool, &src, "FRIENDS", 5).await.unwrap();
     let s2 = apply(&pool, &src[..1], "FRIENDS", 5).await.unwrap();

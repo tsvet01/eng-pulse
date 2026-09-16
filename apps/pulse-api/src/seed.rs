@@ -31,7 +31,13 @@ pub async fn run(pool: &PgPool, args: &[String]) -> Result<(), String> {
         .transpose()?
         .unwrap_or(5);
     let raw = if sources.starts_with("http") {
-        reqwest::get(&sources)
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|e| e.to_string())?;
+        client
+            .get(&sources)
+            .send()
             .await
             .and_then(|r| r.error_for_status())
             .map_err(|e| e.to_string())?
@@ -60,7 +66,7 @@ pub async fn apply(
 ) -> Result<Summary, String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     let feed_id: uuid::Uuid = sqlx::query_scalar(
-        "insert into feeds (slug, name, description) values ('engineering', 'Engineering', 'Systems, infrastructure, AI tooling') on conflict (slug) do update set name = excluded.name returning id",
+        "insert into feeds (slug, name, description) values ('engineering', 'Engineering', 'Systems, infrastructure, AI tooling') on conflict (slug) do update set name = excluded.name, description = excluded.description returning id",
     )
     .fetch_one(&mut *tx)
     .await
@@ -87,8 +93,14 @@ pub async fn apply(
     .execute(&mut *tx)
     .await
     .map_err(|e| e.to_string())?;
+    let sources_active: i64 =
+        sqlx::query_scalar("select count(*) from feed_sources where feed_id = $1 and is_active")
+            .bind(feed_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(Summary {
-        sources_active: sources.len(),
+        sources_active: sources_active as usize,
     })
 }
