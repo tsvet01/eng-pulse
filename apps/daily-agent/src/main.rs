@@ -143,18 +143,30 @@ fn build_recent_picks_context(manifest: &[ManifestEntry], max_days: usize) -> Op
 }
 
 /// API keys the pipeline needs: Claude writes the brief, OpenAI judges it.
+/// Gemini is optional and unused by the daily run; when present it is only
+/// exercised by `--smoke`.
 #[derive(Debug, Clone, PartialEq)]
 struct ApiKeys {
     claude: String,
     openai: String,
+    gemini: Option<String>,
 }
 
-/// Both keys are required; an empty value counts as missing.
-fn api_keys_from(claude: Option<String>, openai: Option<String>) -> Result<ApiKeys, String> {
+/// Claude and OpenAI keys are required; an empty value counts as missing.
+fn api_keys_from(
+    claude: Option<String>,
+    openai: Option<String>,
+    gemini: Option<String>,
+) -> Result<ApiKeys, String> {
     let claude = claude.filter(|k| !k.is_empty());
     let openai = openai.filter(|k| !k.is_empty());
+    let gemini = gemini.filter(|k| !k.is_empty());
     match (claude, openai) {
-        (Some(claude), Some(openai)) => Ok(ApiKeys { claude, openai }),
+        (Some(claude), Some(openai)) => Ok(ApiKeys {
+            claude,
+            openai,
+            gemini,
+        }),
         (claude, openai) => {
             let missing: Vec<&str> = [
                 (claude.is_none(), LlmProvider::Claude),
@@ -176,6 +188,7 @@ fn load_api_keys() -> Result<ApiKeys, String> {
     api_keys_from(
         std::env::var(get_api_key_env_var(LlmProvider::Claude)).ok(),
         std::env::var(get_api_key_env_var(LlmProvider::OpenAI)).ok(),
+        std::env::var(get_api_key_env_var(LlmProvider::Gemini)).ok(),
     )
 }
 
@@ -200,6 +213,11 @@ async fn run_smoke(
         shadow
             .as_deref()
             .map(|m| (LlmProvider::Claude, keys.claude.as_str(), Some(m))),
+    )
+    .chain(
+        keys.gemini
+            .as_deref()
+            .map(|k| (LlmProvider::Gemini, k, None)),
     );
 
     let mut failures = Vec::new();
@@ -890,32 +908,51 @@ mod tests {
 
     #[test]
     fn test_api_keys_from_both_present() {
-        let keys = api_keys_from(Some("c".to_string()), Some("g".to_string())).unwrap();
+        let keys = api_keys_from(Some("c".to_string()), Some("g".to_string()), None).unwrap();
         assert_eq!(
             keys,
             ApiKeys {
                 claude: "c".to_string(),
-                openai: "g".to_string()
+                openai: "g".to_string(),
+                gemini: None,
             }
         );
     }
 
     #[test]
+    fn test_api_keys_from_gemini_is_optional() {
+        let keys = api_keys_from(
+            Some("c".to_string()),
+            Some("o".to_string()),
+            Some("g".to_string()),
+        )
+        .unwrap();
+        assert_eq!(keys.gemini.as_deref(), Some("g"));
+        let keys = api_keys_from(
+            Some("c".to_string()),
+            Some("o".to_string()),
+            Some(String::new()),
+        )
+        .unwrap();
+        assert_eq!(keys.gemini, None);
+    }
+
+    #[test]
     fn test_api_keys_from_missing_openai_fails() {
-        let err = api_keys_from(Some("c".to_string()), None).unwrap_err();
+        let err = api_keys_from(Some("c".to_string()), None, None).unwrap_err();
         assert!(err.contains("OPENAI_API_KEY"), "{err}");
         assert!(!err.contains("ANTHROPIC_API_KEY"), "{err}");
     }
 
     #[test]
     fn test_api_keys_from_empty_claude_counts_as_missing() {
-        let err = api_keys_from(Some(String::new()), Some("g".to_string())).unwrap_err();
+        let err = api_keys_from(Some(String::new()), Some("g".to_string()), None).unwrap_err();
         assert!(err.contains("ANTHROPIC_API_KEY"), "{err}");
     }
 
     #[test]
     fn test_api_keys_from_both_missing_names_both() {
-        let err = api_keys_from(None, None).unwrap_err();
+        let err = api_keys_from(None, None, None).unwrap_err();
         assert!(err.contains("ANTHROPIC_API_KEY"), "{err}");
         assert!(err.contains("OPENAI_API_KEY"), "{err}");
     }
@@ -1018,6 +1055,7 @@ mod tests {
         ApiKeys {
             claude: "test-claude-key".to_string(),
             openai: "test-openai-key".to_string(),
+            gemini: None,
         }
     }
 
@@ -1131,6 +1169,59 @@ mod tests {
 
         let err = result.expect_err("a failing OpenAI smoke call must fail the gate");
         assert!(err.to_string().contains("openai:"), "{err}");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_run_smoke_checks_gemini_only_when_key_is_set() {
+        use wiremock::matchers::{method, path, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        mount_openai_ok(&mock_server).await;
+        Mock::given(method("POST"))
+            .and(path("/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "content": [{"text": "OK"}]
+            })))
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/v1beta/models/.*:generateContent$"))
+            .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
+                "error": {"message": "API key not valid"}
+            })))
+            .mount(&mock_server)
+            .await;
+
+        unsafe {
+            std::env::set_var("CLAUDE_BASE_URL", mock_server.uri());
+            std::env::set_var("OPENAI_BASE_URL", mock_server.uri());
+            std::env::set_var("GEMINI_BASE_URL", mock_server.uri());
+            std::env::remove_var("SHADOW_MODEL");
+        }
+
+        // No Gemini key: the failing Gemini mock is never called.
+        let without = run_smoke(&reqwest::Client::new(), &test_keys()).await;
+        // With a key: the gemini check runs and its failure fails the gate.
+        let with = run_smoke(
+            &reqwest::Client::new(),
+            &ApiKeys {
+                gemini: Some("test-gemini-key".to_string()),
+                ..test_keys()
+            },
+        )
+        .await;
+
+        unsafe {
+            std::env::remove_var("CLAUDE_BASE_URL");
+            std::env::remove_var("OPENAI_BASE_URL");
+            std::env::remove_var("GEMINI_BASE_URL");
+        }
+
+        assert!(without.is_ok(), "{without:?}");
+        let err = with.expect_err("a failing Gemini smoke call must fail the gate");
+        assert!(err.to_string().contains("gemini:"), "{err}");
     }
 
     #[tokio::test]

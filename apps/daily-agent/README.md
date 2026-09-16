@@ -13,8 +13,9 @@ cargo test -p se-daily-agent
 |---|---|---|
 | `ANTHROPIC_API_KEY` | yes | |
 | `OPENAI_API_KEY` | yes (judge) | |
+| `GEMINI_API_KEY` | no | optional; unused by the daily run, only adds a `gemini` check to `--smoke` |
 | `GCS_BUCKET` | no | `tsvet01-agent-brain` |
-| `CLAUDE_MODEL`, `OPENAI_MODEL` | no | see `libs/llm-client` |
+| `CLAUDE_MODEL`, `OPENAI_MODEL`, `GEMINI_MODEL` | no | see `libs/llm-client` |
 | `SHADOW_MODEL` | no | when set, a second brief is generated with that model and judged pairwise against production (`eval-v3` gets `pairwise_winner`). Currently `claude-fable-5-1` in production (set by CI at deploy) |
 | `RUST_LOG` | no | `info` |
 

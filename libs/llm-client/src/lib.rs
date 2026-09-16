@@ -10,6 +10,9 @@ const MAX_RETRY_ELAPSED_SECS: u64 = 120;
 /// Default GCS bucket for storing agent data
 pub const DEFAULT_BUCKET: &str = "tsvet01-agent-brain";
 
+/// Default Gemini model (available, unused by the pipeline today)
+pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.1-pro-preview";
+
 /// Default OpenAI model (the judge)
 pub const DEFAULT_OPENAI_MODEL: &str = "gpt-6-astra";
 
@@ -20,6 +23,7 @@ pub const DEFAULT_CLAUDE_MODEL: &str = "claude-opus-5";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LlmProvider {
+    Gemini,
     OpenAI,
     Claude,
 }
@@ -27,6 +31,7 @@ pub enum LlmProvider {
 impl LlmProvider {
     pub fn as_str(&self) -> &'static str {
         match self {
+            LlmProvider::Gemini => "gemini",
             LlmProvider::OpenAI => "openai",
             LlmProvider::Claude => "claude",
         }
@@ -34,6 +39,7 @@ impl LlmProvider {
 
     pub fn display_name(&self) -> &'static str {
         match self {
+            LlmProvider::Gemini => "Gemini",
             LlmProvider::OpenAI => "OpenAI",
             LlmProvider::Claude => "Claude",
         }
@@ -42,6 +48,7 @@ impl LlmProvider {
     /// Returns the exact model name/ID used for this provider
     pub fn model_name(&self) -> &'static str {
         match self {
+            LlmProvider::Gemini => DEFAULT_GEMINI_MODEL,
             LlmProvider::OpenAI => DEFAULT_OPENAI_MODEL,
             LlmProvider::Claude => DEFAULT_CLAUDE_MODEL,
         }
@@ -83,7 +90,9 @@ pub struct SourceConfig {
 /// Options for LLM calls (system message, model override, etc.)
 #[derive(Debug, Clone, Default)]
 pub struct LlmOptions {
-    /// System message.
+    /// Temperature (0.0-2.0). Gemini only; Claude and OpenAI never send it.
+    pub temperature: Option<f32>,
+    /// System message (Claude/OpenAI). Ignored by Gemini.
     pub system: Option<String>,
     /// Per-call model override (beats env var and default).
     pub model: Option<String>,
@@ -130,6 +139,67 @@ pub fn init_logging() {
     }
 }
 
+// --- Gemini Structs ---
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GeminiPart {
+    pub text: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GeminiContent {
+    pub parts: Vec<GeminiPart>,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct GeminiGenerationConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct GeminiRequest {
+    pub contents: Vec<GeminiContent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generation_config: Option<GeminiGenerationConfig>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct GeminiCandidate {
+    pub content: GeminiContent,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct GeminiUsageMetadata {
+    #[serde(rename = "promptTokenCount", default)]
+    pub prompt_token_count: u64,
+    #[serde(rename = "candidatesTokenCount", default)]
+    pub candidates_token_count: u64,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct GeminiResponse {
+    pub candidates: Option<Vec<GeminiCandidate>>,
+    pub error: Option<GeminiError>,
+    #[serde(rename = "usageMetadata")]
+    pub usage_metadata: Option<GeminiUsageMetadata>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct GeminiError {
+    pub message: String,
+}
+
+/// Call Gemini API with exponential backoff retry for transient failures
+pub async fn call_gemini_with_retry(
+    client: &reqwest::Client,
+    api_key: &str,
+    prompt: String,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    call_llm_with_retry(client, LlmProvider::Gemini, api_key, prompt).await
+}
+
 fn is_transient_error(err: &str) -> bool {
     let transient_patterns = [
         "timeout",
@@ -172,6 +242,79 @@ fn is_transient_boxed(err: &(dyn std::error::Error + Send + Sync + 'static)) -> 
         source = cause.source();
     }
     is_transient_error(&message)
+}
+
+async fn call_gemini(
+    client: &reqwest::Client,
+    api_key: &str,
+    text: String,
+    options: &LlmOptions,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let model = resolve_model_from(
+        options.model.as_deref(),
+        std::env::var("GEMINI_MODEL").ok(),
+        DEFAULT_GEMINI_MODEL,
+    );
+
+    // Allow overriding base URL for testing
+    let base_url = std::env::var("GEMINI_BASE_URL")
+        .unwrap_or_else(|_| "https://generativelanguage.googleapis.com".to_string());
+
+    let url = format!("{}/v1beta/models/{}:generateContent", base_url, model);
+
+    let generation_config = options.temperature.map(|t| GeminiGenerationConfig {
+        temperature: Some(t),
+    });
+
+    let request = GeminiRequest {
+        contents: vec![GeminiContent {
+            parts: vec![GeminiPart { text }],
+        }],
+        generation_config,
+    };
+
+    debug!("Sending request to Gemini API");
+
+    let res = client
+        .post(&url)
+        .header("x-goog-api-key", api_key)
+        .json(&request)
+        .send()
+        .await?;
+
+    let status = res.status();
+    debug!(status = %status, "Gemini API response received");
+
+    if !status.is_success() {
+        let error_body = res.text().await.unwrap_or_default();
+        return Err(format!("Gemini API returned {}: {}", status, error_body).into());
+    }
+
+    let resp: GeminiResponse = res.json().await?;
+
+    if let Some(error) = resp.error {
+        return Err(format!("Gemini API Error: {}", error.message).into());
+    }
+
+    if let Some(usage) = &resp.usage_metadata {
+        info!(
+            provider = "gemini",
+            model = %model,
+            input_tokens = usage.prompt_token_count,
+            output_tokens = usage.candidates_token_count,
+            "LLM usage"
+        );
+    }
+
+    if let Some(candidates) = resp.candidates {
+        if let Some(first) = candidates.first() {
+            if let Some(part) = first.content.parts.first() {
+                return Ok(part.text.clone());
+            }
+        }
+    }
+
+    Err("No content returned from Gemini".into())
 }
 
 // --- OpenAI API ---
@@ -486,6 +629,7 @@ pub async fn call_llm(
 
         async move {
             let result = match provider {
+                LlmProvider::Gemini => call_gemini(&client, &api_key, prompt, &options).await,
                 LlmProvider::OpenAI => call_openai(&client, &api_key, prompt, &options).await,
                 LlmProvider::Claude => call_claude(&client, &api_key, prompt, &options).await,
             };
@@ -509,6 +653,7 @@ pub async fn call_llm(
 /// Get the API key environment variable name for a provider
 pub fn get_api_key_env_var(provider: LlmProvider) -> &'static str {
     match provider {
+        LlmProvider::Gemini => "GEMINI_API_KEY",
         LlmProvider::OpenAI => "OPENAI_API_KEY",
         LlmProvider::Claude => "ANTHROPIC_API_KEY",
     }
@@ -517,6 +662,7 @@ pub fn get_api_key_env_var(provider: LlmProvider) -> &'static str {
 /// Get the model environment variable name for a provider
 pub fn get_model_env_var(provider: LlmProvider) -> &'static str {
     match provider {
+        LlmProvider::Gemini => "GEMINI_MODEL",
         LlmProvider::OpenAI => "OPENAI_MODEL",
         LlmProvider::Claude => "CLAUDE_MODEL",
     }
@@ -571,6 +717,15 @@ mod tests {
         let usage = resp.usage.unwrap();
         assert_eq!(usage.prompt_tokens, 10);
         assert_eq!(usage.completion_tokens, 5);
+    }
+
+    #[test]
+    fn test_gemini_response_parses_usage_metadata() {
+        let json = r#"{"candidates":[{"content":{"parts":[{"text":"hi"}]}}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}"#;
+        let resp: GeminiResponse = serde_json::from_str(json).unwrap();
+        let usage = resp.usage_metadata.unwrap();
+        assert_eq!(usage.prompt_token_count, 10);
+        assert_eq!(usage.candidates_token_count, 5);
     }
 
     #[test]
@@ -662,6 +817,66 @@ mod tests {
     }
 
     #[test]
+    fn test_gemini_request_serialization() {
+        let request = GeminiRequest {
+            contents: vec![GeminiContent {
+                parts: vec![GeminiPart {
+                    text: "Hello, Gemini!".to_string(),
+                }],
+            }],
+            generation_config: None,
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("Hello, Gemini!"));
+        assert!(json.contains("contents"));
+        assert!(json.contains("parts"));
+        assert!(json.contains("text"));
+    }
+
+    #[test]
+    fn test_gemini_response_deserialization_success() {
+        let json = r#"{
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": "Hello from Gemini!"}]
+                }
+            }]
+        }"#;
+
+        let response: GeminiResponse = serde_json::from_str(json).unwrap();
+        assert!(response.candidates.is_some());
+        assert!(response.error.is_none());
+
+        let candidates = response.candidates.unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].content.parts[0].text, "Hello from Gemini!");
+    }
+
+    #[test]
+    fn test_gemini_response_deserialization_error() {
+        let json = r#"{
+            "error": {
+                "message": "API key invalid"
+            }
+        }"#;
+
+        let response: GeminiResponse = serde_json::from_str(json).unwrap();
+        assert!(response.candidates.is_none());
+        assert!(response.error.is_some());
+        assert_eq!(response.error.unwrap().message, "API key invalid");
+    }
+
+    #[test]
+    fn test_gemini_response_deserialization_empty() {
+        let json = r#"{}"#;
+
+        let response: GeminiResponse = serde_json::from_str(json).unwrap();
+        assert!(response.candidates.is_none());
+        assert!(response.error.is_none());
+    }
+
+    #[test]
     fn test_extract_domain_valid_url() {
         assert_eq!(extract_domain("https://example.com/path"), "example.com");
         assert_eq!(
@@ -721,18 +936,21 @@ mod tests {
 
     #[test]
     fn test_llm_provider_as_str() {
+        assert_eq!(LlmProvider::Gemini.as_str(), "gemini");
         assert_eq!(LlmProvider::OpenAI.as_str(), "openai");
         assert_eq!(LlmProvider::Claude.as_str(), "claude");
     }
 
     #[test]
     fn test_llm_provider_display_name() {
+        assert_eq!(LlmProvider::Gemini.display_name(), "Gemini");
         assert_eq!(LlmProvider::OpenAI.display_name(), "OpenAI");
         assert_eq!(LlmProvider::Claude.display_name(), "Claude");
     }
 
     #[test]
     fn test_llm_provider_model_name() {
+        assert_eq!(LlmProvider::Gemini.model_name(), DEFAULT_GEMINI_MODEL);
         assert_eq!(LlmProvider::OpenAI.model_name(), DEFAULT_OPENAI_MODEL);
         assert_eq!(LlmProvider::Claude.model_name(), DEFAULT_CLAUDE_MODEL);
     }
@@ -749,6 +967,7 @@ mod tests {
     #[test]
     fn test_llm_provider_serde_all_variants() {
         for (json_str, expected) in [
+            (r#""gemini""#, LlmProvider::Gemini),
             (r#""openai""#, LlmProvider::OpenAI),
             (r#""claude""#, LlmProvider::Claude),
         ] {
@@ -759,6 +978,7 @@ mod tests {
 
     #[test]
     fn test_get_api_key_env_var() {
+        assert_eq!(get_api_key_env_var(LlmProvider::Gemini), "GEMINI_API_KEY");
         assert_eq!(get_api_key_env_var(LlmProvider::OpenAI), "OPENAI_API_KEY");
         assert_eq!(
             get_api_key_env_var(LlmProvider::Claude),
@@ -768,6 +988,7 @@ mod tests {
 
     #[test]
     fn test_get_model_env_var() {
+        assert_eq!(get_model_env_var(LlmProvider::Gemini), "GEMINI_MODEL");
         assert_eq!(get_model_env_var(LlmProvider::OpenAI), "OPENAI_MODEL");
         assert_eq!(get_model_env_var(LlmProvider::Claude), "CLAUDE_MODEL");
     }
@@ -796,6 +1017,7 @@ mod tests {
     #[test]
     fn test_openai_request_with_effort_system_and_cap() {
         let options = LlmOptions {
+            temperature: Some(0.3),
             system: Some("Be terse.".to_string()),
             effort: Some("medium".to_string()),
             max_tokens: Some(8000),
@@ -864,6 +1086,20 @@ mod tests {
         // system and temperature should be omitted when None
         assert!(!json.contains("system"));
         assert!(!json.contains("temperature"));
+    }
+
+    #[test]
+    fn test_claude_request_never_sends_temperature() {
+        // Regression: Opus 4.7+ rejects `temperature` with a 400. It must never
+        // be serialized for Claude even when a caller sets one.
+        let options = LlmOptions {
+            temperature: Some(0.3),
+            ..Default::default()
+        };
+        let request =
+            build_claude_request("claude-opus-4-8".to_string(), "Hi".to_string(), &options);
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(!json.contains("temperature"), "{json}");
     }
 
     #[test]
@@ -958,7 +1194,8 @@ mod tests {
 
     // --- call_llm retry behaviour (wiremock) ---
     //
-    // #[serial] because CLAUDE_BASE_URL / OPENAI_BASE_URL are process-global.
+    // #[serial] because CLAUDE_BASE_URL / OPENAI_BASE_URL / GEMINI_BASE_URL are
+    // process-global.
 
     fn claude_ok_body() -> serde_json::Value {
         serde_json::json!({"content": [{"type": "text", "text": "OK"}]})
@@ -1156,6 +1393,76 @@ mod tests {
         )
         .await;
         unsafe { std::env::remove_var("OPENAI_BASE_URL") };
+
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("400"), "{err}");
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_call_llm_gemini_sends_temperature_and_parses_candidate() {
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1beta/models/gemini-test-model:generateContent"))
+            .and(header("x-goog-api-key", "key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "candidates": [{"content": {"parts": [{"text": "OK"}]}}],
+                "usageMetadata": {"promptTokenCount": 7, "candidatesTokenCount": 1}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let options = LlmOptions {
+            model: Some("gemini-test-model".to_string()),
+            temperature: Some(0.3),
+            ..Default::default()
+        };
+        unsafe { std::env::set_var("GEMINI_BASE_URL", server.uri()) };
+        let result = call_llm(
+            &reqwest::Client::new(),
+            LlmProvider::Gemini,
+            "key",
+            "hi".to_string(),
+            &options,
+        )
+        .await;
+        unsafe { std::env::remove_var("GEMINI_BASE_URL") };
+
+        assert_eq!(result.unwrap(), "OK");
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body["contents"][0]["parts"][0]["text"], "hi");
+        assert_eq!(body["generationConfig"]["temperature"], 0.3);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_call_llm_gemini_gives_up_on_400() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("bad request"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        unsafe { std::env::set_var("GEMINI_BASE_URL", server.uri()) };
+        let result = call_llm(
+            &reqwest::Client::new(),
+            LlmProvider::Gemini,
+            "key",
+            "hi".to_string(),
+            &opts_with_model("gemini-test-model"),
+        )
+        .await;
+        unsafe { std::env::remove_var("GEMINI_BASE_URL") };
 
         let err = result.unwrap_err().to_string();
         assert!(err.contains("400"), "{err}");

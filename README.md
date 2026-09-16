@@ -25,7 +25,7 @@ Multi-user with interest feeds: Supabase for identity, `apps/pulse-api` (Rust/ax
 
 | Path | What |
 |---|---|
-| `libs/llm-client` | Claude/OpenAI client: retries, usage logging |
+| `libs/llm-client` | Claude/OpenAI/Gemini client: retries, usage logging (pipeline uses Claude + OpenAI) |
 | `libs/pulse-core` | Contract types; fixtures in `docs/contracts/` (CI drift guard) |
 | `apps/daily-agent`, `apps/explorer-agent` | Pipeline jobs |
 | `apps/pulse-api` | API (`/healthz`, sqlx migrations) |
