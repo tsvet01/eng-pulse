@@ -41,7 +41,9 @@ impl FromRequestParts<AppState> for Identity {
     }
 }
 
-/// A registered user. Links a new identity when the verified email already has an account.
+/// A registered user: the token's (issuer, subject) must already be a known identity.
+///
+/// No automatic account linking: identity claims are user-controlled.
 pub struct AuthUser {
     pub id: Uuid,
     pub email: String,
@@ -54,23 +56,9 @@ impl FromRequestParts<AppState> for AuthUser {
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, ApiError> {
         let Identity(claims) = Identity::from_request_parts(parts, state).await?;
-        let user: User =
-            match users::find_by_identity(&state.pool, &claims.iss, &claims.sub).await? {
-                Some(u) => u,
-                None => {
-                    let linked = match claims.email_lower() {
-                        Some(email) if claims.email_verified() => {
-                            users::find_by_email(&state.pool, &email).await?
-                        }
-                        _ => None,
-                    };
-                    let Some(u) = linked else {
-                        return Err(ApiError::InviteRequired);
-                    };
-                    users::link_identity(&state.pool, u.id, &claims.iss, &claims.sub).await?;
-                    u
-                }
-            };
+        let user: User = users::find_by_identity(&state.pool, &claims.iss, &claims.sub)
+            .await?
+            .ok_or(ApiError::InviteRequired)?;
         Ok(AuthUser {
             id: user.id,
             email: user.email,

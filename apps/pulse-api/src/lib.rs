@@ -35,9 +35,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return seed::run(&pool, &args[1..]).await.map_err(Into::into);
     }
 
+    // Bounded: a refresh holds a lock every request needing a key waits on.
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()?;
     let jwks = Arc::new(auth::jwks::JwksCache::new(
         cfg.supabase_jwks_url.clone(),
-        reqwest::Client::new(),
+        http,
     ));
     let state = state::AppState {
         pool,

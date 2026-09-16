@@ -23,16 +23,6 @@ pub async fn find_by_email(pool: &PgPool, email: &str) -> sqlx::Result<Option<Us
         .bind(email).fetch_optional(pool).await
 }
 
-pub async fn link_identity(
-    pool: &PgPool,
-    user_id: Uuid,
-    issuer: &str,
-    subject: &str,
-) -> sqlx::Result<()> {
-    sqlx::query("insert into identities (user_id, issuer, subject) values ($1, $2, $3) on conflict do nothing")
-        .bind(user_id).bind(issuer).bind(subject).execute(pool).await.map(|_| ())
-}
-
 pub async fn insert_user(
     tx: &mut Transaction<'_, Postgres>,
     email: &str,

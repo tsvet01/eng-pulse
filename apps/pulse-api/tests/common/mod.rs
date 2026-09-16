@@ -8,7 +8,7 @@ use http_body_util::BodyExt;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use pulse_api::{auth::jwks::JwksCache, config::Config, routes, state::AppState};
 use sqlx::PgPool;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tower::ServiceExt;
 use wiremock::{
     matchers::{method, path},
@@ -35,7 +35,11 @@ pub fn test_config(jwks_url: &str) -> Config {
 
 pub fn app(pool: PgPool, jwks_url: &str) -> Router {
     let cfg = Arc::new(test_config(jwks_url));
-    let jwks = Arc::new(JwksCache::new(jwks_url.to_string(), reqwest::Client::new()));
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let jwks = Arc::new(JwksCache::new(jwks_url.to_string(), http));
     routes::router(AppState { pool, cfg, jwks })
 }
 
@@ -101,7 +105,8 @@ pub struct TokenOpts {
     pub verified: bool,
     pub exp_offset_secs: i64,
     pub kid: String,
-    pub aud: String,
+    /// `None` omits the claim entirely.
+    pub aud: Option<String>,
     pub iss: String,
 }
 
@@ -113,7 +118,7 @@ impl Default for TokenOpts {
             verified: true,
             exp_offset_secs: 3600,
             kid: TEST_KID.into(),
-            aud: "authenticated".into(),
+            aud: Some("authenticated".into()),
             iss: ISSUER.into(),
         }
     }
@@ -121,10 +126,13 @@ impl Default for TokenOpts {
 
 pub fn token(o: TokenOpts) -> String {
     let now = chrono::Utc::now().timestamp();
-    let claims = serde_json::json!({
-        "sub": o.sub, "iss": o.iss, "aud": o.aud, "exp": now + o.exp_offset_secs, "iat": now,
+    let mut claims = serde_json::json!({
+        "sub": o.sub, "iss": o.iss, "exp": now + o.exp_offset_secs, "iat": now,
         "email": o.email, "user_metadata": {"email_verified": o.verified}, "role": "authenticated"
     });
+    if let Some(aud) = o.aud {
+        claims["aud"] = serde_json::Value::String(aud);
+    }
     let mut header = Header::new(Algorithm::ES256);
     header.kid = Some(o.kid);
     encode(

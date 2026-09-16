@@ -34,7 +34,7 @@ async fn wrong_issuer_or_audience_is_401(pool: PgPool) {
             ..Default::default()
         }),
         token(TokenOpts {
-            aud: "anon".into(),
+            aud: Some("anon".into()),
             ..Default::default()
         }),
     ] {
@@ -83,47 +83,51 @@ async fn registered_user_gets_me(pool: PgPool) {
     assert_eq!(body["is_admin"], false);
 }
 
+/// `email_verified` is user-controlled, so a matching email must never attach a new
+/// identity to an existing account.
 #[sqlx::test]
-async fn verified_email_links_new_identity(pool: PgPool) {
+async fn existing_email_from_new_provider_is_invite_required(pool: PgPool) {
     let (_s, url) = jwks_mock().await;
     let (id, _) = registered_user(&pool, "link@example.com", false).await;
     let app = app(pool.clone(), &url);
-    let second = user_token("second-provider-sub", "link@example.com");
+    let second = token(TokenOpts {
+        sub: "second-provider-sub".into(),
+        email: Some("link@example.com".into()),
+        verified: true,
+        ..Default::default()
+    });
     let (status, body) = send(&app, Method::GET, "/v1/me", Some(&second), None).await;
-    assert_eq!(status, 200);
-    assert_eq!(body["id"], id.to_string());
+    assert_eq!(status, 403);
+    assert_eq!(body["error"], "invite_required");
     let n: i64 = sqlx::query_scalar("select count(*) from identities where user_id = $1")
         .bind(id)
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(n, 2);
+    assert_eq!(n, 1);
 }
 
+/// `find_by_email` backs Task 4 sign-up; a text-bound parameter would compare
+/// case-sensitively and defeat the citext column.
 #[sqlx::test]
-async fn email_match_is_case_insensitive(pool: PgPool) {
-    let (_s, url) = jwks_mock().await;
+async fn find_by_email_is_case_insensitive(pool: PgPool) {
     let (id, _) = registered_user(&pool, "Mixed.Case@Example.com", false).await;
-    let app = app(pool, &url);
-    let t = user_token("case-sub", "mixed.case@example.com");
-    let (status, body) = send(&app, Method::GET, "/v1/me", Some(&t), None).await;
-    assert_eq!(status, 200);
-    assert_eq!(body["id"], id.to_string());
+    let found = pulse_api::db::users::find_by_email(&pool, "mixed.case@example.com")
+        .await
+        .unwrap();
+    assert_eq!(found.map(|u| u.id), Some(id));
 }
 
 #[sqlx::test]
-async fn unverified_email_does_not_link(pool: PgPool) {
+async fn token_without_aud_is_401(pool: PgPool) {
     let (_s, url) = jwks_mock().await;
-    registered_user(&pool, "nolink@example.com", false).await;
     let app = app(pool, &url);
     let t = token(TokenOpts {
-        sub: "x".into(),
-        email: Some("nolink@example.com".into()),
-        verified: false,
+        aud: None,
         ..Default::default()
     });
     let (status, _) = send(&app, Method::GET, "/v1/me", Some(&t), None).await;
-    assert_eq!(status, 403);
+    assert_eq!(status, 401);
 }
 
 #[sqlx::test]

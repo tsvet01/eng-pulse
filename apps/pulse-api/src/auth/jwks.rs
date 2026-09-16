@@ -32,6 +32,9 @@ impl JwksCache {
         if last.map(|t| t.elapsed() < MIN_REFRESH).unwrap_or(false) {
             return Ok(());
         }
+        // Stamp the attempt, not the success, so a failing issuer is retried at most once
+        // per MIN_REFRESH instead of on every request.
+        *last = Some(Instant::now());
         let set: JwkSet = self
             .http
             .get(&self.url)
@@ -57,7 +60,6 @@ impl JwksCache {
             }
         }
         *self.keys.write().await = keys;
-        *last = Some(Instant::now());
         Ok(())
     }
 
@@ -88,6 +90,8 @@ impl JwksCache {
         let mut v = Validation::new(alg);
         v.set_issuer(&[issuer]);
         v.set_audience(&[audience]);
+        // Required, not just checked-if-present: a token omitting aud/iss must not pass.
+        v.set_required_spec_claims(&["exp", "aud", "iss"]);
         v.validate_exp = true;
         v.leeway = 0; // expiry is exact; clients refresh rather than lean on skew
         decode::<Claims>(token, &key, &v)
