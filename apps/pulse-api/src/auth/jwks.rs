@@ -1,4 +1,4 @@
-// Placeholder until Task 3 fills in JWKS fetching and caching.
+// Placeholder.
 pub struct JwksCache;
 
 impl JwksCache {

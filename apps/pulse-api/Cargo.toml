@@ -14,7 +14,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 dotenvy = "0.15"
 pulse-core = { path = "../../libs/pulse-core" }
 jsonwebtoken = "10"
-reqwest = { version = "0.13", features = ["json", "rustls", "webpki-roots"], default-features = false }
+reqwest = { version = "0.13", features = ["json", "rustls"], default-features = false }
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 tower-http = { version = "0.6", features = ["trace"] }

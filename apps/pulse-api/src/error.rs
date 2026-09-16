@@ -1,4 +1,4 @@
-// Not yet used outside tests; wired into handlers starting Task 2.
+// Not yet used outside tests; wired into handlers later.
 #![allow(dead_code)]
 
 use axum::{
