@@ -7,6 +7,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::time::Duration;
 use uuid::Uuid;
 
 pub fn routes() -> Router<AppState> {
@@ -164,7 +165,13 @@ async fn add_source(
     Json(b): Json<SourceBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     require_member(&s, &user, id).await?;
-    let kind = feedcheck::validate_feed_url(&reqwest::Client::new(), b.url.trim())
+    // No redirects: a 3xx could repoint the fetch at an internal address post-check.
+    let http = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let kind = feedcheck::validate_feed_url(&http, b.url.trim())
         .await
         .map_err(ApiError::BadRequest)?;
     feeds::add_source(

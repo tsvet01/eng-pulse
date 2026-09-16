@@ -170,3 +170,34 @@ async fn topics_and_sources_require_membership(pool: PgPool) {
     .await;
     assert_eq!(status, 204);
 }
+
+#[sqlx::test]
+async fn private_feed_urls_are_rejected(pool: PgPool) {
+    let (_s, url) = jwks_mock().await;
+    let (_, owner) = registered_user(&pool, "o@example.com", false).await;
+    let app = app(pool, &url);
+    let (_, body) = send(
+        &app,
+        Method::POST,
+        "/v1/feeds",
+        Some(&owner),
+        Some(json!({"slug": "priv", "name": "Priv"})),
+    )
+    .await;
+    let id = body["id"].as_str().unwrap().to_string();
+    for target in [
+        "http://169.254.169.254/latest/meta-data",
+        "http://10.0.0.1/feed",
+    ] {
+        let (status, body) = send(
+            &app,
+            Method::POST,
+            &format!("/v1/feeds/{id}/sources"),
+            Some(&owner),
+            Some(json!({"url": target})),
+        )
+        .await;
+        assert_eq!(status, 422);
+        assert_eq!(body["message"], "URL must resolve to a public address");
+    }
+}
