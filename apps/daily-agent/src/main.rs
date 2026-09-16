@@ -142,23 +142,35 @@ fn build_recent_picks_context(manifest: &[ManifestEntry], max_days: usize) -> Op
     Some(context)
 }
 
-/// API keys the pipeline needs: Claude writes the brief, Gemini judges it.
+/// API keys the pipeline needs: Claude writes the brief, OpenAI judges it.
+/// Gemini is optional and unused by the daily run; when present it is only
+/// exercised by `--smoke`.
 #[derive(Debug, Clone, PartialEq)]
 struct ApiKeys {
     claude: String,
-    gemini: String,
+    openai: String,
+    gemini: Option<String>,
 }
 
-/// Both keys are required; an empty value counts as missing.
-fn api_keys_from(claude: Option<String>, gemini: Option<String>) -> Result<ApiKeys, String> {
+/// Claude and OpenAI keys are required; an empty value counts as missing.
+fn api_keys_from(
+    claude: Option<String>,
+    openai: Option<String>,
+    gemini: Option<String>,
+) -> Result<ApiKeys, String> {
     let claude = claude.filter(|k| !k.is_empty());
+    let openai = openai.filter(|k| !k.is_empty());
     let gemini = gemini.filter(|k| !k.is_empty());
-    match (claude, gemini) {
-        (Some(claude), Some(gemini)) => Ok(ApiKeys { claude, gemini }),
-        (claude, gemini) => {
+    match (claude, openai) {
+        (Some(claude), Some(openai)) => Ok(ApiKeys {
+            claude,
+            openai,
+            gemini,
+        }),
+        (claude, openai) => {
             let missing: Vec<&str> = [
                 (claude.is_none(), LlmProvider::Claude),
-                (gemini.is_none(), LlmProvider::Gemini),
+                (openai.is_none(), LlmProvider::OpenAI),
             ]
             .into_iter()
             .filter(|(missing, _)| *missing)
@@ -175,6 +187,7 @@ fn api_keys_from(claude: Option<String>, gemini: Option<String>) -> Result<ApiKe
 fn load_api_keys() -> Result<ApiKeys, String> {
     api_keys_from(
         std::env::var(get_api_key_env_var(LlmProvider::Claude)).ok(),
+        std::env::var(get_api_key_env_var(LlmProvider::OpenAI)).ok(),
         std::env::var(get_api_key_env_var(LlmProvider::Gemini)).ok(),
     )
 }
@@ -193,13 +206,18 @@ async fn run_smoke(
     let shadow = shadow_model();
     let checks = [
         (LlmProvider::Claude, keys.claude.as_str(), None),
-        (LlmProvider::Gemini, keys.gemini.as_str(), None),
+        (LlmProvider::OpenAI, keys.openai.as_str(), None),
     ]
     .into_iter()
     .chain(
         shadow
             .as_deref()
             .map(|m| (LlmProvider::Claude, keys.claude.as_str(), Some(m))),
+    )
+    .chain(
+        keys.gemini
+            .as_deref()
+            .map(|k| (LlmProvider::Gemini, k, None)),
     );
 
     let mut failures = Vec::new();
@@ -439,10 +457,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         articles_text.push_str(&format!("{}. [{}] {}\n", i, article.source, article.title));
     }
 
-    let selection_opts = LlmOptions {
-        temperature: Some(0.3),
-        ..Default::default()
-    };
+    let selection_opts = LlmOptions::default();
 
     // Phase 1: Shortlist top 5 from headlines
     let shortlist_prompt = prompts::shortlist_prompt_with_context(
@@ -563,10 +578,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!("Generating V3 Insight Brief");
     let v3_prompt =
         prompts::summary_prompt(&best_article.source, &best_article.title, &truncated_text);
-    let v3_options = LlmOptions {
-        temperature: Some(0.3),
-        ..Default::default()
-    };
+    let v3_options = LlmOptions::default();
     let response = call_llm(
         &http_client,
         LlmProvider::Claude,
@@ -657,8 +669,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     // --- Eval ---
-    // Gemini judges to avoid self-preference bias (Claude judging Claude).
-    info!(provider = "gemini", "Starting eval stage");
+    // A non-Claude judge avoids self-preference bias (Claude judging Claude).
+    info!(provider = "openai", "Starting eval stage");
     let v3_eval_prompt = String::from(
         "You are evaluating Insight Brief summaries for a senior engineering leader (C++/Rust, hedge fund, low-latency systems).\n\n\
         Score each summary on these criteria (1-5 scale):\n\
@@ -682,8 +694,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     if let Some(json) = run_eval_pass(
         &http_client,
-        LlmProvider::Gemini,
-        &keys.gemini,
+        LlmProvider::OpenAI,
+        &keys.openai,
         format!(
             "{}{}{}",
             v3_eval_prompt,
@@ -816,7 +828,7 @@ mod tests {
 
     #[test]
     fn test_parse_selection_index_with_text() {
-        // Gemini sometimes returns text before/after the number
+        // The judge sometimes returns text before/after the number
         assert_eq!(parse_selection_index("I choose 5"), Some(5));
         assert_eq!(parse_selection_index("Article 3 is best"), Some(3));
         assert_eq!(parse_selection_index("The answer is: 7."), Some(7));
@@ -896,34 +908,53 @@ mod tests {
 
     #[test]
     fn test_api_keys_from_both_present() {
-        let keys = api_keys_from(Some("c".to_string()), Some("g".to_string())).unwrap();
+        let keys = api_keys_from(Some("c".to_string()), Some("g".to_string()), None).unwrap();
         assert_eq!(
             keys,
             ApiKeys {
                 claude: "c".to_string(),
-                gemini: "g".to_string()
+                openai: "g".to_string(),
+                gemini: None,
             }
         );
     }
 
     #[test]
-    fn test_api_keys_from_missing_gemini_fails() {
-        let err = api_keys_from(Some("c".to_string()), None).unwrap_err();
-        assert!(err.contains("GEMINI_API_KEY"), "{err}");
+    fn test_api_keys_from_gemini_is_optional() {
+        let keys = api_keys_from(
+            Some("c".to_string()),
+            Some("o".to_string()),
+            Some("g".to_string()),
+        )
+        .unwrap();
+        assert_eq!(keys.gemini.as_deref(), Some("g"));
+        let keys = api_keys_from(
+            Some("c".to_string()),
+            Some("o".to_string()),
+            Some(String::new()),
+        )
+        .unwrap();
+        assert_eq!(keys.gemini, None);
+    }
+
+    #[test]
+    fn test_api_keys_from_missing_openai_fails() {
+        let err = api_keys_from(Some("c".to_string()), None, None).unwrap_err();
+        assert!(err.contains("OPENAI_API_KEY"), "{err}");
         assert!(!err.contains("ANTHROPIC_API_KEY"), "{err}");
     }
 
     #[test]
     fn test_api_keys_from_empty_claude_counts_as_missing() {
-        let err = api_keys_from(Some(String::new()), Some("g".to_string())).unwrap_err();
+        let err = api_keys_from(Some(String::new()), Some("g".to_string()), None).unwrap_err();
         assert!(err.contains("ANTHROPIC_API_KEY"), "{err}");
     }
 
     #[test]
     fn test_api_keys_from_both_missing_names_both() {
-        let err = api_keys_from(None, None).unwrap_err();
+        let err = api_keys_from(None, None, None).unwrap_err();
         assert!(err.contains("ANTHROPIC_API_KEY"), "{err}");
-        assert!(err.contains("GEMINI_API_KEY"), "{err}");
+        assert!(err.contains("OPENAI_API_KEY"), "{err}");
     }
 
     // --- Insight Brief parsing ---
@@ -1023,17 +1054,18 @@ mod tests {
     fn test_keys() -> ApiKeys {
         ApiKeys {
             claude: "test-claude-key".to_string(),
-            gemini: "test-gemini-key".to_string(),
+            openai: "test-openai-key".to_string(),
+            gemini: None,
         }
     }
 
-    async fn mount_gemini_ok(server: &wiremock::MockServer) {
-        use wiremock::matchers::{method, path_regex};
+    async fn mount_openai_ok(server: &wiremock::MockServer) {
+        use wiremock::matchers::{method, path};
         use wiremock::{Mock, ResponseTemplate};
         Mock::given(method("POST"))
-            .and(path_regex(r"^/v1beta/models/.*:generateContent$"))
+            .and(path("/chat/completions"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "candidates": [{"content": {"parts": [{"text": "OK"}]}}]
+                "choices": [{"message": {"content": "OK"}}]
             })))
             .mount(server)
             .await;
@@ -1046,7 +1078,7 @@ mod tests {
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
-        mount_gemini_ok(&mock_server).await;
+        mount_openai_ok(&mock_server).await;
 
         // Prod smoke call (default model, no override) succeeds.
         Mock::given(method("POST"))
@@ -1077,7 +1109,7 @@ mod tests {
 
         unsafe {
             std::env::set_var("CLAUDE_BASE_URL", mock_server.uri());
-            std::env::set_var("GEMINI_BASE_URL", mock_server.uri());
+            std::env::set_var("OPENAI_BASE_URL", mock_server.uri());
             std::env::set_var("SHADOW_MODEL", "claude-bad-shadow");
         }
 
@@ -1085,7 +1117,7 @@ mod tests {
 
         unsafe {
             std::env::remove_var("CLAUDE_BASE_URL");
-            std::env::remove_var("GEMINI_BASE_URL");
+            std::env::remove_var("OPENAI_BASE_URL");
             std::env::remove_var("SHADOW_MODEL");
         }
 
@@ -1095,18 +1127,58 @@ mod tests {
             "error should name the shadow model, got: {err}"
         );
         assert!(
-            !err.to_string().contains("gemini:"),
-            "gemini check should have passed, got: {err}"
+            !err.to_string().contains("openai:"),
+            "openai check should have passed, got: {err}"
         );
     }
 
     #[tokio::test]
     #[serial]
-    async fn test_run_smoke_fails_when_gemini_rejects() {
+    async fn test_run_smoke_fails_when_openai_rejects() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "content": [{"text": "OK"}]
+            })))
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+                "error": {"message": "Incorrect API key provided"}
+            })))
+            .mount(&mock_server)
+            .await;
+
+        unsafe {
+            std::env::set_var("CLAUDE_BASE_URL", mock_server.uri());
+            std::env::set_var("OPENAI_BASE_URL", mock_server.uri());
+            std::env::remove_var("SHADOW_MODEL");
+        }
+
+        let result = run_smoke(&reqwest::Client::new(), &test_keys()).await;
+
+        unsafe {
+            std::env::remove_var("CLAUDE_BASE_URL");
+            std::env::remove_var("OPENAI_BASE_URL");
+        }
+
+        let err = result.expect_err("a failing OpenAI smoke call must fail the gate");
+        assert!(err.to_string().contains("openai:"), "{err}");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_run_smoke_checks_gemini_only_when_key_is_set() {
         use wiremock::matchers::{method, path, path_regex};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
+        mount_openai_ok(&mock_server).await;
         Mock::given(method("POST"))
             .and(path("/messages"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -1124,18 +1196,31 @@ mod tests {
 
         unsafe {
             std::env::set_var("CLAUDE_BASE_URL", mock_server.uri());
+            std::env::set_var("OPENAI_BASE_URL", mock_server.uri());
             std::env::set_var("GEMINI_BASE_URL", mock_server.uri());
             std::env::remove_var("SHADOW_MODEL");
         }
 
-        let result = run_smoke(&reqwest::Client::new(), &test_keys()).await;
+        // No Gemini key: the failing Gemini mock is never called.
+        let without = run_smoke(&reqwest::Client::new(), &test_keys()).await;
+        // With a key: the gemini check runs and its failure fails the gate.
+        let with = run_smoke(
+            &reqwest::Client::new(),
+            &ApiKeys {
+                gemini: Some("test-gemini-key".to_string()),
+                ..test_keys()
+            },
+        )
+        .await;
 
         unsafe {
             std::env::remove_var("CLAUDE_BASE_URL");
+            std::env::remove_var("OPENAI_BASE_URL");
             std::env::remove_var("GEMINI_BASE_URL");
         }
 
-        let err = result.expect_err("a failing Gemini smoke call must fail the gate");
+        assert!(without.is_ok(), "{without:?}");
+        let err = with.expect_err("a failing Gemini smoke call must fail the gate");
         assert!(err.to_string().contains("gemini:"), "{err}");
     }
 
@@ -1146,7 +1231,7 @@ mod tests {
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
-        mount_gemini_ok(&mock_server).await;
+        mount_openai_ok(&mock_server).await;
 
         Mock::given(method("POST"))
             .and(path("/messages"))
@@ -1158,7 +1243,7 @@ mod tests {
 
         unsafe {
             std::env::set_var("CLAUDE_BASE_URL", mock_server.uri());
-            std::env::set_var("GEMINI_BASE_URL", mock_server.uri());
+            std::env::set_var("OPENAI_BASE_URL", mock_server.uri());
             std::env::set_var("SHADOW_MODEL", "claude-opus-5");
         }
 
@@ -1166,7 +1251,7 @@ mod tests {
 
         unsafe {
             std::env::remove_var("CLAUDE_BASE_URL");
-            std::env::remove_var("GEMINI_BASE_URL");
+            std::env::remove_var("OPENAI_BASE_URL");
             std::env::remove_var("SHADOW_MODEL");
         }
 

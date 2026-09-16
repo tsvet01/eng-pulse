@@ -8,11 +8,11 @@ One engineering article a day, turned into an Insight Brief, delivered to an iOS
 
 ```
 sources.json ─▶ daily-agent (06:00 UTC, Cloud Run Job) ─▶ GCS bucket ─▶ iOS app / email / APNs
-                  select (Claude) · brief (Claude Opus 5) · judge (Gemini)
+                  select (Claude) · brief (Claude Opus 5) · judge (GPT-6 Astra)
 explorer-agent (weekly) ─▶ sources.json
 ```
 
-- **daily-agent** picks one article (headline shortlist, then full-text pick), writes `summaries/v3/<date>.json` (Insight Brief), scores it with a Gemini judge into `eval-v3/<date>.json`, and appends one entry to `manifest.json`.
+- **daily-agent** picks one article (headline shortlist, then full-text pick), writes `summaries/v3/<date>.json` (Insight Brief), scores it with a GPT-6 Astra judge into `eval-v3/<date>.json`, and appends one entry to `manifest.json`.
 - **explorer-agent** validates candidate feeds (`config/user_candidates.json`), drops stale sources, asks the model for new ones.
 - **functions/** (Python, Cloud Functions): email notifier, APNs/FCM token registration, feedback receiver.
 - **apps/mobile-swift** reads `manifest.json` from the public bucket `tsvet01-agent-brain`.
@@ -25,7 +25,7 @@ Multi-user with interest feeds: Supabase for identity, `apps/pulse-api` (Rust/ax
 
 | Path | What |
 |---|---|
-| `libs/llm-client` | Claude/Gemini client: retries, usage logging |
+| `libs/llm-client` | Claude/OpenAI/Gemini client: retries, usage logging (pipeline uses Claude + OpenAI) |
 | `libs/pulse-core` | Contract types; fixtures in `docs/contracts/` (CI drift guard) |
 | `apps/daily-agent`, `apps/explorer-agent` | Pipeline jobs |
 | `apps/pulse-api` | API (`/healthz`, sqlx migrations) |
@@ -44,7 +44,7 @@ cargo test --workspace
 for f in notifier apns-notifier fcm-tokens; do (cd functions/$f && python -m pytest test_main.py -q); done
 ```
 
-Run the pipeline locally with `ANTHROPIC_API_KEY` and `GEMINI_API_KEY` set: `cargo run -p daily-agent -- --smoke` checks both providers without side effects; `cargo run -p daily-agent` does a real run against `GCS_BUCKET` (default `tsvet01-agent-brain`). The API: start Postgres 18, then `DATABASE_URL=postgres://pulse:pulse@localhost:5432/pulse cargo run -p pulse-api`.
+Run the pipeline locally with `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` set: `cargo run -p se-daily-agent -- --smoke` checks both providers without side effects; `cargo run -p se-daily-agent` does a real run against `GCS_BUCKET` (default `tsvet01-agent-brain`). The API: start Postgres 18, then `DATABASE_URL=postgres://pulse:pulse@localhost:5432/pulse cargo run -p pulse-api`.
 
 ## Deploy
 

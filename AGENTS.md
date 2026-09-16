@@ -1,10 +1,10 @@
 # Eng Pulse
 
-Daily engineering brief. A Rust pipeline on GCP (Cloud Run Jobs, 06:00 UTC) picks one article from `config/sources.json`, writes a V3 Insight Brief to the public GCS bucket `tsvet01-agent-brain`, judges it with Gemini, and notifies by email/APNs. The Swift iOS app reads the bucket. In progress: multi-user API (`apps/pulse-api`, axum + Postgres) on a Hetzner box managed by `infra/hetzner`; spec in `docs/superpowers/specs/2026-09-01-multiuser-cohorts-design.md`. Production model: `claude-opus-5`.
+Daily engineering brief. A Rust pipeline on GCP (Cloud Run Jobs, 06:00 UTC) picks one article from `config/sources.json`, writes a V3 Insight Brief to the public GCS bucket `tsvet01-agent-brain`, judges it with OpenAI GPT-6 Astra (`gpt-6-astra`), and notifies by email/APNs. The Swift iOS app reads the bucket. In progress: multi-user API (`apps/pulse-api`, axum + Postgres) on a Hetzner box managed by `infra/hetzner`; spec in `docs/superpowers/specs/2026-09-01-multiuser-cohorts-design.md`. Production model: `claude-opus-5`. Env keys: `ANTHROPIC_API_KEY` (selection + brief), `OPENAI_API_KEY` (judge). Providers available in `libs/llm-client`: Claude, OpenAI, Gemini (unused today).
 
 | Path | What |
 |---|---|
-| `libs/llm-client` | Claude/Gemini client, retries, usage logging |
+| `libs/llm-client` | Claude/OpenAI/Gemini client, retries, usage logging |
 | `libs/pulse-core` | Contract types; fixtures in `docs/contracts/` |
 | `apps/daily-agent`, `apps/explorer-agent` | Pipeline jobs |
 | `apps/pulse-api` | API skeleton (`/healthz`, sqlx migrations) |
@@ -22,7 +22,7 @@ cargo run -p pulse-core --bin fixtures && git diff --exit-code docs/contracts
 for f in notifier apns-notifier fcm-tokens; do (cd functions/$f && python -m pytest test_main.py -q); done
 ```
 
-pulse-api against Postgres 16: `DATABASE_URL=postgres://pulse:pulse@localhost:5432/pulse cargo run -p pulse-api`, then `curl localhost:8080/healthz`.
+pulse-api against Postgres 18: `DATABASE_URL=postgres://pulse:pulse@localhost:5432/pulse cargo run -p pulse-api`, then `curl localhost:8080/healthz`.
 
 ## Rules
 

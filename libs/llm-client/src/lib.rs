@@ -10,17 +10,14 @@ const MAX_RETRY_ELAPSED_SECS: u64 = 120;
 /// Default GCS bucket for storing agent data
 pub const DEFAULT_BUCKET: &str = "tsvet01-agent-brain";
 
-/// Default Gemini model to use
+/// Default Gemini model (available, unused by the pipeline today)
 pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.1-pro-preview";
 
-/// Default OpenAI model to use
-pub const DEFAULT_OPENAI_MODEL: &str = "gpt-5.2-2025-12-11";
+/// Default OpenAI model (the judge)
+pub const DEFAULT_OPENAI_MODEL: &str = "gpt-6-astra";
 
 /// Default Claude model to use
 pub const DEFAULT_CLAUDE_MODEL: &str = "claude-opus-5";
-
-// Re-export for backwards compatibility
-pub const DEFAULT_MODEL: &str = DEFAULT_GEMINI_MODEL;
 
 /// Supported LLM providers
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -90,20 +87,21 @@ pub struct SourceConfig {
     pub url: String,
 }
 
-/// Options for LLM calls (temperature, system message, etc.)
+/// Options for LLM calls (system message, model override, etc.)
 #[derive(Debug, Clone, Default)]
 pub struct LlmOptions {
-    /// Temperature for generation (0.0-2.0). None = provider default.
+    /// Temperature (0.0-2.0). Gemini only; Claude and OpenAI never send it.
     pub temperature: Option<f32>,
     /// System message (Claude/OpenAI). Ignored by Gemini.
     pub system: Option<String>,
     /// Per-call model override (beats env var and default).
     pub model: Option<String>,
-    /// Per-call max_tokens override for Claude (beats the 4096 default). On
-    /// Opus 5, adaptive thinking tokens count against this budget, so a
-    /// caller expecting thinking should raise it to leave room for the
-    /// answer.
+    /// Per-call output cap. Claude: `max_tokens` (default 4096). OpenAI:
+    /// `max_completion_tokens` (omitted when None). Thinking/reasoning tokens
+    /// count against it on both, so callers expecting reasoning should raise it.
     pub max_tokens: Option<u32>,
+    /// OpenAI `reasoning_effort` (`low|medium|high|xhigh|max`). Ignored by Claude.
+    pub effort: Option<String>,
 }
 
 /// Model precedence: per-call override > env var > provider default.
@@ -255,7 +253,7 @@ async fn call_gemini(
     let model = resolve_model_from(
         options.model.as_deref(),
         std::env::var("GEMINI_MODEL").ok(),
-        DEFAULT_MODEL,
+        DEFAULT_GEMINI_MODEL,
     );
 
     // Allow overriding base URL for testing
@@ -327,12 +325,16 @@ struct OpenAIMessage {
     content: String,
 }
 
+/// Chat Completions body. `temperature`/`top_p` are never sent: gpt-6-astra
+/// rejects them; reasoning is steered with `reasoning_effort` instead.
 #[derive(Serialize, Debug)]
 struct OpenAIRequest {
     model: String,
     messages: Vec<OpenAIMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    temperature: Option<f32>,
+    reasoning_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_completion_tokens: Option<u32>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -346,9 +348,18 @@ struct OpenAIMessageResponse {
 }
 
 #[derive(Deserialize, Debug)]
+struct OpenAIUsage {
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
+}
+
+#[derive(Deserialize, Debug)]
 struct OpenAIResponse {
     choices: Option<Vec<OpenAIChoice>>,
     error: Option<OpenAIError>,
+    usage: Option<OpenAIUsage>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -363,6 +374,26 @@ pub async fn call_openai_with_retry(
     prompt: String,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     call_llm_with_retry(client, LlmProvider::OpenAI, api_key, prompt).await
+}
+
+fn build_openai_request(model: String, text: String, options: &LlmOptions) -> OpenAIRequest {
+    let mut messages = Vec::new();
+    if let Some(ref system) = options.system {
+        messages.push(OpenAIMessage {
+            role: "system".to_string(),
+            content: system.clone(),
+        });
+    }
+    messages.push(OpenAIMessage {
+        role: "user".to_string(),
+        content: text,
+    });
+    OpenAIRequest {
+        model,
+        messages,
+        reasoning_effort: options.effort.clone(),
+        max_completion_tokens: options.max_tokens,
+    }
 }
 
 async fn call_openai(
@@ -381,23 +412,7 @@ async fn call_openai(
     let base_url = std::env::var("OPENAI_BASE_URL")
         .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
 
-    let mut messages = Vec::new();
-    if let Some(ref system) = options.system {
-        messages.push(OpenAIMessage {
-            role: "system".to_string(),
-            content: system.clone(),
-        });
-    }
-    messages.push(OpenAIMessage {
-        role: "user".to_string(),
-        content: text,
-    });
-
-    let request = OpenAIRequest {
-        model,
-        messages,
-        temperature: options.temperature,
-    };
+    let request = build_openai_request(model, text, options);
 
     debug!("Sending request to OpenAI API");
 
@@ -420,6 +435,16 @@ async fn call_openai(
 
     if let Some(error) = resp.error {
         return Err(format!("OpenAI API Error: {}", error.message).into());
+    }
+
+    if let Some(usage) = &resp.usage {
+        info!(
+            provider = "openai",
+            model = %request.model,
+            input_tokens = usage.prompt_tokens,
+            output_tokens = usage.completion_tokens,
+            "LLM usage"
+        );
     }
 
     if let Some(choices) = resp.choices {
@@ -482,12 +507,8 @@ pub async fn call_claude_with_retry(
     call_llm_with_retry(client, LlmProvider::Claude, api_key, prompt).await
 }
 
-/// Build a Claude API request body.
-///
-/// `temperature` is intentionally NOT included: Opus 4.7+ deprecated the
-/// parameter and the API returns a 400 invalid_request_error if it is sent.
-/// `LlmOptions.temperature` is retained only for providers that still accept it
-/// (Gemini).
+/// Build a Claude API request body. `temperature` is never sent: Opus 4.7+
+/// rejects it with a 400 invalid_request_error.
 fn build_claude_request(model: String, text: String, options: &LlmOptions) -> ClaudeRequest {
     ClaudeRequest {
         model,
@@ -687,6 +708,15 @@ mod tests {
         let json = r#"{"content":[{"type":"text","text":"hi"}]}"#;
         let resp: ClaudeResponse = serde_json::from_str(json).unwrap();
         assert!(resp.usage.is_none());
+    }
+
+    #[test]
+    fn test_openai_response_parses_usage() {
+        let json = r#"{"choices":[{"message":{"content":"hi"}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}"#;
+        let resp: OpenAIResponse = serde_json::from_str(json).unwrap();
+        let usage = resp.usage.unwrap();
+        assert_eq!(usage.prompt_tokens, 10);
+        assert_eq!(usage.completion_tokens, 5);
     }
 
     #[test]
@@ -927,9 +957,9 @@ mod tests {
 
     #[test]
     fn test_llm_provider_serde_roundtrip() {
-        let provider = LlmProvider::Gemini;
+        let provider = LlmProvider::OpenAI;
         let json = serde_json::to_string(&provider).unwrap();
-        assert_eq!(json, r#""gemini""#);
+        assert_eq!(json, r#""openai""#);
         let deserialized: LlmProvider = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, provider);
     }
@@ -967,20 +997,42 @@ mod tests {
 
     #[test]
     fn test_openai_request_serialization() {
-        let request = OpenAIRequest {
-            model: "gpt-4".to_string(),
-            messages: vec![OpenAIMessage {
-                role: "user".to_string(),
-                content: "Hello, OpenAI!".to_string(),
-            }],
-            temperature: None,
-        };
+        let request = build_openai_request(
+            "gpt-6-astra".to_string(),
+            "Hello, OpenAI!".to_string(),
+            &LlmOptions::default(),
+        );
 
-        let json = serde_json::to_string(&request).unwrap();
-        assert!(json.contains("gpt-4"));
-        assert!(json.contains("Hello, OpenAI!"));
-        assert!(json.contains("user"));
-        assert!(json.contains("messages"));
+        let json: serde_json::Value = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["model"], "gpt-6-astra");
+        assert_eq!(json["messages"][0]["role"], "user");
+        assert_eq!(json["messages"][0]["content"], "Hello, OpenAI!");
+        // Optional knobs are omitted when unset; temperature is never sent.
+        assert!(json.get("reasoning_effort").is_none());
+        assert!(json.get("max_completion_tokens").is_none());
+        assert!(json.get("temperature").is_none());
+        assert!(json.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn test_openai_request_with_effort_system_and_cap() {
+        let options = LlmOptions {
+            temperature: Some(0.3),
+            system: Some("Be terse.".to_string()),
+            effort: Some("medium".to_string()),
+            max_tokens: Some(8000),
+            ..Default::default()
+        };
+        let request = build_openai_request("gpt-6-astra".to_string(), "Hi".to_string(), &options);
+
+        let json: serde_json::Value = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["messages"][0]["role"], "system");
+        assert_eq!(json["messages"][0]["content"], "Be terse.");
+        assert_eq!(json["messages"][1]["role"], "user");
+        assert_eq!(json["reasoning_effort"], "medium");
+        assert_eq!(json["max_completion_tokens"], 8000);
+        assert!(json.get("temperature").is_none());
+        assert!(json.get("max_tokens").is_none());
     }
 
     #[test]
@@ -1038,9 +1090,8 @@ mod tests {
 
     #[test]
     fn test_claude_request_never_sends_temperature() {
-        // Regression: Opus 4.7+ deprecated `temperature` and rejects it with a
-        // 400 invalid_request_error. It must NEVER be serialized for Claude, even
-        // when a caller sets one (e.g. eval passes Some(0.3)).
+        // Regression: Opus 4.7+ rejects `temperature` with a 400. It must never
+        // be serialized for Claude even when a caller sets one.
         let options = LlmOptions {
             temperature: Some(0.3),
             ..Default::default()
@@ -1048,10 +1099,21 @@ mod tests {
         let request =
             build_claude_request("claude-opus-4-8".to_string(), "Hi".to_string(), &options);
         let json = serde_json::to_string(&request).unwrap();
-        assert!(
-            !json.contains("temperature"),
-            "temperature must not be sent to Claude, got: {json}"
-        );
+        assert!(!json.contains("temperature"), "{json}");
+    }
+
+    #[test]
+    fn test_claude_request_ignores_effort() {
+        // `effort` is an OpenAI knob; Claude must not see it or any temperature.
+        let options = LlmOptions {
+            effort: Some("high".to_string()),
+            ..Default::default()
+        };
+        let request =
+            build_claude_request("claude-opus-4-8".to_string(), "Hi".to_string(), &options);
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(!json.contains("effort"), "{json}");
+        assert!(!json.contains("temperature"), "{json}");
     }
 
     #[test]
@@ -1132,7 +1194,8 @@ mod tests {
 
     // --- call_llm retry behaviour (wiremock) ---
     //
-    // #[serial] because CLAUDE_BASE_URL is process-global.
+    // #[serial] because CLAUDE_BASE_URL / OPENAI_BASE_URL / GEMINI_BASE_URL are
+    // process-global.
 
     fn claude_ok_body() -> serde_json::Value {
         serde_json::json!({"content": [{"type": "text", "text": "OK"}]})
@@ -1211,6 +1274,195 @@ mod tests {
         )
         .await;
         unsafe { std::env::remove_var("CLAUDE_BASE_URL") };
+
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("400"), "{err}");
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    fn openai_ok_body() -> serde_json::Value {
+        serde_json::json!({
+            "choices": [{"message": {"role": "assistant", "content": "OK"}}],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 1}
+        })
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_call_llm_openai_sends_reasoning_shape_and_parses_content() {
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(header("Authorization", "Bearer key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(openai_ok_body()))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let options = LlmOptions {
+            model: Some("gpt-test-model".to_string()),
+            effort: Some("medium".to_string()),
+            max_tokens: Some(8000),
+            ..Default::default()
+        };
+        unsafe { std::env::set_var("OPENAI_BASE_URL", server.uri()) };
+        let result = call_llm(
+            &reqwest::Client::new(),
+            LlmProvider::OpenAI,
+            "key",
+            "hi".to_string(),
+            &options,
+        )
+        .await;
+        unsafe { std::env::remove_var("OPENAI_BASE_URL") };
+
+        assert_eq!(result.unwrap(), "OK");
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body["model"], "gpt-test-model");
+        assert_eq!(body["reasoning_effort"], "medium");
+        assert_eq!(body["max_completion_tokens"], 8000);
+        assert_eq!(body["messages"][0]["content"], "hi");
+        assert!(body.get("temperature").is_none(), "{body}");
+        assert!(body.get("top_p").is_none(), "{body}");
+        assert!(body.get("max_tokens").is_none(), "{body}");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_call_llm_openai_retries_transient_503_then_succeeds() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(503).set_body_string("overloaded"))
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(openai_ok_body()))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        unsafe { std::env::set_var("OPENAI_BASE_URL", server.uri()) };
+        let result = call_llm(
+            &reqwest::Client::new(),
+            LlmProvider::OpenAI,
+            "key",
+            "hi".to_string(),
+            &opts_with_model("gpt-test-model"),
+        )
+        .await;
+        unsafe { std::env::remove_var("OPENAI_BASE_URL") };
+
+        assert_eq!(result.unwrap(), "OK");
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_call_llm_openai_gives_up_on_400() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+                "error": {"message": "Unsupported parameter: 'temperature'"}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        unsafe { std::env::set_var("OPENAI_BASE_URL", server.uri()) };
+        let result = call_llm(
+            &reqwest::Client::new(),
+            LlmProvider::OpenAI,
+            "key",
+            "hi".to_string(),
+            &opts_with_model("gpt-test-model"),
+        )
+        .await;
+        unsafe { std::env::remove_var("OPENAI_BASE_URL") };
+
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("400"), "{err}");
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_call_llm_gemini_sends_temperature_and_parses_candidate() {
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1beta/models/gemini-test-model:generateContent"))
+            .and(header("x-goog-api-key", "key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "candidates": [{"content": {"parts": [{"text": "OK"}]}}],
+                "usageMetadata": {"promptTokenCount": 7, "candidatesTokenCount": 1}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let options = LlmOptions {
+            model: Some("gemini-test-model".to_string()),
+            temperature: Some(0.3),
+            ..Default::default()
+        };
+        unsafe { std::env::set_var("GEMINI_BASE_URL", server.uri()) };
+        let result = call_llm(
+            &reqwest::Client::new(),
+            LlmProvider::Gemini,
+            "key",
+            "hi".to_string(),
+            &options,
+        )
+        .await;
+        unsafe { std::env::remove_var("GEMINI_BASE_URL") };
+
+        assert_eq!(result.unwrap(), "OK");
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body["contents"][0]["parts"][0]["text"], "hi");
+        assert_eq!(body["generationConfig"]["temperature"], 0.3);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_call_llm_gemini_gives_up_on_400() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("bad request"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        unsafe { std::env::set_var("GEMINI_BASE_URL", server.uri()) };
+        let result = call_llm(
+            &reqwest::Client::new(),
+            LlmProvider::Gemini,
+            "key",
+            "hi".to_string(),
+            &opts_with_model("gemini-test-model"),
+        )
+        .await;
+        unsafe { std::env::remove_var("GEMINI_BASE_URL") };
 
         let err = result.unwrap_err().to_string();
         assert!(err.contains("400"), "{err}");
