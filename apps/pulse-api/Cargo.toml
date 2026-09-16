@@ -8,8 +8,22 @@ axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "migrate"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "migrate", "uuid", "chrono", "json"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 dotenvy = "0.15"
 pulse-core = { path = "../../libs/pulse-core" }
+jsonwebtoken = "10"
+reqwest = { version = "0.13", features = ["json", "rustls", "webpki-roots"], default-features = false }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tower-http = { version = "0.6", features = ["trace"] }
+subtle = "2"
+rand = "0.10"
+rss = "2"
+atom_syndication = "0.12"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+wiremock = "0.6"
+http-body-util = "0.1"
