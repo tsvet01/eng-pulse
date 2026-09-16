@@ -104,14 +104,10 @@ async fn put_feedback(
         .await?
         .ok_or(ApiError::NotFound("feed"))?;
     member_feed(&s, &user, feed_id).await?;
-    feedback::upsert(
-        &s.pool,
-        user.id,
-        feed_id,
-        parse_date(&date)?,
-        &b.aspect,
-        b.value,
-    )
-    .await?;
+    let date = parse_date(&date)?;
+    briefs::get(&s.pool, feed_id, date)
+        .await?
+        .ok_or(ApiError::NotFound("brief"))?;
+    feedback::upsert(&s.pool, user.id, feed_id, date, &b.aspect, b.value).await?;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -23,7 +23,7 @@ async fn register(
             "platform must be ios|android and token non-empty".into(),
         ));
     }
-    devices::upsert(
+    let owned = devices::upsert(
         &s.pool,
         user.id,
         &b.platform,
@@ -31,7 +31,11 @@ async fn register(
         b.app_version.as_deref(),
     )
     .await?;
-    Ok(StatusCode::NO_CONTENT)
+    if owned {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError::Conflict("token registered to another account"))
+    }
 }
 
 #[derive(Deserialize)]
@@ -44,6 +48,6 @@ async fn remove(
     user: AuthUser,
     Json(b): Json<Remove>,
 ) -> Result<StatusCode, ApiError> {
-    devices::deactivate(&s.pool, user.id, &b.token).await?;
+    devices::deactivate(&s.pool, user.id, b.token.trim()).await?;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -127,3 +127,20 @@ async fn feedback_upserts(pool: PgPool) {
     .await;
     assert_eq!(status, 422);
 }
+
+#[sqlx::test]
+async fn feedback_requires_existing_brief(pool: PgPool) {
+    let (_s, url) = jwks_mock().await;
+    let (uid, t) = registered_user(&pool, "m@example.com", false).await;
+    feed_with_briefs(&pool, uid).await;
+    let app = app(pool, &url);
+    let (status, _) = send(
+        &app,
+        Method::PUT,
+        "/v1/briefs/engineering/2026-01-01/feedback",
+        Some(&t),
+        Some(json!({"aspect": "brief", "value": 1})),
+    )
+    .await;
+    assert_eq!(status, 404);
+}
