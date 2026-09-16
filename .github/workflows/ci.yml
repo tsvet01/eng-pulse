@@ -213,12 +213,12 @@ jobs:
           --substitutions=_IMAGE_TAG=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:${{ env.IMAGE_TAG }} \
           --machine-type=E2_HIGHCPU_8 .
         gcloud run jobs update se-daily-agent-job --region ${{ env.REGION }} --project ${{ env.PROJECT_ID }} \
-          --remove-env-vars ANTHROPIC_API_KEY,OPENAI_API_KEY,SHADOW_MODEL --clear-secrets || true
+          --remove-env-vars ANTHROPIC_API_KEY,OPENAI_API_KEY,SHADOW_MODEL,PIPELINE_SERVICE_TOKEN --clear-secrets || true
         gcloud run jobs deploy se-daily-agent-job \
           --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:${{ env.IMAGE_TAG }} \
           --region ${{ env.REGION }} --project ${{ env.PROJECT_ID }} \
-          --set-secrets ANTHROPIC_API_KEY=anthropic-api-key:latest,OPENAI_API_KEY=openai-api-key:latest \
-          --update-env-vars=SHADOW_MODEL=claude-fable-5-1 \
+          --set-secrets ANTHROPIC_API_KEY=anthropic-api-key:latest,OPENAI_API_KEY=openai-api-key:latest,PIPELINE_SERVICE_TOKEN=pipeline-service-token:latest \
+          --update-env-vars=SHADOW_MODEL=claude-fable-5-1,PULSE_API_URL=https://api.eng-pulse.tsvetkov.org \
           --task-timeout 10m
     - name: Build & deploy explorer-agent
       run: |
