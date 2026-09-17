@@ -105,7 +105,12 @@ jobs:
       with:
         cache-on-failure: true
     - run: cargo build -p pulse-api
+    - run: cargo test -p pulse-api
     - name: Start pulse-api and wait for /healthz
+      env:
+        SUPABASE_JWKS_URL: https://example.invalid/jwks
+        SUPABASE_ISSUER: https://example.invalid
+        PIPELINE_SERVICE_TOKEN: ci
       run: |
         ./target/debug/pulse-api &
         for i in $(seq 1 30); do curl -sf localhost:8080/healthz && break; sleep 1; done
