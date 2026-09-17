@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn insight_brief_defaults_missing_why_it_matters() {
-        // The pipeline's own parser only requires deep_dive; match that leniency.
+        // The pipeline's parser does not require why_it_matters; match that leniency.
         let json = r#"{"key_idea":"k","what_to_change":null,"deep_dive":"d"}"#;
         let b: InsightBrief = serde_json::from_str(json).unwrap();
         assert_eq!(b.why_it_matters, "");
