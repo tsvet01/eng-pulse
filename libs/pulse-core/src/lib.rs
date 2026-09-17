@@ -35,7 +35,9 @@ pub enum SourceKind {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InsightBrief {
+    #[serde(default)]
     pub key_idea: String,
+    #[serde(default)]
     pub why_it_matters: String,
     pub what_to_change: Option<String>,
     pub deep_dive: String,
@@ -153,6 +155,14 @@ mod tests {
             b.meta.unwrap().category.as_deref(),
             Some("platform-engineering")
         );
+    }
+
+    #[test]
+    fn insight_brief_defaults_missing_why_it_matters() {
+        // The pipeline's own parser only requires deep_dive; match that leniency.
+        let json = r#"{"key_idea":"k","what_to_change":null,"deep_dive":"d"}"#;
+        let b: InsightBrief = serde_json::from_str(json).unwrap();
+        assert_eq!(b.why_it_matters, "");
     }
 
     #[test]
