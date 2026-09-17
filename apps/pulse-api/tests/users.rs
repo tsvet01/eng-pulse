@@ -147,6 +147,34 @@ async fn signup_needs_email_in_token(pool: PgPool) {
     assert_eq!(status, 422);
 }
 
+/// An empty `email` claim is no email: it must not slip past the check and
+/// match an unset ADMIN_EMAIL.
+#[sqlx::test]
+async fn signup_rejects_empty_email_claim(pool: PgPool) {
+    let (_s, url) = jwks_mock().await;
+    invite(&pool, "EMPTY", 1, false).await;
+    let app = app(pool.clone(), &url);
+    let t = token(TokenOpts {
+        email: Some("   ".into()),
+        ..Default::default()
+    });
+    let (status, body) = send(
+        &app,
+        Method::POST,
+        "/v1/users",
+        Some(&t),
+        Some(json!({"invite_code": "EMPTY"})),
+    )
+    .await;
+    assert_eq!(status, 422);
+    assert_eq!(body["message"], "token has no email");
+    let n: i64 = sqlx::query_scalar("select count(*) from users")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 0);
+}
+
 #[sqlx::test]
 async fn duplicate_identity_signup_is_idempotent(pool: PgPool) {
     let (_s, url) = jwks_mock().await;

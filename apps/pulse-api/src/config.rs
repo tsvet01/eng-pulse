@@ -37,7 +37,11 @@ impl Config {
                 .cloned()
                 .unwrap_or_else(|| "authenticated".into()),
             pipeline_service_token: req("PIPELINE_SERVICE_TOKEN")?,
-            admin_email: v.get("ADMIN_EMAIL").cloned().map(|e| e.to_lowercase()),
+            // An empty value must not make an email-less token an admin.
+            admin_email: v
+                .get("ADMIN_EMAIL")
+                .map(|e| e.trim().to_lowercase())
+                .filter(|e| !e.is_empty()),
         })
     }
 }
@@ -73,6 +77,18 @@ mod tests {
             Config::from_map(&m).unwrap_err(),
             "PIPELINE_SERVICE_TOKEN is required"
         );
+    }
+
+    #[test]
+    fn admin_email_empty_is_none() {
+        for value in ["", "   "] {
+            let mut m = base();
+            m.insert("ADMIN_EMAIL".into(), value.into());
+            assert!(
+                Config::from_map(&m).unwrap().admin_email.is_none(),
+                "{value:?}"
+            );
+        }
     }
 
     #[test]
