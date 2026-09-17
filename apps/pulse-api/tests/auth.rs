@@ -107,7 +107,7 @@ async fn existing_email_from_new_provider_is_invite_required(pool: PgPool) {
     assert_eq!(n, 1);
 }
 
-/// `find_by_email` backs Task 4 sign-up; a text-bound parameter would compare
+/// `find_by_email` backs sign-up; a text-bound parameter would compare
 /// case-sensitively and defeat the citext column.
 #[sqlx::test]
 async fn find_by_email_is_case_insensitive(pool: PgPool) {
