@@ -241,14 +241,22 @@ async fn run_smoke(
         }
     }
 
-    // The dual-write target, when configured, is checked too so a bad URL or
-    // an unreachable API fails the deploy gate rather than the nightly run.
+    // The dual-write target, when configured, is checked too so a bad URL, an
+    // unreachable API or a rejected service token fails the deploy gate rather
+    // than the nightly run.
     if let Some(api) = api_client::PulseApi::from_env() {
         match api.healthz().await {
             Ok(()) => info!(check = "pulse-api", "Smoke check passed"),
             Err(e) => {
                 error!(check = "pulse-api", error = %e, "Smoke check FAILED");
                 failures.push(format!("pulse-api: {}", e));
+            }
+        }
+        match api.internal_feeds().await {
+            Ok(n) => info!(check = "pulse-api-feeds", feeds = n, "Smoke check passed"),
+            Err(e) => {
+                error!(check = "pulse-api-feeds", error = %e, "Smoke check FAILED");
+                failures.push(format!("pulse-api-feeds: {}", e));
             }
         }
     }

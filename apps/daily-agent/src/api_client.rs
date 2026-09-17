@@ -2,7 +2,7 @@
 //! GCS. Enabled only when both `PULSE_API_URL` and `PIPELINE_SERVICE_TOKEN` are
 //! set, so an unconfigured run keeps its previous behavior.
 
-use pulse_core::{Brief, InsightBrief};
+use pulse_core::{Brief, Feed, InsightBrief};
 use std::time::Duration;
 
 const API_TIMEOUT_SECS: u64 = 20;
@@ -59,6 +59,23 @@ impl PulseApi {
                 resp.text().await.unwrap_or_default()
             ))
         }
+    }
+
+    /// Feed count from `/internal/feeds`; exercises the service token too.
+    pub async fn internal_feeds(&self) -> Result<usize, String> {
+        let resp = self
+            .http
+            .get(format!("{}/internal/feeds", self.base))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(format!("internal/feeds {status}"));
+        }
+        let feeds: Vec<Feed> = resp.json().await.map_err(|e| e.to_string())?;
+        Ok(feeds.len())
     }
 
     pub async fn healthz(&self) -> Result<(), String> {
@@ -149,6 +166,33 @@ mod tests {
         let api = PulseApi::new(server.uri(), "tok".into());
         let b = brief_for_api("2026-09-16", V3, "https://x", "T", None, None).unwrap();
         assert!(api.post_brief(&b).await.unwrap_err().contains("500"));
+    }
+
+    #[tokio::test]
+    async fn internal_feeds_counts_with_service_token() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/internal/feeds"))
+            .and(bearer_token("tok"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {"slug":"engineering","name":"Engineering","description":null,"topics":[],"sources":[],"is_active":true}
+            ])))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let api = PulseApi::new(server.uri(), "tok".into());
+        assert_eq!(api.internal_feeds().await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn internal_feeds_rejected_token_is_reported() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+        let api = PulseApi::new(server.uri(), "bad".into());
+        assert!(api.internal_feeds().await.unwrap_err().contains("401"));
     }
 
     #[test]
