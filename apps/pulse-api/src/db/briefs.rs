@@ -51,7 +51,7 @@ pub async fn list(
     before: Option<NaiveDate>,
     limit: i64,
 ) -> sqlx::Result<Vec<BriefSummary>> {
-    sqlx::query_as("select date, article_title, article_url, left(payload->>'key_idea', 160) as snippet, model, eval_score from briefs where feed_id = $1 and ($2::date is null or date < $2) order by date desc limit $3")
+    sqlx::query_as("select date, article_title, article_url, coalesce(left(payload->>'key_idea', 160), '') as snippet, model, eval_score from briefs where feed_id = $1 and ($2::date is null or date < $2) order by date desc limit $3")
         .bind(feed_id).bind(before).bind(limit).fetch_all(pool).await
 }
 
