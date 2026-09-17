@@ -62,7 +62,9 @@ BIND_ADDR=0.0.0.0:8080
 RUST_LOG=info
 SUPABASE_JWKS_URL=https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json
 SUPABASE_ISSUER=https://<project-ref>.supabase.co/auth/v1
+SUPABASE_AUDIENCE=authenticated
 PIPELINE_SERVICE_TOKEN=<generate: openssl rand -hex 32>
+ADMIN_EMAIL=<your email>
 ```
 
 To generate secrets:

@@ -7,7 +7,7 @@ Daily engineering brief. A Rust pipeline on GCP (Cloud Run Jobs, 06:00 UTC) pick
 | `libs/llm-client` | Claude/OpenAI/Gemini client, retries, usage logging |
 | `libs/pulse-core` | Contract types; fixtures in `docs/contracts/` |
 | `apps/daily-agent`, `apps/explorer-agent` | Pipeline jobs |
-| `apps/pulse-api` | API skeleton (`/healthz`, sqlx migrations) |
+| `apps/pulse-api` | API: auth, feeds, briefs, devices; `/internal` for the pipeline |
 | `apps/mobile-swift` | iOS app; builds on macOS only |
 | `functions/*` | Python cloud functions |
 | `infra/hetzner` | Terraform; applied by CI after human approval |

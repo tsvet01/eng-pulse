@@ -67,7 +67,8 @@ jobs:
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
     - run: cargo fmt --all -- --check
     - run: cargo clippy --workspace -- -D warnings
-    - run: cargo test --workspace
+    # pulse-api's tests need Postgres; the api-it job runs them against its service.
+    - run: cargo test --workspace --exclude pulse-api
 
   fixtures:
     needs: changes
@@ -105,7 +106,12 @@ jobs:
       with:
         cache-on-failure: true
     - run: cargo build -p pulse-api
+    - run: cargo test -p pulse-api
     - name: Start pulse-api and wait for /healthz
+      env:
+        SUPABASE_JWKS_URL: https://example.invalid/jwks
+        SUPABASE_ISSUER: https://example.invalid
+        PIPELINE_SERVICE_TOKEN: ci
       run: |
         ./target/debug/pulse-api &
         for i in $(seq 1 30); do curl -sf localhost:8080/healthz && break; sleep 1; done
@@ -213,12 +219,12 @@ jobs:
           --substitutions=_IMAGE_TAG=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:${{ env.IMAGE_TAG }} \
           --machine-type=E2_HIGHCPU_8 .
         gcloud run jobs update se-daily-agent-job --region ${{ env.REGION }} --project ${{ env.PROJECT_ID }} \
-          --remove-env-vars ANTHROPIC_API_KEY,OPENAI_API_KEY,SHADOW_MODEL --clear-secrets || true
+          --remove-env-vars ANTHROPIC_API_KEY,OPENAI_API_KEY,SHADOW_MODEL,PIPELINE_SERVICE_TOKEN --clear-secrets || true
         gcloud run jobs deploy se-daily-agent-job \
           --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:${{ env.IMAGE_TAG }} \
           --region ${{ env.REGION }} --project ${{ env.PROJECT_ID }} \
-          --set-secrets ANTHROPIC_API_KEY=anthropic-api-key:latest,OPENAI_API_KEY=openai-api-key:latest \
-          --update-env-vars=SHADOW_MODEL=claude-fable-5-1 \
+          --set-secrets ANTHROPIC_API_KEY=anthropic-api-key:latest,OPENAI_API_KEY=openai-api-key:latest,PIPELINE_SERVICE_TOKEN=pipeline-service-token:latest \
+          --update-env-vars=SHADOW_MODEL=claude-fable-5-1,PULSE_API_URL=https://api.eng-pulse.tsvetkov.org \
           --task-timeout 10m
     - name: Build & deploy explorer-agent
       run: |

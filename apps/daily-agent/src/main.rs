@@ -1,3 +1,4 @@
+mod api_client;
 mod eval;
 mod feedback;
 mod fetcher;
@@ -236,6 +237,26 @@ async fn run_smoke(
             Err(e) => {
                 error!(check = %label, error = %e, "Smoke check FAILED");
                 failures.push(format!("{}: {}", label, e));
+            }
+        }
+    }
+
+    // The dual-write target, when configured, is checked too so a bad URL, an
+    // unreachable API or a rejected service token fails the deploy gate rather
+    // than the nightly run.
+    if let Some(api) = api_client::PulseApi::from_env() {
+        match api.healthz().await {
+            Ok(()) => info!(check = "pulse-api", "Smoke check passed"),
+            Err(e) => {
+                error!(check = "pulse-api", error = %e, "Smoke check FAILED");
+                failures.push(format!("pulse-api: {}", e));
+            }
+        }
+        match api.internal_feeds().await {
+            Ok(n) => info!(check = "pulse-api-feeds", feeds = n, "Smoke check passed"),
+            Err(e) => {
+                error!(check = "pulse-api-feeds", error = %e, "Smoke check FAILED");
+                failures.push(format!("pulse-api-feeds: {}", e));
             }
         }
     }
@@ -710,6 +731,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     .await
     {
         apply_eval_scores(&json, std::slice::from_mut(&mut entry));
+    }
+
+    // --- Dual-write: mirror the brief to pulse-api ---
+    // GCS stays the source of truth while the API is being brought up, so a
+    // failure here warns and the run continues.
+    if let Some(api) = api_client::PulseApi::from_env() {
+        match api_client::brief_for_api(
+            &today,
+            &brief.json,
+            &best_article.url,
+            &best_article.title,
+            entry.model.as_deref(),
+            entry.eval_score,
+        ) {
+            Ok(b) => match api.post_brief(&b).await {
+                Ok(()) => info!("Brief posted to pulse-api"),
+                Err(e) => warn!(error = %e, "pulse-api dual-write failed (non-fatal in Phase 1)"),
+            },
+            Err(e) => warn!(error = %e, "pulse-api brief mapping failed"),
+        }
     }
 
     // --- Final: Upload manifest ---
