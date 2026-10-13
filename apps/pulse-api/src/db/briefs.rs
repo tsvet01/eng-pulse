@@ -11,7 +11,7 @@ pub struct BriefRow {
     pub article_url: String,
     pub article_title: String,
     pub model: Option<String>,
-    pub eval_score: Option<f32>,
+    pub eval_score: Option<f64>,
 }
 
 /// Returns true when a new row was created.
@@ -21,12 +21,11 @@ pub async fn upsert(
     date: NaiveDate,
     b: &pulse_core::Brief,
 ) -> sqlx::Result<bool> {
-    let payload = serde_json::to_value(&b.payload).expect("brief payload serializes");
     let created: bool = sqlx::query_scalar(
         "insert into briefs (feed_id, date, format, payload, article_url, article_title, model, eval_score) values ($1,$2,$3,$4,$5,$6,$7,$8)
          on conflict (feed_id, date) do update set format = excluded.format, payload = excluded.payload, article_url = excluded.article_url, article_title = excluded.article_title, model = excluded.model, eval_score = excluded.eval_score
          returning (xmax = 0)")
-        .bind(feed_id).bind(date).bind(&b.format).bind(payload).bind(&b.article_url).bind(&b.article_title).bind(&b.model).bind(b.eval_score.map(|v| v as f32))
+        .bind(feed_id).bind(date).bind(&b.format).bind(&b.payload).bind(&b.article_url).bind(&b.article_title).bind(&b.model).bind(b.eval_score)
         .fetch_one(pool).await?;
     Ok(created)
 }
@@ -42,7 +41,7 @@ pub struct BriefSummary {
     pub article_url: String,
     pub snippet: String,
     pub model: Option<String>,
-    pub eval_score: Option<f32>,
+    pub eval_score: Option<f64>,
 }
 
 pub async fn list(
@@ -56,10 +55,12 @@ pub async fn list(
 }
 
 pub async fn feed_id_by_slug(pool: &PgPool, slug: &str) -> sqlx::Result<Option<Uuid>> {
-    sqlx::query_scalar("select id from feeds where slug = $1")
-        .bind(slug)
-        .fetch_optional(pool)
-        .await
+    sqlx::query_scalar(
+        "select id from feeds where slug = $1 and slug = 'engineering' and is_active",
+    )
+    .bind(slug)
+    .fetch_optional(pool)
+    .await
 }
 
 /// Same lookup as `feed_id_by_slug`, run on the caller's open transaction.
@@ -67,8 +68,10 @@ pub async fn feed_id_by_slug_tx(
     tx: &mut Transaction<'_, Postgres>,
     slug: &str,
 ) -> sqlx::Result<Option<Uuid>> {
-    sqlx::query_scalar("select id from feeds where slug = $1")
-        .bind(slug)
-        .fetch_optional(&mut **tx)
-        .await
+    sqlx::query_scalar(
+        "select id from feeds where slug = $1 and slug = 'engineering' and is_active",
+    )
+    .bind(slug)
+    .fetch_optional(&mut **tx)
+    .await
 }

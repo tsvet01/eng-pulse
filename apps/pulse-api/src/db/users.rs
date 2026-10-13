@@ -7,6 +7,7 @@ pub struct User {
     pub email: String,
     pub display_name: Option<String>,
     pub is_admin: bool,
+    pub is_active: bool,
 }
 
 pub async fn find_by_identity(
@@ -14,12 +15,12 @@ pub async fn find_by_identity(
     issuer: &str,
     subject: &str,
 ) -> sqlx::Result<Option<User>> {
-    sqlx::query_as("select u.id, u.email::text as email, u.display_name, u.is_admin from users u join identities i on i.user_id = u.id where i.issuer = $1 and i.subject = $2")
+    sqlx::query_as("select u.id, u.email::text as email, u.display_name, u.is_admin, u.is_active from users u join identities i on i.user_id = u.id where i.issuer = $1 and i.subject = $2")
         .bind(issuer).bind(subject).fetch_optional(pool).await
 }
 
 pub async fn find_by_email(pool: &PgPool, email: &str) -> sqlx::Result<Option<User>> {
-    sqlx::query_as("select id, email::text as email, display_name, is_admin from users where email = $1::citext")
+    sqlx::query_as("select id, email::text as email, display_name, is_admin, is_active from users where email = $1::citext")
         .bind(email).fetch_optional(pool).await
 }
 
@@ -32,7 +33,7 @@ pub async fn find_by_email_tx(
     tx: &mut Transaction<'_, Postgres>,
     email: &str,
 ) -> sqlx::Result<Option<User>> {
-    sqlx::query_as("select id, email::text as email, display_name, is_admin from users where email = $1::citext")
+    sqlx::query_as("select id, email::text as email, display_name, is_admin, is_active from users where email = $1::citext")
         .bind(email).fetch_optional(&mut **tx).await
 }
 
@@ -41,7 +42,7 @@ pub async fn insert_user(
     email: &str,
     is_admin: bool,
 ) -> sqlx::Result<User> {
-    sqlx::query_as("insert into users (email, is_admin) values ($1, $2) returning id, email::text as email, display_name, is_admin")
+    sqlx::query_as("insert into users (email, is_admin) values ($1, $2) returning id, email::text as email, display_name, is_admin, is_active")
         .bind(email).bind(is_admin).fetch_one(&mut **tx).await
 }
 

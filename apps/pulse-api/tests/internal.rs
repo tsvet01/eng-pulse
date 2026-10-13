@@ -155,3 +155,187 @@ async fn runs_ingest_is_atomic(pool: PgPool) {
         .unwrap();
     assert_eq!(count, 0);
 }
+
+#[sqlx::test]
+async fn complete_v3_survives_signup_ingest_database_and_read(pool: PgPool) {
+    let (_s, url) = jwks_mock().await;
+    let fid = seed_feed(&pool).await;
+    sqlx::query("insert into invites (code, max_uses) values ('PILOT', 2)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let app = app(pool.clone(), &url);
+    let a = user_token("reader-a", "a@example.com");
+    let b = user_token("reader-b", "b@example.com");
+    for t in [&a, &b] {
+        assert_eq!(
+            send(
+                &app,
+                Method::POST,
+                "/v1/users",
+                Some(t),
+                Some(json!({"invite_code": "PILOT"}))
+            )
+            .await
+            .0,
+            201
+        );
+    }
+    let mut samples: Vec<_> = pulse_core::fixtures()
+        .into_iter()
+        .filter(|(name, _)| name.starts_with("brief"))
+        .map(|(_, value)| value)
+        .collect();
+    let mut optional_nulls = samples[0].clone();
+    optional_nulls["payload"]["what_to_change"] = json!(null);
+    optional_nulls["payload"]["meta"] = json!(null);
+    samples.push(optional_nulls);
+    for sample in samples {
+        for created in [true, false] {
+            let (status, body) = send(
+                &app,
+                Method::POST,
+                "/internal/briefs",
+                Some(SERVICE_TOKEN),
+                Some(sample.clone()),
+            )
+            .await;
+            assert_eq!(status, 200);
+            assert_eq!(body["created"], created);
+            let stored: serde_json::Value =
+                sqlx::query_scalar("select payload from briefs where feed_id = $1")
+                    .bind(fid)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(stored, sample["payload"]);
+            for t in [&a, &b] {
+                let (status, body) = send(
+                    &app,
+                    Method::GET,
+                    "/v1/briefs/engineering/2026-09-01",
+                    Some(t),
+                    None,
+                )
+                .await;
+                assert_eq!(status, 200);
+                assert_eq!(body, sample);
+                assert_eq!(
+                    send(
+                        &app,
+                        Method::GET,
+                        &format!("/v1/feeds/{fid}/briefs"),
+                        Some(t),
+                        None
+                    )
+                    .await
+                    .1
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                    1
+                );
+            }
+        }
+        sqlx::query("delete from briefs")
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        send(
+            &app,
+            Method::POST,
+            "/internal/briefs",
+            Some(SERVICE_TOKEN),
+            Some(brief("2026-09-16", "T"))
+        )
+        .await
+        .0,
+        200
+    );
+    for (t, value) in [(&a, 1), (&b, -1)] {
+        assert_eq!(
+            send(
+                &app,
+                Method::PUT,
+                "/v1/briefs/engineering/2026-09-16/feedback",
+                Some(t),
+                Some(json!({"aspect": "brief", "value": value}))
+            )
+            .await
+            .0,
+            204
+        );
+    }
+    let feedback: Vec<i16> = sqlx::query_scalar("select value from feedback order by value")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(feedback, [-1, 1]);
+    let notifications: i64 = sqlx::query_scalar("select count(*) from notifications_sent")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(notifications, 0);
+}
+
+#[sqlx::test]
+async fn ingest_rejects_invalid_payload_format_and_non_pilot_feed(pool: PgPool) {
+    let (_s, url) = jwks_mock().await;
+    seed_feed(&pool).await;
+    sqlx::query("insert into feeds (slug, name) values ('other', 'Other')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let app = app(pool.clone(), &url);
+    for payload in [json!(null), json!([]), json!({}), json!({"deep_dive": 42})] {
+        let mut b = brief("2026-09-16", "T");
+        b["payload"] = payload;
+        assert_eq!(
+            send(
+                &app,
+                Method::POST,
+                "/internal/briefs",
+                Some(SERVICE_TOKEN),
+                Some(b)
+            )
+            .await
+            .0,
+            422
+        );
+    }
+    let mut b = brief("2026-09-16", "T");
+    b["format"] = json!("unsupported");
+    assert_eq!(
+        send(
+            &app,
+            Method::POST,
+            "/internal/briefs",
+            Some(SERVICE_TOKEN),
+            Some(b)
+        )
+        .await
+        .0,
+        422
+    );
+    let mut b = brief("2026-09-16", "T");
+    b["feed_slug"] = json!("other");
+    assert_eq!(
+        send(
+            &app,
+            Method::POST,
+            "/internal/briefs",
+            Some(SERVICE_TOKEN),
+            Some(b)
+        )
+        .await
+        .0,
+        404
+    );
+    let n: i64 = sqlx::query_scalar("select count(*) from briefs")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 0);
+}

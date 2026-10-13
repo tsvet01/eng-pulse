@@ -1,0 +1,12 @@
+{
+  "article_title": "Example post",
+  "article_url": "https://example.com/post",
+  "date": "2026-09-01",
+  "eval_score": null,
+  "feed_slug": "engineering",
+  "format": "insight-brief-v3",
+  "model": null,
+  "payload": {
+    "deep_dive": "## Deep dive\n\nMinimal body."
+  }
+}

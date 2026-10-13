@@ -33,15 +33,7 @@ pub fn test_config(jwks_url: &str) -> Config {
     .unwrap()
 }
 
-static ALLOW_LOOPBACK_FEEDS: std::sync::Once = std::sync::Once::new();
-
 pub fn app(pool: PgPool, jwks_url: &str) -> Router {
-    // Test-only: lets validate_feed_url accept the wiremock server's 127.0.0.1
-    // address; production never sets this.
-    ALLOW_LOOPBACK_FEEDS.call_once(|| {
-        // SAFETY: single-threaded call via `Once`, before any other test reads env.
-        unsafe { std::env::set_var("PULSE_ALLOW_LOOPBACK_FEEDS", "1") };
-    });
     let cfg = Arc::new(test_config(jwks_url));
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
@@ -177,4 +169,13 @@ pub async fn registered_user(pool: &PgPool, email: &str, is_admin: bool) -> (uui
         .await
         .unwrap();
     (id, user_token(&sub, email))
+}
+
+pub async fn engineering_feed(pool: &PgPool) -> uuid::Uuid {
+    sqlx::query_scalar(
+        "insert into feeds (slug, name) values ('engineering', 'Engineering') returning id",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }

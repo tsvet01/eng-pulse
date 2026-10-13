@@ -40,7 +40,7 @@ async fn list_feeds(
     _t: ServiceToken,
 ) -> Result<Json<Vec<Feed>>, ApiError> {
     let rows: Vec<(uuid::Uuid, String, String, Option<String>, bool)> = sqlx::query_as(
-        "select id, slug, name, description, is_active from feeds where is_active order by slug",
+        "select id, slug, name, description, is_active from feeds where is_active and slug = 'engineering' order by slug",
     )
     .fetch_all(&s.pool)
     .await?;
@@ -70,6 +70,9 @@ async fn ingest_brief(
     _t: ServiceToken,
     Json(b): Json<Brief>,
 ) -> Result<Json<Value>, ApiError> {
+    if b.format != "insight-brief-v3" {
+        return Err(ApiError::BadRequest("unsupported brief format".into()));
+    }
     let date = parse_date(&b.date)?;
     let feed_id = briefs::feed_id_by_slug(&s.pool, &b.feed_slug)
         .await?

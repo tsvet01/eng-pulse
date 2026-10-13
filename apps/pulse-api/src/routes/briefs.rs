@@ -11,7 +11,7 @@ use axum::{
     Json, Router,
 };
 use chrono::NaiveDate;
-use pulse_core::{Brief, InsightBrief};
+use pulse_core::Brief;
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -69,17 +69,15 @@ async fn get_one(
     let row = briefs::get(&s.pool, feed_id, parse_date(&date)?)
         .await?
         .ok_or(ApiError::NotFound("brief"))?;
-    let payload: InsightBrief = serde_json::from_value(row.payload)
-        .map_err(|e| ApiError::Internal(format!("stored payload: {e}")))?;
     Ok(Json(Brief {
         feed_slug: slug,
         date: row.date.to_string(),
         format: row.format,
-        payload,
+        payload: row.payload,
         article_url: row.article_url,
         article_title: row.article_title,
         model: row.model,
-        eval_score: row.eval_score.map(f64::from),
+        eval_score: row.eval_score,
     }))
 }
 

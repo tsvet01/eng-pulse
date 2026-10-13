@@ -1,8 +1,27 @@
-# Phase 1: API MVP Implementation Plan
+# Phase 1: API MVP Implementation Record
+
+> **Superseded for forward planning on 2026-10-13.** This document preserves the task-by-task implementation history behind PR #185. Code exists on `plan/phase1-api-mvp`, but production readiness is not established by the historical checkboxes. Do not replay the snippets as current requirements. Use the [Hetzner multi-user pilot plan](2026-10-13-hetzner-multiuser-pilot.md) and [revised design](../specs/2026-09-01-multiuser-cohorts-design.md) for all new work and launch gates.
+
+## Current direction and remaining work
+
+Keep the GCP daily/explorer pipeline and artifacts. The next release is about five invited iOS users on one engineering feed through the Hetzner API, followed by a 14-day pilot. OMGifts cleanup is separate.
+
+The pilot plan supersedes these historical assumptions:
+
+- Open feed creation/member configuration edits: restrict the pilot to engineering and gate mutation routes server-side; future configuration is owner/admin controlled.
+- Email-based identity linking: reject collisions until explicit verified linking is implemented; consuming an invite is not ownership proof.
+- Typed payload round-tripping: preserve every original V3 JSON field/value through ingest and reads.
+- Warn-only dual-write: add silent history import and scheduled artifact reconciliation before app read cutover.
+- Independent API/agent deploys: implement API-first integration readiness in CI; the current jobs do not guarantee order.
+- Unchanged Swift cache: implement account/feed isolation, safe logout, pending-write ownership, and device cleanup.
+- Notifications after friends are invited: complete durable email/APNs, preferences, per-recipient legacy cutover, and rollback before external invitations.
+- General health/backup checks: require real daily content, actual delivery, tested alerts, and a timed restore before launch.
+
+## Historical implementation tasks
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Turn the `pulse-api` skeleton into the multi-user API: Supabase-JWT auth with an invite gate, feeds/memberships/topics/sources, brief ingest and read, feedback, devices; seed the `engineering` feed; make the daily pipeline dual-write briefs to the API. Notification fan-out stays off.
+**Original goal:** Turn the `pulse-api` skeleton into the multi-user API: Supabase-JWT auth with an invite gate, feeds/memberships/topics/sources, brief ingest and read, feedback, devices; seed the `engineering` feed; make the daily pipeline dual-write briefs to the API. Notification fan-out stays off.
 
 **Architecture:** axum 0.8 + sqlx 0.9 on the Hetzner box (Phase 0). Three route groups: `/v1` (Supabase JWT → `user_id`), `/internal` (static service token, pipeline), `/admin` (JWT + `is_admin`). JWTs are verified locally against a cached JWKS. Each aggregate has a `db/*.rs` query module and a `routes/*.rs` handler module; handlers are thin. The daily agent keeps writing GCS + manifest and additionally `POST`s the same brief to `/internal/briefs`.
 
@@ -2138,17 +2157,7 @@ ADMIN_EMAIL=you@example.com
 
 - [ ] **Step 3: Runbook** `docs/runbooks/phase1-setup.md`
 
-```markdown
-# Phase 1 setup (API MVP)
-
-1. Supabase: create project `eng-pulse` (EU), enable Apple, Google, Email (magic link/OTP), set SMTP (runbook phase0 §1). Copy the project ref.
-2. `PULSE_ENV` (GitHub environment `production`): set `SUPABASE_JWKS_URL=https://<ref>.supabase.co/auth/v1/.well-known/jwks.json`, `SUPABASE_ISSUER=https://<ref>.supabase.co/auth/v1`, add `ADMIN_EMAIL=<your email>`. No spaces.
-3. GCP: `printf '%s' '<same value as PIPELINE_SERVICE_TOKEN in PULSE_ENV>' | gcloud secrets create pipeline-service-token --project tsvet01 --data-file=-`.
-4. Merge; approve `deploy-api`; then `deploy-agents` redeploys the pipeline with `PULSE_API_URL` and the token (smoke checks `/healthz`).
-5. Seed on the box: `ssh -i ~/.ssh/pulse-deploy deploy@api.eng-pulse.tsvetkov.org 'cd /opt/pulse && docker compose run --rm pulse-api seed --sources https://storage.googleapis.com/tsvet01-agent-brain/config/sources.json --invite <CODE> --invite-uses 5'`.
-6. Verify with a real Supabase token (Supabase dashboard → Authentication → Users → generate magic link, or the `supabase` CLI): `curl -H "Authorization: Bearer $JWT" https://api.eng-pulse.tsvetkov.org/v1/me` → `403 invite_required`; `curl -X POST -H "Authorization: Bearer $JWT" -H 'content-type: application/json' -d '{"invite_code":"<CODE>"}' .../v1/users` → `201` with `is_admin: true` for `ADMIN_EMAIL`; `.../v1/feeds` lists `engineering`.
-7. Next morning: `psql` on the box (`docker compose exec postgres psql -U pulse -d pulse -c "select date, article_title, model, eval_score from briefs"`) shows the day's brief; GCS and manifest unchanged.
-```
+The original embedded runbook is superseded by the maintained [Phase 1 setup runbook](../../runbooks/phase1-setup.md). Follow its current configuration and deployment caveats together with the pilot plan; do not infer deployment ordering from this historical task.
 
 Update the `PULSE_ENV` template in `docs/runbooks/phase0-setup.md` §3 with `SUPABASE_AUDIENCE=authenticated` and `ADMIN_EMAIL=`. Root `AGENTS.md`: layout row for `apps/pulse-api` → "API: auth, feeds, briefs, devices; `/internal` for the pipeline".
 
@@ -2158,17 +2167,12 @@ Update the `PULSE_ENV` template in `docs/runbooks/phase0-setup.md` §3 with `SUP
 
 ---
 
-### Task 11: Phase boundary verification (after merge; Anton + me)
+### Task 11: Phase boundary verification — superseded
 
-- [ ] Prerequisites done (Supabase project, `PULSE_ENV`, `pipeline-service-token`).
-- [ ] `deploy-api` and `deploy-agents` green; smoke shows `check=pulse-api`.
-- [ ] Seed run on the box; `GET /v1/feeds` with a real token lists `engineering` with 47 sources.
-- [ ] Anton signs up with the invite from his phone's Supabase session or curl → `is_admin: true`; mints a second invite via `/admin/invites`.
-- [ ] Next 06:00 UTC run: `briefs` has the row, `LLM usage`/manifest unchanged, GCS files unchanged.
-- [ ] Record outcomes in memory; Phase 2 (Swift on API) plan starts only after this checklist passes.
+The current [pilot plan](2026-10-13-hetzner-multiuser-pilot.md) owns API readiness, app/notification readiness, and launch evidence. Retain production fan-out off until recipient routing is ready. A successful Phase 1 API deploy alone does not authorize invitations or establish multi-user readiness.
 
-## Self-review notes
+## Historical verification notes
 
-- Spec §3: every table present in 0002 (including `notifications_sent`, unused until Phase 3). §4: JWKS verification with pinned issuer/audience, invite gate 403, account linking on verified email, service token on `/internal`. §6: all `/v1`, `/internal`, `/admin` routes listed in the spec exist except `/admin` beyond invites (spec names only `/admin/*` generically). §9 row 1: seed + dual-write + fan-out off. §10: sqlx tests in CI, smoke hits `/healthz`.
-- Deliberately deferred: rate limiting, CORS (apps talk directly), `GET /internal/feedback` consumers (Phase 4 calibration), `POST /internal/runs` calls from the pipeline (Phase 4; endpoint exists), notification fan-out (Phase 3).
-- Type consistency checked: `SourceKind` string mapping lives in `feedcheck::kind_str` and `internal::kind_of`; `Brief`/`RunReport` shapes come from `pulse-core` unchanged.
+PR #185's head `6b87ca3` had successful Rust, API integration, and fixture checks at the 2026-10-13 review; deploy jobs were skipped on the PR. This does not demonstrate Supabase configuration, a deployed API MVP, real devices, notifications, backup restoration, or production data parity.
+
+The implementation intentionally left notification fan-out off, while rate limits and pipeline run/feedback reporting were deferred. The pilot plan records the additional corrections and launch gates. Checkboxes above are retained as implementation history and must not be interpreted as an up-to-date completion tracker.

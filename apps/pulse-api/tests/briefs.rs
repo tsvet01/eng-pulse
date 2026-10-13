@@ -79,7 +79,7 @@ async fn get_brief_returns_contract_shape(pool: PgPool) {
     .await;
     assert_eq!(status, 200);
     let b: pulse_core::Brief = serde_json::from_value(body).unwrap();
-    assert_eq!(b.payload.key_idea, "idea 2026-09-15");
+    assert_eq!(b.payload["key_idea"], "idea 2026-09-15");
     assert_eq!(b.feed_slug, "engineering");
     let (status, _) = send(
         &app,

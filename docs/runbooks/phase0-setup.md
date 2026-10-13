@@ -8,17 +8,18 @@ This runbook walks you through the one-time setup for Phase 0 deployment infrast
 
 ## 1. Supabase Project
 
-- [ ] Go to [supabase.com](https://supabase.com) and create a new project named `eng-pulse` in region **EU (Frankfurt)** (closest to Hetzner `nbg1`).
-- [ ] Note the project URL: `https://<project-ref>.supabase.co`
+For the [2026-10-13 pilot](../superpowers/plans/2026-10-13-hetzner-multiuser-pilot.md), Apple and email/OTP are required; Google is deferred if it would delay launch. This runbook provisions prerequisites, not the complete pilot. Verify the Supabase tier and any SMTP charges in the pilot cost worksheet.
+
+- [x] Supabase project supplied by Anton: `zimjnykjqsxwsidwmemd`. Project exists; region/tier still need dashboard verification. Use the existing project.
+- [x] Project URL: `https://zimjnykjqsxwsidwmemd.supabase.co` (2026-10-13).
 - [ ] **Authentication → Providers** — enable:
-  - **Apple**: enter Services ID and key from Apple Developer portal, team `9XQ7BW6Q4T`
-  - **Google**: enter OAuth 2.0 client IDs for iOS and web from GCP
+  - **Apple (native iOS)**: enable Sign in with Apple for App ID `org.tsvetkov.EngPulseSwift` in Apple Developer; add that ID to the Supabase Apple provider's Client IDs. Follow the [native sign-in guidance](https://supabase.com/docs/guides/auth/social-login/auth-apple). Native-only sign-in does not need the web OAuth Services ID/signing-secret rotation. If web OAuth is added later, configure it separately.
+  - **Google (optional for pilot)**: enter OAuth 2.0 client IDs for iOS and web from GCP
   - **Email**: magic link + OTP enabled
-- [ ] **Authentication → SMTP** — configure Anton's Gmail:
-  - SMTP host: `smtp.gmail.com:587`
-  - From email/password: use Gmail app password (not account password)
-- [ ] Copy the JWKS URL: `https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json`
-- [ ] Copy the issuer: `https://<project-ref>.supabase.co/auth/v1`
+- [ ] **Authentication → SMTP** — configure a verified sender and custom SMTP credentials directly in Supabase. Its default sender only reaches organization team addresses, so it cannot deliver OTPs to ordinary pilot users. Follow [custom SMTP setup](https://supabase.com/docs/guides/auth/auth-smtp); do not paste SMTP passwords into chat or commit them.
+- [ ] Keep email confirmation enabled. Confirm the **current** JWT signing key uses ES256 or RS256, as required by the API; a published standby key alone is insufficient. See [JWT signing keys](https://supabase.com/docs/guides/auth/signing-keys).
+- [x] Public JWKS responds with an ES256/P-256 key (2026-10-13): `https://zimjnykjqsxwsidwmemd.supabase.co/auth/v1/.well-known/jwks.json`. Real token verification remains pending.
+- [x] Issuer derived from the project URL: `https://zimjnykjqsxwsidwmemd.supabase.co/auth/v1`. Audience: `authenticated`.
 
 ---
 

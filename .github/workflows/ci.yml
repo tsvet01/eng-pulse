@@ -52,7 +52,7 @@ jobs:
           rust: ['Cargo.toml', 'Cargo.lock', 'libs/**', 'apps/daily-agent/**', 'apps/explorer-agent/**', 'apps/pulse-api/**']
           api: ['Cargo.toml', 'Cargo.lock', 'libs/**', 'apps/pulse-api/**']
           agents: ['Cargo.toml', 'Cargo.lock', 'libs/**', 'apps/daily-agent/**', 'apps/explorer-agent/**']
-          swift: ['apps/mobile-swift/**', 'docs/contracts/**']
+          swift: ['apps/mobile-swift/**', 'docs/contracts/**', 'scripts/check-brief-contracts.swift']
           infra: ['infra/**']
           functions: ['functions/**']
 
@@ -124,6 +124,10 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+    - name: Decode API brief fixtures with the app model
+      run: |
+        swiftc apps/mobile-swift/EngPulse/Models/InsightBrief.swift scripts/check-brief-contracts.swift -o /tmp/check-brief-contracts
+        /tmp/check-brief-contracts docs/contracts/brief*.json
     - run: touch apps/mobile-swift/Secrets.xcconfig
     - run: cp apps/mobile-swift/GoogleService-Info.plist.ci apps/mobile-swift/EngPulse/GoogleService-Info.plist
     - name: Build and test

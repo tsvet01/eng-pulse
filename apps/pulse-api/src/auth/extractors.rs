@@ -59,6 +59,9 @@ impl FromRequestParts<AppState> for AuthUser {
         let user: User = users::find_by_identity(&state.pool, &claims.iss, &claims.sub)
             .await?
             .ok_or(ApiError::InviteRequired)?;
+        if !user.is_active {
+            return Err(ApiError::Forbidden);
+        }
         Ok(AuthUser {
             id: user.id,
             email: user.email,

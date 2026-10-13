@@ -27,3 +27,14 @@ struct InsightBrief: Codable {
         return try? JSONDecoder().decode(InsightBrief.self, from: data)
     }
 }
+
+extension InsightBrief {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        keyIdea = try values.decodeIfPresent(String.self, forKey: .keyIdea) ?? ""
+        whyItMatters = try values.decodeIfPresent(String.self, forKey: .whyItMatters) ?? ""
+        whatToChange = try values.decodeIfPresent(String.self, forKey: .whatToChange)
+        deepDive = try values.decode(String.self, forKey: .deepDive)
+        meta = try values.decodeIfPresent(InsightBriefMeta.self, forKey: .meta)
+    }
+}

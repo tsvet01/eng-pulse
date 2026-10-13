@@ -1,6 +1,6 @@
 use crate::{
     auth::extractors::{AuthUser, Identity},
-    db::{invites, users},
+    db::{feeds, invites, users},
     error::ApiError,
     state::AppState,
 };
@@ -27,15 +27,16 @@ struct Signup {
 /// Sign-up with an invite code. Already-registered callers get their existing
 /// record back (200) instead of re-consuming an invite.
 ///
-/// No automatic account linking: attaching a new identity to an existing
-/// email is only ever done here, and only because a valid invite was just
-/// consumed in the same transaction.
+/// An invite never grants access to another identity with the same email.
 async fn signup(
     State(state): State<AppState>,
     Identity(claims): Identity,
     Json(body): Json<Signup>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     if let Some(u) = users::find_by_identity(&state.pool, &claims.iss, &claims.sub).await? {
+        if !u.is_active {
+            return Err(ApiError::Forbidden);
+        }
         return Ok((StatusCode::OK, Json(user_json(&u))));
     }
     let email = claims
@@ -46,15 +47,20 @@ async fn signup(
         .await?
         .ok_or_else(|| ApiError::BadRequest("invite code is invalid, expired or used up".into()))?;
     let is_admin = state.cfg.admin_email.as_deref() == Some(email.as_str());
-    let user = match users::find_by_email_tx(&mut tx, &email).await? {
-        Some(existing) => existing,
-        None => users::insert_user(&mut tx, &email, is_admin)
-            .await
-            .map_err(conflict_on_unique_violation)?,
-    };
+    if users::find_by_email_tx(&mut tx, &email).await?.is_some() {
+        return Err(ApiError::Conflict(
+            "account already exists; sign in with the original identity",
+        ));
+    }
+    let user = users::insert_user(&mut tx, &email, is_admin)
+        .await
+        .map_err(conflict_on_unique_violation)?;
     users::insert_identity(&mut tx, user.id, &claims.iss, &claims.sub)
         .await
         .map_err(conflict_on_unique_violation)?;
+    if !feeds::join_pilot(&mut tx, user.id).await? {
+        return Err(ApiError::Unavailable("engineering feed is not ready"));
+    }
     tx.commit().await?;
     Ok((StatusCode::CREATED, Json(user_json(&user))))
 }

@@ -2,7 +2,7 @@
 //! GCS. Enabled only when both `PULSE_API_URL` and `PIPELINE_SERVICE_TOKEN` are
 //! set, so an unconfigured run keeps its previous behavior.
 
-use pulse_core::{Brief, Feed, InsightBrief};
+use pulse_core::{Brief, Feed};
 use std::time::Duration;
 
 const API_TIMEOUT_SECS: u64 = 20;
@@ -102,8 +102,9 @@ pub fn brief_for_api(
     model: Option<&str>,
     eval_score: Option<f64>,
 ) -> Result<Brief, String> {
-    let payload: InsightBrief =
+    let payload: serde_json::Value =
         serde_json::from_str(brief_json).map_err(|e| format!("brief json: {e}"))?;
+    pulse_core::validate_payload(&payload).map_err(|e| format!("brief payload: {e}"))?;
     Ok(Brief {
         feed_slug: "engineering".into(),
         date: date.into(),
@@ -199,6 +200,29 @@ mod tests {
     fn from_env_requires_both_vars() {
         assert!(PulseApi::from_pair(None, Some("t".into())).is_none());
         assert!(PulseApi::from_pair(Some("https://api".into()), Some("t".into())).is_some());
+    }
+
+    #[test]
+    fn mapper_preserves_complete_payload_and_metadata() {
+        for (name, fixture) in pulse_core::fixtures() {
+            if !name.starts_with("brief") {
+                continue;
+            }
+            let expected: Brief = serde_json::from_value(fixture).unwrap();
+            let actual = brief_for_api(
+                &expected.date,
+                &expected.payload.to_string(),
+                &expected.article_url,
+                &expected.article_title,
+                expected.model.as_deref(),
+                expected.eval_score,
+            )
+            .unwrap();
+            assert_eq!(actual, expected);
+        }
+        for payload in ["null", "[]", "{}", r#"{"deep_dive":42}"#] {
+            assert!(brief_for_api("2026-10-13", payload, "u", "t", None, None).is_err());
+        }
     }
 
     #[test]

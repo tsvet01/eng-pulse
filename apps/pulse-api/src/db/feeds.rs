@@ -1,4 +1,4 @@
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 #[derive(Debug, sqlx::FromRow)]
@@ -18,7 +18,7 @@ pub struct SourceRow {
 }
 
 pub async fn list_for_user(pool: &PgPool, user_id: Uuid) -> sqlx::Result<Vec<FeedRow>> {
-    sqlx::query_as("select f.id, f.slug, f.name, f.description, f.is_active, m.role from feeds f left join memberships m on m.feed_id = f.id and m.user_id = $1 where f.is_active order by f.slug")
+    sqlx::query_as("select f.id, f.slug, f.name, f.description, f.is_active, m.role from feeds f left join memberships m on m.feed_id = f.id and m.user_id = $1 where f.is_active and f.slug = 'engineering' order by f.slug")
         .bind(user_id).fetch_all(pool).await
 }
 
@@ -58,10 +58,12 @@ pub async fn create(
 }
 
 pub async fn exists(pool: &PgPool, feed_id: Uuid) -> sqlx::Result<bool> {
-    sqlx::query_scalar("select exists(select 1 from feeds where id = $1 and is_active)")
-        .bind(feed_id)
-        .fetch_one(pool)
-        .await
+    sqlx::query_scalar(
+        "select exists(select 1 from feeds where id = $1 and is_active and slug = 'engineering')",
+    )
+    .bind(feed_id)
+    .fetch_one(pool)
+    .await
 }
 
 pub async fn is_member(pool: &PgPool, user_id: Uuid, feed_id: Uuid) -> sqlx::Result<bool> {
@@ -138,4 +140,11 @@ pub async fn remove_source(pool: &PgPool, feed_id: Uuid, url: &str) -> sqlx::Res
         .execute(pool)
         .await
         .map(|_| ())
+}
+
+/// Enrollment and invite consumption commit together, or neither does.
+pub async fn join_pilot(tx: &mut Transaction<'_, Postgres>, user_id: Uuid) -> sqlx::Result<bool> {
+    let result = sqlx::query("insert into memberships (user_id, feed_id) select $1, id from feeds where slug = 'engineering' and is_active on conflict (user_id, feed_id) do nothing")
+        .bind(user_id).execute(&mut **tx).await?;
+    Ok(result.rows_affected() == 1)
 }
