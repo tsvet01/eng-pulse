@@ -4,7 +4,8 @@ on:
   push:
     branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
+    # Validate the mobile checkpoint stacked on the API readiness PR.
+    branches: [ "main", "plan/phase1-api-mvp" ]
   workflow_dispatch:
     inputs:
       deploy_api:
