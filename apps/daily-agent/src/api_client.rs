@@ -61,7 +61,7 @@ impl PulseApi {
         }
     }
 
-    /// Feed count from `/internal/feeds`; exercises the service token too.
+    /// Verify authentication and the active engineering seed before enabling writes.
     pub async fn internal_feeds(&self) -> Result<usize, String> {
         let resp = self
             .http
@@ -75,6 +75,9 @@ impl PulseApi {
             return Err(format!("internal/feeds {status}"));
         }
         let feeds: Vec<Feed> = resp.json().await.map_err(|e| e.to_string())?;
+        if feeds.len() != 1 || feeds[0].slug != "engineering" || !feeds[0].is_active {
+            return Err("internal/feeds must contain exactly the active engineering feed".into());
+        }
         Ok(feeds.len())
     }
 
@@ -194,6 +197,33 @@ mod tests {
             .await;
         let api = PulseApi::new(server.uri(), "bad".into());
         assert!(api.internal_feeds().await.unwrap_err().contains("401"));
+    }
+
+    #[tokio::test]
+    async fn internal_feeds_requires_exactly_the_active_pilot_feed() {
+        let engineering = serde_json::json!({
+            "slug":"engineering", "name":"Engineering", "description":null,
+            "topics":[], "sources":[], "is_active":true
+        });
+        let mut inactive = engineering.clone();
+        inactive["is_active"] = false.into();
+        let mut other = engineering.clone();
+        other["slug"] = "other".into();
+        for feeds in [
+            vec![],
+            vec![inactive],
+            vec![other.clone()],
+            vec![engineering, other],
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/internal/feeds"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(&feeds))
+                .mount(&server)
+                .await;
+            let api = PulseApi::new(server.uri(), "tok".into());
+            assert!(api.internal_feeds().await.is_err(), "accepted {feeds:?}");
+        }
     }
 
     #[test]
