@@ -105,6 +105,8 @@ Swift work and the delivery worker may be developed independently after the API 
 
 **Local validation:** Authentication/admission tests cover expired/rejected refresh, stale responses after logout, malformed sessions, invalid invites, disabled users and API outage. The iOS simulator build passes; Keychain save/update/removal and build-setting injection pass with local ad-hoc signing. The full local suites pass: 25 authentication/admission tests and 54 iOS tests. Fresh review found a multi-window session ownership gap; a failing regression test reproduced it, and the shared app-wide session owner plus delayed Apple callback checks now pass. Native Apple/device checks and the full two-account offline reader journey remain pending. No cloud deployment, GCP pipeline changes or additional sign-in emails occurred.
 
+**Device build, 2026-10-15:** Development provisioning now supports Apple sign-in and push for the new bundle. The complete entitlement set still fails because CarPlay is not authorized. A local authentication-only build, using a temporary entitlement override without CarPlay, compiled and passed strict signature verification with the correct identity and Supabase configuration. The repository's entitlements are unchanged. USB/Finder recognize the test iPhone, but Xcode pairing is still unresolved; installation and native Apple sign-in are not yet verified. Full CarPlay provisioning remains a release gate.
+
 ### 5. Durable notifications and controlled sender cutover
 
 **Targets:** a new API migration, publication/outbox DB code, a small Rust worker, Compose configuration, and recipient filtering in legacy functions where needed.
