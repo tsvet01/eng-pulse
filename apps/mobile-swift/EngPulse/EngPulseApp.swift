@@ -20,7 +20,13 @@ struct EngPulseApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            Group {
+                if PilotBuild.allowsLegacyServices {
+                    ContentView()
+                } else {
+                    PilotEntryView()
+                }
+            }
                 .environmentObject(appState)
                 .environmentObject(ttsService)
                 .task {
@@ -49,6 +55,7 @@ struct EngPulseApp: App {
     }
 
     private func setupNotifications() async {
+        guard PilotBuild.allowsLegacyServices else { return }
         let granted = await NotificationService.shared.requestAuthorization()
         print("Notification permission: \(granted ? "granted" : "denied")")
         if granted {
@@ -64,6 +71,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        guard PilotBuild.allowsLegacyServices else { return true }
         FirebaseApp.configure()
         UNUserNotificationCenter.current().delegate = NotificationService.shared
 
@@ -99,6 +107,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didReceiveRemoteNotification userInfo: [AnyHashable: Any]
     ) async -> UIBackgroundFetchResult {
+        guard PilotBuild.allowsLegacyServices else { return .noData }
         let articleUrl = userInfo["article_url"] as? String
         await MainActor.run {
             if let url = articleUrl {
@@ -132,6 +141,7 @@ class AppState: ObservableObject {
     /// Coalesces concurrent callers (phone UI and the CarPlay scene can both
     /// trigger a load at launch) into a single fetch.
     func loadSummaries() async {
+        guard PilotBuild.allowsLegacyServices else { return }
         if let activeLoad {
             await activeLoad.value
             return

@@ -11,11 +11,16 @@ final class AppServices {
     let cacheService: CacheService
     let appState: AppState
     let ttsService: TTSService
+    let pilotAccountModel: PilotAccountModel?
 
     private init() {
         let cache = CacheService()
         cacheService = cache
         appState = AppState(cacheService: cache)
         ttsService = TTSService(cacheService: cache)
+        if PilotBuild.isEnabled, let config = try? PilotConfiguration.from() {
+            let auth = PilotAuthClient(configuration: config, storage: PilotKeychain())
+            pilotAccountModel = PilotAccountModel(auth: auth, api: PilotAPIClient(configuration: config, auth: auth))
+        } else { pilotAccountModel = nil }
     }
 }

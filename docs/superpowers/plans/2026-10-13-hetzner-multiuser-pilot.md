@@ -1,6 +1,6 @@
 # Hetzner Multi-User Pilot — Delivery Plan
 
-**Updated:** 2026-10-13. **Status:** first API readiness tranche implemented and locally verified; deployment and launch gates remain open.
+**Updated:** 2026-10-15. **Status:** first API readiness tranche implemented; Supabase email signup and repeat sign-in verified; Apple App ID and Supabase Client ID configured. Swift sign-in/admission checkpoint implemented locally; device signing, reading migration, deployment and launch gates remain open.
 **Goal:** About five invited iOS users use the shared engineering brief through the Hetzner API, with sign-in, offline reading/TTS, personal feedback, and reliable email/APNs preferences. Observe 14 days before expanding.
 **Design:** [Multi-user design](../specs/2026-09-01-multiuser-cohorts-design.md).
 **Baseline implementation:** [PR #185](https://github.com/tsvet01/eng-pulse/pull/185), branch `plan/phase1-api-mvp`, plus its [historical implementation plan](2026-09-16-phase1-api-mvp.md).
@@ -9,6 +9,7 @@
 
 - Keep the GCP daily/explorer jobs, schedules, models/prompts, secrets, GCS artifacts, and manifest behavior. Add/reliably operate the API mirror; do not migrate job execution to Hetzner.
 - Use the existing Hetzner API/Postgres infrastructure and Supabase identity. First release: Apple and email/OTP. Google is a later addition unless already working without delaying the pilot.
+- Use `org.tsvetkov.eng-pulse` for the pilot iOS app (Anton, 2026-10-13); keep the display name **Eng Pulse**. Complete Apple registration/signing, Supabase audience setup, Firebase removal or matching configuration, and new APNs routing before distribution. Preserve the legacy GCP sender and old app identity. See [app identity setup](../../runbooks/phase0-setup.md#pilot-app-identity).
 - Offer one shared `engineering` feed. Join it during sign-up; ordinary users cannot create feeds or edit sources/topics. Enforce the restriction server-side. API configuration edits must not pretend to change the existing GCS-configured pipeline.
 - Complete notification delivery and account isolation before inviting external users. API endpoint coverage alone is not launch readiness.
 - Retain old clients and notification recipients through an explicit compatibility period. Cut over pilot recipients individually, with rollback.
@@ -51,10 +52,15 @@ Snapshot from the 2026-10-13 review; recheck before deployment:
 
 **Exit:** focused authorization/contract tests and the existing CI checks pass on the release revision. This stage does not add new generation behavior.
 
-**Local verification, 2026-10-13:** 205 Rust tests pass against disposable Postgres 18.6; workspace/all-target Clippy with warnings denied and rustfmt pass. Swift contract checks pass for generated full/minimal fixtures and the public 2026-10-13 GCS brief. Fixture regeneration is deterministic. Actionlint reports the same two pre-existing shellcheck findings (SC2034/SC2129) as the original PR; the added Swift check has none. Remote CI must run on the pushed revision. Full iOS simulator/device validation is still separate from the standalone decoder check.
+**Verification, 2026-10-13:** 205 Rust tests pass against disposable Postgres 18.6; workspace/all-target Clippy with warnings denied and rustfmt pass. Swift contract checks pass for generated full/minimal fixtures and the public 2026-10-13 GCS brief. Fixture regeneration is deterministic. Actionlint reports the same two pre-existing shellcheck findings (SC2034/SC2129) as the original PR; the added Swift check has none. [Remote CI on API-readiness commit `cc743150`](https://github.com/tsvet01/eng-pulse/actions/runs/38464754868) passed Rust, API integration, fixtures and Swift checks; deployment jobs were skipped. The subsequent bundle ID rename has passed local project/plist validation but still needs CI and signed-device validation.
 
-**Supabase evidence:** Anton supplied project `zimjnykjqsxwsidwmemd`; its public JWKS publishes ES256/P-256. Admin email confirmed as `anton.tsvetkov@gmail.com`. Provider/SMTP settings, current-token algorithm, region/tier and production secret installation still need verification; no cloud configuration was changed by this tranche.
+**Supabase configuration, verified 2026-10-13:** Project `zimjnykjqsxwsidwmemd` is healthy in Frankfurt (`eu-central-1`) on the Free plan; its current signing key is ECC P-256/ES256 and its public JWKS publishes that key. Email and email confirmation are enabled. Apple is enabled but has the team ID instead of the app bundle ID; the correction is not saved. Anton saved Resend SMTP credentials directly in Supabase; enabled SMTP and stored password were verified. Sender `Eng Pulse <eng-pulse@n21.me>` uses the verified `n21.me` domain. Signup and sign-in templates now show one-time codes, with saved content verified. Admin email confirmed as `anton.tsvetkov@gmail.com`. Email and token test results are below; production secret installation remains open. GCP and Hetzner configuration are unchanged.
 
+**Email test result, 2026-10-14:** Exactly two authorized emails were delivered: [signup](https://resend.com/emails/01a138ea-dbbe-7b20-9bb2-09a439a1e537) and [repeat sign-in](https://resend.com/emails/01a138f8-613f-76b6-be36-4b04cff13112). Anton entered both codes locally; both were accepted. Both ES256 signatures verified against the project JWKS, with matching issuer/audience, valid expiry and confirmed administrator email. Both temporary test sessions were signed out. No API membership or administrator role was created by this test. Apple configuration, production secret installation, deployed API authorization and Swift launch gates remain open.
+
+**Apple setup, 2026-10-14:** With Anton's confirmation, registered `org.tsvetkov.eng-pulse` under team `9XQ7BW6Q4T`, with Sign in with Apple (primary App ID) and Push Notifications. Apple Developer lists the new identifier alongside both legacy app IDs. With separate explicit approval, replaced the incorrect team ID in Supabase Apple Client IDs with `org.tsvetkov.eng-pulse`; persistence verified after a page reload. The Apple provider remains enabled and allowing users without an email remains off. This supersedes the unsaved Apple configuration noted on 2026-10-13. CarPlay authorization, provisioning and native signed-device sign-in remain open.
+
+**App Store Connect, verified 2026-10-15:** Anton had completed the terms step. Refreshing the stale tab cleared the agreement screen and the Apps page opened normally, showing **No Apps** for the current account. The agreement is no longer a blocker; create an Eng Pulse app record for `org.tsvetkov.eng-pulse` before TestFlight distribution.
 
 ### 2. Deploy and reconcile the API mirror
 
@@ -95,6 +101,10 @@ Swift work and the delivery worker may be developed independently after the API 
 - [ ] Implement safe device logout/account switching, including queued cleanup when offline and server-side ownership checks. Re-evaluate notification targets when the account changes. Remove the new build's Firebase Auth path only after API feedback/device registration works.
 - [ ] Provide email/push preferences and verify opt-out on actual delivery. Document admin revocation and data cleanup for someone leaving the pilot.
 
+**Swift checkpoint, 2026-10-15:** Added a separate pilot entry flow for the renamed bundle, with native Apple nonce exchange, email OTP, Keychain storage, refresh, invite admission and sign-out. The client rejects responses from old sessions and distinguishes an API outage from missing or revoked access. The renamed app cannot call legacy Firebase feedback/device paths or load old reader caches. This is a development checkpoint: an admitted account sees an explicit readiness message; reading/audio/notifications are not enabled. Firebase remains available only to an explicit legacy build. Supabase session signup alone is not API membership.
+
+**Local validation:** Authentication/admission tests cover expired/rejected refresh, stale responses after logout, malformed sessions, invalid invites, disabled users and API outage. The iOS simulator build passes; Keychain save/update/removal and build-setting injection pass with local ad-hoc signing. The full local suites pass: 25 authentication/admission tests and 54 iOS tests. Fresh review found a multi-window session ownership gap; a failing regression test reproduced it, and the shared app-wide session owner plus delayed Apple callback checks now pass. Native Apple/device checks and the full two-account offline reader journey remain pending. No cloud deployment, GCP pipeline changes or additional sign-in emails occurred.
+
 ### 5. Durable notifications and controlled sender cutover
 
 **Targets:** a new API migration, publication/outbox DB code, a small Rust worker, Compose configuration, and recipient filtering in legacy functions where needed.
@@ -121,10 +131,10 @@ Fill this table during execution; unchecked tasks and blank evidence mean the ga
 | Gate | Required evidence | Result / date / reference |
 |---|---|---|
 | Baseline | Revisions, CI, config presence, attributed cost worksheet and thresholds | Pending |
-| API access | Real sign-in/invite, engineering membership, ownership/revocation checks | Pending |
+| API access | Real sign-in/invite, engineering membership, ownership/revocation checks | Supabase email signup/repeat sign-in and token checks passed 2026-10-14; deployed API invite/membership/access checks pending |
 | Data | History parity, next scheduled run, outage + reconciliation proof | Pending |
 | Recovery | Timed restore, alert tests, rollback procedure/results | Pending |
-| Swift | Two-account real-device checks, offline account switching, TTS/CarPlay | Pending |
+| Swift | Two-account real-device checks, offline account switching, TTS/CarPlay | Local sign-in/admission checkpoint implemented and simulator-tested 2026-10-15; reader migration and real-device gates pending |
 | Delivery | Actual email/APNs receipt, preferences, retry/replay and legacy isolation | Pending |
 | Pilot launch | All above passed; release/build IDs and about five users onboarded | Pending |
 | Pilot review | 14-day usage, reliability, cost, operating effort, decision | Pending |

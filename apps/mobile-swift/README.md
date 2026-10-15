@@ -4,7 +4,7 @@ Native iOS app for viewing AI-curated daily software engineering summaries.
 
 > Part of [Eng Pulse](../../README.md) - see root README for system overview.
 
-## Features
+## Existing reader features
 
 - **Daily Summaries**: View AI-generated article summaries with markdown rendering
 - **Model Filter**: Filter by AI model (Gemini, Claude, GPT) via toolbar menu
@@ -15,6 +15,8 @@ Native iOS app for viewing AI-curated daily software engineering summaries.
 - **Pull to Refresh**: Manual refresh for latest content
 - **Share**: Share articles with other apps
 - **Original Links**: Direct links to source articles
+
+The features below describe the existing reader. The renamed pilot build currently stops at sign-in and invitation admission; its reading, feedback, delivery and offline migration are still gated.
 
 ## Architecture
 
@@ -49,6 +51,34 @@ EngPulse/
 - Apple Developer account (for device testing)
 
 ## Setup
+
+### Pilot app identity
+
+The pilot bundle ID is `org.tsvetkov.eng-pulse`; the display name remains **Eng Pulse**. Before distributing a device build, complete the [app identity setup](../../docs/runbooks/phase0-setup.md#pilot-app-identity).
+
+This installs as a separate app from `org.tsvetkov.EngPulseSwift`, with separate local data and device tokens. The existing GCP notifier still targets the old app. The pilot's API device registration and APNs sender must be ready before enabling notifications for the new app; do not change the legacy sender's default bundle ID. Firebase Auth remains in source for explicit legacy builds. The new bundle never initializes Firebase, registers a token with the legacy sender, submits legacy feedback, or opens the legacy cache. The CI Firebase plist is a build placeholder, not a working configuration.
+
+### Pilot sign-in checkpoint
+
+This branch defaults to `PILOT_AUTH_ENABLED=YES` for `org.tsvetkov.eng-pulse`. It is a development checkpoint, **not the reader release**. It implements native Apple and email-code sign-in, Keychain session storage/refresh, `/v1/me` admission checks, invite signup, and local sign-out. An API outage leaves a retry screen rather than granting access. All app windows share one session owner. A late response or Apple callback from a previous session is discarded, including when the same user signs in again.
+
+1. Copy `Secrets.xcconfig.example` to the ignored `Secrets.xcconfig` if it does not exist. Set `SUPABASE_PUBLISHABLE_KEY` to this project's **public publishable key**, never the service-role key, SMTP password, or signing key. Keep actual configuration out of git.
+2. The tracked `EngPulse/Info.plist` uses build-setting substitutions for credentials. Keep it that way; actual values belong in the ignored `Secrets.xcconfig`. `Info.plist.template` has matching pilot substitutions if a fresh template is needed.
+3. For simulator builds, use the tracked `GoogleService-Info.plist.ci` placeholder as the ignored `EngPulse/GoogleService-Info.plist` build resource. Firebase is not initialized in pilot mode.
+4. Run the app. Sign-in uses the configured Supabase project; admission uses `https://api.eng-pulse.tsvetkov.org/v1`. The API release, seed and invite still need operator completion before real membership can pass.
+5. Use a signed device build to verify native Apple sign-in. Existing legacy readers are preserved; an explicit legacy development build must use both `PILOT_AUTH_ENABLED=NO` and the old `org.tsvetkov.EngPulseSwift` bundle ID with matching Firebase/provisioning settings.
+
+Automated authentication tests use fake server responses and send no emails.
+
+```bash
+swift test --package-path apps/mobile-swift
+xcodebuild -project apps/mobile-swift/EngPulse.xcodeproj -scheme EngPulse \
+  -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
+  CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=YES CODE_SIGNING_ALLOWED=YES \
+  SUPABASE_PUBLISHABLE_KEY=public-test-placeholder test
+```
+
+The simulator needs local ad-hoc signing for the Keychain integration test; disabling signing prevents secure-storage access. CI runs the package tests and existing iOS suite, and checks the built app contains the pilot settings. Reading/TTS/CarPlay, account-scoped caches, feedback queues, device cleanup and actual notification delivery remain launch gates in the [pilot plan](../../docs/superpowers/plans/2026-10-13-hetzner-multiuser-pilot.md).
 
 ### Build and Run
 
@@ -209,7 +239,7 @@ xcodebuild -scheme EngPulse -sdk iphonesimulator -destination 'platform=iOS Simu
 xcrun devicectl device install app --device <DEVICE_ID> build/Debug-iphoneos/EngPulse.app
 
 # Launch
-xcrun devicectl device process launch --device <DEVICE_ID> org.tsvetkov.EngPulseSwift
+xcrun devicectl device process launch --device <DEVICE_ID> org.tsvetkov.eng-pulse
 ```
 
 ### Send Test Notification

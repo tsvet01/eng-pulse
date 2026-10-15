@@ -18,6 +18,7 @@ class NotificationService: NSObject, ObservableObject {
 
     /// Request notification permissions
     func requestAuthorization() async -> Bool {
+        guard PilotBuild.allowsLegacyServices else { return false }
         let center = UNUserNotificationCenter.current()
 
         do {
@@ -42,8 +43,8 @@ class NotificationService: NSObject, ObservableObject {
 
     /// Called when APNs token is received
     func didRegisterForRemoteNotifications(deviceToken: Data) {
+        guard PilotBuild.allowsLegacyServices else { return }
         let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
-        print("APNs token: \(token)")
 
         // In a real app with Firebase, this would be converted to FCM token
         // For now, we'll use the APNs token directly
@@ -57,6 +58,7 @@ class NotificationService: NSObject, ObservableObject {
 
     /// Register APNs token with backend
     private func registerTokenWithBackend(_ token: String) async {
+        guard PilotBuild.allowsLegacyServices else { return }
         guard let url = URL(string: "https://us-central1-tsvet01.cloudfunctions.net/register-apns-token") else {
             return
         }
@@ -119,6 +121,7 @@ extension NotificationService: UNUserNotificationCenterDelegate {
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
+        guard PilotBuild.allowsLegacyServices else { return [] }
         return [.banner, .badge, .sound]
     }
 
@@ -128,6 +131,7 @@ extension NotificationService: UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
+        guard PilotBuild.allowsLegacyServices else { completionHandler(); return }
         let userInfo = response.notification.request.content.userInfo
 
         // Extract article URL safely

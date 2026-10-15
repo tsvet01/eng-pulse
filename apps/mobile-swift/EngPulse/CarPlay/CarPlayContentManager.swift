@@ -47,6 +47,13 @@ final class CarPlayContentManager {
     }
 
     func connect() {
+        guard PilotBuild.allowsLegacyServices else {
+            let message = CPListItem(text: "Eng Pulse pilot", detailText: "Reading and audio are not yet available in this build.")
+            message.isEnabled = false
+            let template = CPListTemplate(title: "Eng Pulse", sections: [CPListSection(items: [message])])
+            interfaceController.setRootTemplate(template, animated: false, completion: nil)
+            return
+        }
         let tabBar = CPTabBarTemplate(templates: [latestTemplate, topicsTemplate])
         interfaceController.setRootTemplate(tabBar, animated: false, completion: nil)
 

@@ -46,6 +46,10 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>PilotAuthEnabled</key>
+	<string>$(PILOT_AUTH_ENABLED)</string>
+	<key>SupabasePublishableKey</key>
+	<string>$(SUPABASE_PUBLISHABLE_KEY)</string>
 	<key>GoogleCloudTTSAPIKey</key>
 	<string>YOUR_API_KEY</string>
 </dict>
