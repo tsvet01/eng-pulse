@@ -47,6 +47,8 @@ jobs:
       swift: ${{ steps.f.outputs.swift }}
       infra: ${{ steps.f.outputs.infra }}
       functions: ${{ steps.f.outputs.functions }}
+      deploy_api: ${{ steps.release.outputs.deploy_api }}
+      deploy_agents: ${{ steps.release.outputs.deploy_agents }}
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - id: f
@@ -59,6 +61,15 @@ jobs:
           swift: ['apps/mobile-swift/**', 'docs/contracts/**', 'scripts/check-brief-contracts.swift']
           infra: ['infra/**']
           functions: ['functions/**']
+    - name: Select release targets
+      id: release
+      env:
+        RELEASE_EVENT: ${{ github.event_name }}
+        API_CHANGED: ${{ steps.f.outputs.api }}
+        AGENTS_CHANGED: ${{ steps.f.outputs.agents }}
+        REQUEST_API: ${{ inputs.deploy_api }}
+        REQUEST_AGENTS: ${{ inputs.deploy_agents }}
+      run: python3 scripts/release_selection.py >> "$GITHUB_OUTPUT"
 
   rust:
     needs: changes
@@ -224,11 +235,11 @@ jobs:
     if: |
       !cancelled() && github.ref == 'refs/heads/main' &&
       needs.changes.result == 'success' &&
-      (needs.changes.outputs.agents == 'true' || inputs.deploy_agents == true) &&
+      needs.changes.outputs.deploy_agents == 'true' &&
       needs.rust.result == 'success' && needs.fixtures.result == 'success' &&
       needs.release-checks.result == 'success' &&
       (needs.deploy-api.result == 'success' ||
-       (needs.deploy-api.result == 'skipped' && needs.changes.outputs.api != 'true' && inputs.deploy_api != true))
+       (needs.deploy-api.result == 'skipped' && needs.changes.outputs.deploy_api != 'true'))
     runs-on: ubuntu-latest
     concurrency: { group: deploy-agents-main, cancel-in-progress: false }  # serialize deploys
     steps:
@@ -301,7 +312,7 @@ jobs:
     needs: [changes, rust, api-it]
     if: |
       !cancelled() && github.ref == 'refs/heads/main' && needs.changes.result == 'success' &&
-      (needs.changes.outputs.api == 'true' || inputs.deploy_api == true) &&
+      needs.changes.outputs.deploy_api == 'true' &&
       needs.rust.result == 'success' && needs.api-it.result == 'success'
     runs-on: ubuntu-latest
     concurrency: { group: deploy-api-main, cancel-in-progress: false }  # serialize deploys
