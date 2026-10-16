@@ -4,13 +4,17 @@ on:
   push:
     branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "plan/phase1-api-mvp" ]
   workflow_dispatch:
     inputs:
       deploy_api:
         type: boolean
         default: false
         description: "Force deploy-api"
+      deploy_agents:
+        type: boolean
+        default: false
+        description: "Deploy agents using the current PULSE_API_ENABLED repository variable"
 
 permissions:
   contents: read
@@ -43,22 +47,33 @@ jobs:
       swift: ${{ steps.f.outputs.swift }}
       infra: ${{ steps.f.outputs.infra }}
       functions: ${{ steps.f.outputs.functions }}
+      deploy_api: ${{ steps.release.outputs.deploy_api }}
+      deploy_agents: ${{ steps.release.outputs.deploy_agents }}
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - id: f
       uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
       with:
         filters: |
-          rust: ['Cargo.toml', 'Cargo.lock', 'libs/**', 'apps/daily-agent/**', 'apps/explorer-agent/**', 'apps/pulse-api/**']
-          api: ['Cargo.toml', 'Cargo.lock', 'libs/**', 'apps/pulse-api/**']
-          agents: ['Cargo.toml', 'Cargo.lock', 'libs/**', 'apps/daily-agent/**', 'apps/explorer-agent/**']
-          swift: ['apps/mobile-swift/**', 'docs/contracts/**']
+          rust: ['Cargo.toml', 'Cargo.lock', 'libs/**', 'apps/daily-agent/**', 'apps/explorer-agent/**', 'apps/pulse-api/**', 'scripts/deploy-daily-agent.sh']
+          api: ['Cargo.toml', 'Cargo.lock', 'libs/**', 'apps/pulse-api/**', 'config/pilot-auth.json', 'scripts/prepare_api_env.py']
+          agents: ['Cargo.toml', 'Cargo.lock', 'libs/**', 'apps/daily-agent/**', 'apps/explorer-agent/**', 'scripts/deploy-daily-agent.sh']
+          swift: ['apps/mobile-swift/**', 'docs/contracts/**', 'scripts/check-brief-contracts.swift']
           infra: ['infra/**']
           functions: ['functions/**']
+    - name: Select release targets
+      id: release
+      env:
+        RELEASE_EVENT: ${{ github.event_name }}
+        API_CHANGED: ${{ steps.f.outputs.api }}
+        AGENTS_CHANGED: ${{ steps.f.outputs.agents }}
+        REQUEST_API: ${{ inputs.deploy_api }}
+        REQUEST_AGENTS: ${{ inputs.deploy_agents }}
+      run: python3 scripts/release_selection.py >> "$GITHUB_OUTPUT"
 
   rust:
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.deploy_api == 'true' || inputs.deploy_agents == true
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -67,11 +82,12 @@ jobs:
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
     - run: cargo fmt --all -- --check
     - run: cargo clippy --workspace -- -D warnings
-    - run: cargo test --workspace
+    # pulse-api's tests need Postgres; the api-it job runs them against its service.
+    - run: cargo test --workspace --exclude pulse-api
 
   fixtures:
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.rust == 'true' || inputs.deploy_agents == true
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -86,7 +102,7 @@ jobs:
 
   api-it:
     needs: changes
-    if: needs.changes.outputs.api == 'true'
+    if: needs.changes.outputs.api == 'true' || inputs.deploy_api == true
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -105,7 +121,12 @@ jobs:
       with:
         cache-on-failure: true
     - run: cargo build -p pulse-api
+    - run: cargo test -p pulse-api
     - name: Start pulse-api and wait for /healthz
+      env:
+        SUPABASE_JWKS_URL: https://example.invalid/jwks
+        SUPABASE_ISSUER: https://example.invalid
+        PIPELINE_SERVICE_TOKEN: ci
       run: |
         ./target/debug/pulse-api &
         for i in $(seq 1 30); do curl -sf localhost:8080/healthz && break; sleep 1; done
@@ -118,6 +139,10 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+    - name: Decode API brief fixtures with the app model
+      run: |
+        swiftc apps/mobile-swift/EngPulse/Models/InsightBrief.swift scripts/check-brief-contracts.swift -o /tmp/check-brief-contracts
+        /tmp/check-brief-contracts docs/contracts/brief*.json
     - run: touch apps/mobile-swift/Secrets.xcconfig
     - run: cp apps/mobile-swift/GoogleService-Info.plist.ci apps/mobile-swift/EngPulse/GoogleService-Info.plist
     - name: Build and test
@@ -195,10 +220,26 @@ jobs:
           await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number,
             body: '### Terraform plan summary (infra/hetzner)\nFull plan: see the `terraform-plan` workflow artifact on this run.\n```\n' + summary + '\n```' });
 
+  release-checks:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Test release guards without cloud access
+      run: python3 -m unittest discover -s scripts/tests -v
+
   # ---------------- main only ----------------
   deploy-agents:
-    needs: [changes, rust, fixtures]
-    if: github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' && needs.changes.outputs.agents == 'true'
+    needs: [changes, rust, fixtures, release-checks, deploy-api]
+    # Allow skipped API deploys for agent-only releases, but never bypass a failed
+    # or cancelled API deployment when this release includes API changes.
+    if: |
+      !cancelled() && github.ref == 'refs/heads/main' &&
+      needs.changes.result == 'success' &&
+      needs.changes.outputs.deploy_agents == 'true' &&
+      needs.rust.result == 'success' && needs.fixtures.result == 'success' &&
+      needs.release-checks.result == 'success' &&
+      (needs.deploy-api.result == 'success' ||
+       (needs.deploy-api.result == 'skipped' && needs.changes.outputs.deploy_api != 'true'))
     runs-on: ubuntu-latest
     concurrency: { group: deploy-agents-main, cancel-in-progress: false }  # serialize deploys
     steps:
@@ -208,18 +249,10 @@ jobs:
     - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
     - run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
     - name: Build & deploy daily-agent
-      run: |
-        gcloud builds submit --config=apps/daily-agent/cloudbuild.yaml \
-          --substitutions=_IMAGE_TAG=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:${{ env.IMAGE_TAG }} \
-          --machine-type=E2_HIGHCPU_8 .
-        gcloud run jobs update se-daily-agent-job --region ${{ env.REGION }} --project ${{ env.PROJECT_ID }} \
-          --remove-env-vars ANTHROPIC_API_KEY,OPENAI_API_KEY,SHADOW_MODEL --clear-secrets || true
-        gcloud run jobs deploy se-daily-agent-job \
-          --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/se-daily-agent:${{ env.IMAGE_TAG }} \
-          --region ${{ env.REGION }} --project ${{ env.PROJECT_ID }} \
-          --set-secrets ANTHROPIC_API_KEY=anthropic-api-key:latest,OPENAI_API_KEY=openai-api-key:latest \
-          --update-env-vars=SHADOW_MODEL=claude-fable-5-1 \
-          --task-timeout 10m
+      env:
+        PULSE_API_ENABLED: ${{ vars.PULSE_API_ENABLED || 'false' }}
+        PULSE_API_URL: https://api.eng-pulse.tsvetkov.org
+      run: bash scripts/deploy-daily-agent.sh
     - name: Build & deploy explorer-agent
       run: |
         gcloud builds submit --config=apps/explorer-agent/cloudbuild.yaml \
@@ -276,14 +309,12 @@ jobs:
         [ -z "$failed" ] || { echo "failed:$failed"; exit 1; }
 
   deploy-api:
-    needs: [changes, rust, api-it]
-    # always() so a workflow_dispatch (where rust/api-it are skipped because
-    # `changes` reports no diff) doesn't get blocked by "needs" being skipped;
-    # an actual failure in either upstream job still blocks the deploy.
+    needs: [changes, rust, api-it, release-checks]
     if: |
-      always() && github.ref == 'refs/heads/main' &&
-      (needs.changes.outputs.api == 'true' || inputs.deploy_api == true) &&
-      needs.rust.result != 'failure' && needs.api-it.result != 'failure'
+      !cancelled() && github.ref == 'refs/heads/main' && needs.changes.result == 'success' &&
+      needs.changes.outputs.deploy_api == 'true' &&
+      needs.rust.result == 'success' && needs.api-it.result == 'success' &&
+      needs.release-checks.result == 'success'
     runs-on: ubuntu-latest
     concurrency: { group: deploy-api-main, cancel-in-progress: false }  # serialize deploys
     environment: production
@@ -292,6 +323,12 @@ jobs:
       packages: write
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Validate and prepare API runtime configuration
+      env:
+        PULSE_ENV: ${{ secrets.PULSE_ENV }}
+      run: |
+        python3 scripts/prepare_api_env.py --config config/pilot-auth.json --output "$RUNNER_TEMP/pulse-api.env"
+        { echo 'PULSE_RUNTIME_ENV<<PULSE_EOF'; cat "$RUNNER_TEMP/pulse-api.env"; echo PULSE_EOF; } >> "$GITHUB_ENV"
     - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
       with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
     - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
@@ -335,7 +372,7 @@ jobs:
           for i in $(seq 1 30); do curl -sf localhost:8080/healthz | grep -q '"db":"ok"' && exit 0; sleep 2; done
           docker compose logs --tail 50 pulse-api; exit 1
       env:
-        PULSE_ENV: ${{ secrets.PULSE_ENV }}
+        PULSE_ENV: ${{ env.PULSE_RUNTIME_ENV }}
         GCS_BACKUP_SA_JSON: ${{ secrets.GCS_BACKUP_SA_JSON }}
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         GITHUB_ACTOR: ${{ github.actor }}

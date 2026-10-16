@@ -8,10 +8,19 @@
   "model": "claude-opus-4-8",
   "payload": {
     "deep_dive": "## Deep dive\n\nMarkdown body.",
+    "further_reading": [
+      {
+        "title": "Reference",
+        "url": "https://example.com/reference"
+      }
+    ],
     "key_idea": "One clear sentence.",
     "meta": {
       "category": "platform-engineering",
-      "confidence": 0.9
+      "confidence": 0.9,
+      "tags": [
+        "rust"
+      ]
     },
     "what_to_change": "One concrete action.",
     "why_it_matters": "Why the reader cares."

@@ -35,7 +35,9 @@ pub enum SourceKind {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InsightBrief {
+    #[serde(default)]
     pub key_idea: String,
+    #[serde(default)]
     pub why_it_matters: String,
     pub what_to_change: Option<String>,
     pub deep_dive: String,
@@ -55,11 +57,26 @@ pub struct Brief {
     pub date: String,
     /// "insight-brief-v3"
     pub format: String,
-    pub payload: InsightBrief,
+    /// Preserve the complete V3 document, including fields added by the pipeline.
+    #[serde(deserialize_with = "deserialize_payload")]
+    pub payload: serde_json::Value,
     pub article_url: String,
     pub article_title: String,
     pub model: Option<String>,
     pub eval_score: Option<f64>,
+}
+
+/// Validate the known contract without projecting away unknown or absent fields.
+pub fn validate_payload(payload: &serde_json::Value) -> Result<(), serde_json::Error> {
+    serde_json::from_value::<InsightBrief>(payload.clone()).map(|_| ())
+}
+
+fn deserialize_payload<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<serde_json::Value, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    validate_payload(&value).map_err(serde::de::Error::custom)?;
+    Ok(value)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -104,21 +121,23 @@ pub fn fixtures() -> Vec<(&'static str, serde_json::Value)> {
         feed_slug: "engineering".into(),
         date: "2026-09-01".into(),
         format: "insight-brief-v3".into(),
-        payload: InsightBrief {
-            key_idea: "One clear sentence.".into(),
-            why_it_matters: "Why the reader cares.".into(),
-            what_to_change: Some("One concrete action.".into()),
-            deep_dive: "## Deep dive\n\nMarkdown body.".into(),
-            meta: Some(BriefMeta {
-                confidence: Some(0.9),
-                category: Some("platform-engineering".into()),
-            }),
-        },
+        payload: serde_json::json!({
+            "key_idea": "One clear sentence.",
+            "why_it_matters": "Why the reader cares.",
+            "what_to_change": "One concrete action.",
+            "deep_dive": "## Deep dive\n\nMarkdown body.",
+            "meta": {"confidence": 0.9, "category": "platform-engineering", "tags": ["rust"]},
+            "further_reading": [{"url": "https://example.com/reference", "title": "Reference"}]
+        }),
         article_url: "https://example.com/post".into(),
         article_title: "Example post".into(),
         model: Some("claude-opus-4-8".into()),
         eval_score: Some(0.95),
     };
+    let mut minimal = brief.clone();
+    minimal.payload = serde_json::json!({"deep_dive": "## Deep dive\n\nMinimal body."});
+    minimal.model = None;
+    minimal.eval_score = None;
     let run = RunReport {
         date: "2026-09-01".into(),
         feeds: vec![FeedRun {
@@ -134,6 +153,7 @@ pub fn fixtures() -> Vec<(&'static str, serde_json::Value)> {
     vec![
         ("feed", serde_json::to_value(feed).unwrap()),
         ("brief", serde_json::to_value(brief).unwrap()),
+        ("brief_minimal", serde_json::to_value(minimal).unwrap()),
         ("run_report", serde_json::to_value(run).unwrap()),
     ]
 }
@@ -156,6 +176,14 @@ mod tests {
     }
 
     #[test]
+    fn insight_brief_defaults_missing_why_it_matters() {
+        // The pipeline's parser does not require why_it_matters; match that leniency.
+        let json = r#"{"key_idea":"k","what_to_change":null,"deep_dive":"d"}"#;
+        let b: InsightBrief = serde_json::from_str(json).unwrap();
+        assert_eq!(b.why_it_matters, "");
+    }
+
+    #[test]
     fn source_kind_serializes_like_sources_json() {
         assert_eq!(
             serde_json::to_string(&SourceKind::HackerNews).unwrap(),
@@ -174,7 +202,7 @@ mod tests {
                 "feed" => {
                     let _: Feed = serde_json::from_value(value).unwrap();
                 }
-                "brief" => {
+                "brief" | "brief_minimal" => {
                     let _: Brief = serde_json::from_value(value).unwrap();
                 }
                 "run_report" => {

@@ -19,7 +19,7 @@ explorer-agent (weekly) ─▶ sources.json
 
 ## Where it is going
 
-Multi-user with interest feeds: Supabase for identity, `apps/pulse-api` (Rust/axum + Postgres 18) on a Hetzner box provisioned by `infra/hetzner` (Terraform, Cloudflare DNS). Phase 0 is live: `https://api.eng-pulse.tsvetkov.org/healthz`. Design: `docs/superpowers/specs/2026-09-01-multiuser-cohorts-design.md`. Android (Kotlin/Compose) comes after the API.
+Next: a pilot for about five invited iOS users on the shared engineering feed, using Supabase identity and `pulse-api` (Rust/axum + Postgres) on Hetzner. The infrastructure health endpoint is live; the API MVP in [PR #185](https://github.com/tsvet01/eng-pulse/pull/185) and the app/notification launch gates still need completion. Keep the GCP daily/explorer pipeline and GCS artifacts throughout the pilot. Invitations follow working sign-in, account-safe offline reading/feedback, reliable email/APNs, and a tested recovery path. Extra feeds and Android follow a 14-day pilot review; OMGifts cleanup is separate. See the [active pilot plan](docs/superpowers/plans/2026-10-13-hetzner-multiuser-pilot.md) and [revised design](docs/superpowers/specs/2026-09-01-multiuser-cohorts-design.md).
 
 ## Layout
 
