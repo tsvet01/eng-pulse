@@ -56,7 +56,7 @@ jobs:
       with:
         filters: |
           rust: ['Cargo.toml', 'Cargo.lock', 'libs/**', 'apps/daily-agent/**', 'apps/explorer-agent/**', 'apps/pulse-api/**', 'scripts/deploy-daily-agent.sh']
-          api: ['Cargo.toml', 'Cargo.lock', 'libs/**', 'apps/pulse-api/**']
+          api: ['Cargo.toml', 'Cargo.lock', 'libs/**', 'apps/pulse-api/**', 'config/pilot-auth.json', 'scripts/prepare_api_env.py']
           agents: ['Cargo.toml', 'Cargo.lock', 'libs/**', 'apps/daily-agent/**', 'apps/explorer-agent/**', 'scripts/deploy-daily-agent.sh']
           swift: ['apps/mobile-swift/**', 'docs/contracts/**', 'scripts/check-brief-contracts.swift']
           infra: ['infra/**']
@@ -73,7 +73,7 @@ jobs:
 
   rust:
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || inputs.deploy_api == true || inputs.deploy_agents == true
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.deploy_api == 'true' || inputs.deploy_agents == true
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -309,11 +309,12 @@ jobs:
         [ -z "$failed" ] || { echo "failed:$failed"; exit 1; }
 
   deploy-api:
-    needs: [changes, rust, api-it]
+    needs: [changes, rust, api-it, release-checks]
     if: |
       !cancelled() && github.ref == 'refs/heads/main' && needs.changes.result == 'success' &&
       needs.changes.outputs.deploy_api == 'true' &&
-      needs.rust.result == 'success' && needs.api-it.result == 'success'
+      needs.rust.result == 'success' && needs.api-it.result == 'success' &&
+      needs.release-checks.result == 'success'
     runs-on: ubuntu-latest
     concurrency: { group: deploy-api-main, cancel-in-progress: false }  # serialize deploys
     environment: production
@@ -322,6 +323,12 @@ jobs:
       packages: write
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Validate and prepare API runtime configuration
+      env:
+        PULSE_ENV: ${{ secrets.PULSE_ENV }}
+      run: |
+        python3 scripts/prepare_api_env.py --config config/pilot-auth.json --output "$RUNNER_TEMP/pulse-api.env"
+        { echo 'PULSE_RUNTIME_ENV<<PULSE_EOF'; cat "$RUNNER_TEMP/pulse-api.env"; echo PULSE_EOF; } >> "$GITHUB_ENV"
     - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
       with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
     - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
@@ -365,7 +372,7 @@ jobs:
           for i in $(seq 1 30); do curl -sf localhost:8080/healthz | grep -q '"db":"ok"' && exit 0; sleep 2; done
           docker compose logs --tail 50 pulse-api; exit 1
       env:
-        PULSE_ENV: ${{ secrets.PULSE_ENV }}
+        PULSE_ENV: ${{ env.PULSE_RUNTIME_ENV }}
         GCS_BACKUP_SA_JSON: ${{ secrets.GCS_BACKUP_SA_JSON }}
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         GITHUB_ACTOR: ${{ github.actor }}
