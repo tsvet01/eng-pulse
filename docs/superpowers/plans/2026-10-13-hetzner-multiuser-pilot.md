@@ -60,7 +60,7 @@ Snapshot from the 2026-10-13 review; recheck before deployment:
 
 **Targets:** `.github/workflows/ci.yml`, API import/reconciliation command and tests, daily-agent integration, [Phase 1 runbook](../../runbooks/phase1-setup.md).
 
-- [ ] Encode API-first deployment readiness in CI before enabling the agent integration; keep unrelated agent-only releases independent. Check seeded/authenticated `/internal/feeds` as well as `/healthz`. Do not rely on manually racing the existing independent jobs.
+- [x] Encode API-first deployment readiness in CI before enabling the agent integration; keep unrelated agent-only releases independent. Check seeded/authenticated `/internal/feeds` as well as `/healthz`. Do not rely on manually racing the existing independent jobs.
 - [ ] Through the existing release process, deploy API migrations, seed `engineering` and the initial invite, verify the correct API revision/token, then enable/verify GCP dual-write. Keep fan-out off until P2 sender routing is ready. If seeding follows deployment, keep the integration disabled until the seed is confirmed.
 - [ ] Implement idempotent import of the latest 30 days of existing V3 GCS artifacts and metadata. Import must make zero LLM calls and send zero historical notifications. Compare expected dates/counts and complete JSON values with API records; record any source gaps explicitly.
 - [ ] Implement scheduled reconciliation on Hetzner, with a documented bounded interval/retry policy and last-success status. Use narrowly scoped GCS access or the existing public artifacts; do not broaden the backup credential. Reconcile missed writes without regenerating briefs. Old repairs stay silent; current-day recovery uses the notification idempotency key once P2 is enabled.
@@ -68,6 +68,8 @@ Snapshot from the 2026-10-13 review; recheck before deployment:
 - [ ] Observe the next real 06:00 UTC run and compare GCS/API content, metadata, and timestamp. Smoke success alone is insufficient.
 
 **Exit:** current and recent history are available through the API, recovery is demonstrated, and the working GCP publication path remains intact.
+
+**Release-guard implementation, 2026-10-15:** Integration defaults off unless the repository Actions variable `PULSE_API_ENABLED` is exactly `true`. Combined releases wait for successful API deployment; agent-only releases allow a skipped API job, and explicit dispatch runs the required tests. Enabled releases verify database health, the actual GCP service token and exactly the active engineering feed before any build/job mutation. The daily job's image/environment/secrets update together; no preliminary credential clearing occurs. Smoke validation rejects empty/inactive/wrong feeds. Regression tests exercise real HTTP requests against a local server with a recording cloud CLI, including the disabled path, bad tokens/routes, missing seeds and build failures. These guards must be included in #185 before its main-branch release; deployment/seed/activation remain operator steps in the [Phase 1 runbook](../../runbooks/phase1-setup.md). No cloud changes are made by this implementation.
 
 ### 3. Prove recovery and operational visibility
 
