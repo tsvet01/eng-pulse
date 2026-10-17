@@ -4,6 +4,7 @@ pub mod db;
 pub mod error;
 pub mod feedcheck;
 pub mod health;
+pub mod history;
 pub mod routes;
 pub mod seed;
 pub mod state;
@@ -33,6 +34,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("seed") {
         return seed::run(&pool, &args[1..]).await.map_err(Into::into);
+    }
+
+    if args.first().map(String::as_str) == Some("import-history") {
+        return history::run(&pool, &args[1..]).await.map_err(Into::into);
     }
 
     // Bounded: a refresh holds a lock every request needing a key waits on.
