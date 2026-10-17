@@ -1,7 +1,47 @@
 import XCTest
+import Combine
 @testable import EngPulse
 
 final class PilotReaderIntegrationTests: XCTestCase {
+    @MainActor
+    func testReturningReaderPublishesSavedArticlesBeforeAnyNetworkResponse() async throws {
+        let root = try root()
+        let identity = UUID()
+        let user = UUID()
+        let credentials = PilotCredentials(accessToken: "test", refreshToken: "test", expiresAt: 4102444800,
+            identity: PilotIdentity(id: identity, email: "pilot@example.com"))
+        let receipt = Data("{\"identity\":\"\(identity)\",\"feed\":\"engineering\",\"user\":{\"id\":\"\(user)\",\"email\":\"pilot@example.com\",\"is_admin\":false}}".utf8)
+        let config = PilotConfiguration(supabaseURL: URL(string: "https://auth.invalid")!, publishableKey: "public-test",
+            apiURL: URL(string: "https://api.invalid/v1")!)
+        let auth = PilotAuthClient(configuration: config, transport: OfflineTransport(),
+            storage: ReaderTestCredentials(data: try JSONEncoder().encode(credentials)))
+        let transport = StartupTransport()
+        let api = PilotAPIClient(configuration: config, auth: auth, transport: transport)
+        let model = PilotAccountModel(auth: auth, api: api, admissionStorage: ReaderTestCredentials(data: receipt))
+        let store = PilotFeedStore(root: root, identity: identity, user: user)
+        try await store.save([PilotBriefSummary(date: "2026-10-17", title: "Saved engineering brief",
+            articleURL: "https://example.com/article", snippet: "Ready to read", model: nil, evalScore: nil)])
+        let services = AppServices(account: model, api: api, cacheRoot: root)
+        let ready = expectation(description: "Cached reader is ready without a network response")
+        var firstTitles: [String]?
+        let observation = services.$pilotReader.compactMap { $0 }.prefix(1).sink { context in
+            firstTitles = context.appState.summaries.map(\.title)
+            ready.fulfill()
+        }
+        let restore = Task { await model.restore() }
+        await transport.waitForRequest()
+        await fulfillment(of: [ready], timeout: 2)
+        XCTAssertEqual(firstTitles, ["Saved engineering brief"], "The first visible reader must already contain saved articles")
+        let reader = services.pilotReader
+        await transport.respond(status: 503)
+        await restore.value
+        XCTAssertTrue(reader === services.pilotReader, "Background verification must preserve the displayed reader during an outage")
+        await model.signOut()
+        XCTAssertNil(services.pilotReader)
+        XCTAssertTrue(reader?.appState.summaries.isEmpty ?? false)
+        withExtendedLifetime(observation) {}
+    }
+
     private func root() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -116,8 +156,11 @@ final class PilotReaderIntegrationTests: XCTestCase {
         let api = PilotAPIClient(configuration: config, auth: auth, transport: UserTransport())
         let model = PilotAccountModel(auth: auth, api: api)
         let services = AppServices(account: model, api: api, cacheRoot: try root())
+        let ready = expectation(description: "Reader preparation completes")
+        let observation = services.$pilotReader.compactMap { $0 }.prefix(1).sink { _ in ready.fulfill() }
         XCTAssertNil(services.pilotReader)
         await model.restore()
+        await fulfillment(of: [ready], timeout: 2)
         let reader = try XCTUnwrap(services.pilotReader)
         await model.restore()
         XCTAssertTrue(reader === services.pilotReader, "Refreshing the same admission preserves playback")
@@ -126,6 +169,7 @@ final class PilotReaderIntegrationTests: XCTestCase {
         XCTAssertNil(services.pilotReader)
         XCTAssertFalse(reader.reader.isActive)
         XCTAssertTrue(reader.appState.summaries.isEmpty)
+        withExtendedLifetime(observation) {}
     }
 
 }
@@ -146,5 +190,24 @@ private struct UserTransport: PilotTransport {
             return (Data(#"[{"id":"33333333-3333-3333-3333-333333333333","slug":"engineering","is_active":true,"member":true}]"#.utf8), 200)
         }
         return (Data(#"{"id":"11111111-1111-1111-1111-111111111111","email":"pilot@example.com","is_admin":false}"#.utf8), 200)
+    }
+}
+
+private actor StartupTransport: PilotTransport {
+    private var pending: CheckedContinuation<(Data, Int), Error>?
+    private var observer: CheckedContinuation<Void, Never>?
+    func send(_ request: URLRequest) async throws -> (Data, Int) {
+        guard request.url?.lastPathComponent == "me" else { throw PilotError.invalidResponse }
+        return try await withCheckedThrowingContinuation { continuation in
+            pending = continuation
+            observer?.resume(); observer = nil
+        }
+    }
+    func waitForRequest() async {
+        if pending != nil { return }
+        await withCheckedContinuation { observer = $0 }
+    }
+    func respond(status: Int) {
+        pending?.resume(returning: (Data("{}".utf8), status)); pending = nil
     }
 }

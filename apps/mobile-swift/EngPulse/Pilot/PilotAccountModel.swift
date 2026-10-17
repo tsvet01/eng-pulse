@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class PilotAccountModel: ObservableObject {
     enum Phase: Equatable {
+        case restoring
         case signedOut
         case needsInvite(PilotSession)
         case admitted(PilotSession, PilotUser)
@@ -12,14 +13,14 @@ final class PilotAccountModel: ObservableObject {
 
         var session: PilotSession? {
             switch self {
-            case .signedOut: return nil
+            case .restoring, .signedOut: return nil
             case .needsInvite(let session), .admitted(let session, _), .waiting(let session), .blocked(let session):
                 return session
             }
         }
     }
 
-    @Published private(set) var phase: Phase = .signedOut
+    @Published private(set) var phase: Phase = .restoring
     @Published private(set) var isBusy = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var codeSentTo: String?
@@ -37,6 +38,9 @@ final class PilotAccountModel: ObservableObject {
     func restore() async {
         await run {
             guard let session = try await self.auth.currentSession() else { return (.signedOut, nil) }
+            if self.phase == .restoring, let saved = self.savedAdmission(for: session) {
+                self.phase = .admitted(session, saved.user)
+            }
             return try await self.admission(session)
         } apply: { self.apply($0) }
     }
@@ -154,12 +158,18 @@ final class PilotAccountModel: ObservableObject {
         catch PilotError.signInRequired { throw PilotError.signInRequired }
         catch PilotError.sessionChanged { throw PilotError.sessionChanged }
         catch {
-            if pilotAllowsOffline(error), let data = try? admissionStorage?.read(),
-               let saved = try? JSONDecoder().decode(Admission.self, from: data), saved.identity == session.identity.id, saved.feed == "engineering" {
+            if pilotAllowsOffline(error), let saved = savedAdmission(for: session) {
                 return (.admitted(session, saved.user), "Offline. You can read your saved briefs.")
             }
             return (.waiting(session), Self.message(for: error))
         }
+    }
+
+    private func savedAdmission(for session: PilotSession) -> Admission? {
+        guard let data = try? admissionStorage?.read(),
+              let saved = try? JSONDecoder().decode(Admission.self, from: data),
+              saved.identity == session.identity.id, saved.feed == "engineering" else { return nil }
+        return saved
     }
 
     private func apply(_ result: (Phase, String?)) {
