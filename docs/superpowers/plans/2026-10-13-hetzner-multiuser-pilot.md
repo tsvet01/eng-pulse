@@ -39,6 +39,8 @@ Snapshot from the 2026-10-13 review; recheck before deployment:
 
 **Exit:** a known release/configuration baseline and cost worksheet. No cloud resource teardown is required.
 
+**Reconciliation release evidence, 2026-10-17:** [PR #201](https://github.com/tsvet01/eng-pulse/pull/201) merged as `fc696f6`. [API deployment 39053276469](https://github.com/tsvet01/eng-pulse/actions/runs/39053276469) succeeded after its production approval. Public `/healthz` reported API/database healthy; `/healthz/briefs` returned `status=ok, reason=current`. The independent [freshness run 39053925514](https://github.com/tsvet01/eng-pulse/actions/runs/39053925514) also succeeded on this revision. GCP daily/explorer jobs were not redeployed by this API-only release; their existing schedule and publication remain running, and dual-write remains off. Actual failure-alert receipt, the next 06:00 UTC publication parity and the controlled outage rehearsal remain unverified.
+
 ## P1 — Make the API ready for real readers
 
 ### 1. Close the pilot's API gaps
@@ -69,7 +71,7 @@ Snapshot from the 2026-10-13 review; recheck before deployment:
 - [x] Encode API-first deployment readiness in CI before enabling the agent integration; keep unrelated agent-only releases independent. Check seeded/authenticated `/internal/feeds` as well as `/healthz`. Do not rely on manually racing the existing independent jobs.
 - [ ] Through the existing release process, deploy API migrations, seed `engineering` and the initial invite, verify the correct API revision/token, then enable/verify GCP dual-write. Keep fan-out off until P2 sender routing is ready. If seeding follows deployment, keep the integration disabled until the seed is confirmed.
 - [x] Implement idempotent import of the latest 30 days of existing V3 GCS artifacts and metadata. Import must make zero LLM calls and send zero historical notifications. Compare expected dates/counts and complete JSON values with API records; record any source gaps explicitly.
-- [x] Implement scheduled reconciliation for Hetzner (deployment verification pending), with a documented bounded interval/retry policy and last-success status. Use narrowly scoped GCS access or the existing public artifacts; do not broaden the backup credential. Reconcile missed writes without regenerating briefs. Old repairs stay silent; current-day recovery uses the notification idempotency key once P2 is enabled.
+- [x] Implement and deploy scheduled reconciliation for Hetzner, with a documented bounded interval/retry policy and last-success status. Use narrowly scoped GCS access or the existing public artifacts; do not broaden the backup credential. Reconcile missed writes without regenerating briefs. Old repairs stay silent; current-day recovery uses the notification idempotency key once P2 is enabled.
 - [ ] Exercise an API outage: the GCP run still publishes GCS/manifest; after recovery reconciliation restores the missing API brief. Verify repeat reconciliation preserves payloads and never adds duplicate publications or notifications.
 - [ ] Observe the next real 06:00 UTC run and compare GCS/API content, metadata, and timestamp. Smoke success alone is insufficient.
 
@@ -85,7 +87,7 @@ Snapshot from the 2026-10-13 review; recheck before deployment:
 
 **Production history and release evidence, 2026-10-17:** [Import run 39029673324](https://github.com/tsvet01/eng-pulse/actions/runs/39029673324) inserted 29 and verified 29; [replay 39029793870](https://github.com/tsvet01/eng-pulse/actions/runs/39029793870) inserted zero and verified 29 unchanged. The source gap is 10 October. [PR #200](https://github.com/tsvet01/eng-pulse/pull/200) merged as `80e2a88`; [release run 39029761694](https://github.com/tsvet01/eng-pulse/actions/runs/39029761694) passed API/agent deployment and real-provider smoke. GCP daily/explorer remain running; API dual-write remains off.
 
-**Scheduled repair implementation:** See the [reconciliation slice](2026-10-17-pilot-reconciliation.md) and [operating procedure](../../runbooks/phase1-setup.md#scheduled-repair-and-freshness). The opt-in API worker checks public artifacts on startup and every 15 minutes, persists bounded attempts/last success, serializes replicas, and repairs silently. A minimal public probe checks the worker checkpoint and current source/database dates; an hourly independent Actions job fails if freshness is unconfirmed. Deployment, actual alert receipt, the next scheduled GCP run and a production outage rehearsal still need evidence.
+**Scheduled repair implementation:** See the [reconciliation slice](2026-10-17-pilot-reconciliation.md) and [operating procedure](../../runbooks/phase1-setup.md#scheduled-repair-and-freshness). The opt-in API worker checks public artifacts on startup and every 15 minutes, persists bounded attempts/last success, serializes replicas, and repairs silently. A minimal public probe checks the worker checkpoint and current source/database dates; an hourly independent Actions job fails if freshness is unconfirmed. Deployment and live freshness passed as recorded below. Actual alert receipt, the next scheduled GCP run and a production outage rehearsal still need evidence.
 
 ### 3. Prove recovery and operational visibility
 
@@ -119,6 +121,10 @@ Swift work and the delivery worker may be developed independently after the API 
 
 **Device test, 2026-10-15:** Development provisioning now supports Apple sign-in and push for the new bundle. The complete entitlement set still fails because CarPlay is not authorized. A local authentication-only build, using a temporary entitlement override without CarPlay, compiled and passed strict signature verification with the correct identity and Supabase configuration. The repository's entitlements are unchanged. Pairing, installation and launch on an iPhone 14 Pro succeeded. Anton completed Apple's prompt and reported “You’re signed in; pilot access still needs confirming.” Native Apple-to-Supabase authentication passed; API admission, membership and administrator access are not verified. NordVPN's temporarily relaxed local-device isolation was restored after launch and its connected state verified. Full CarPlay provisioning remains a release gate.
 
+**Reader implementation, 2026-10-17:** The [iOS reader slice](2026-10-17-ios-pilot-reader.md) connects admitted accounts to the Hetzner engineering list and complete V3 payloads. Phone and CarPlay use one session-bound reader and audio context; downloaded articles, audio and playback identities are scoped by Supabase identity/API user/feed. Existing admitted identities can read saved data offline, while first-time identities and definite server denials cannot enter via an outage. Sign-out closes old screens and permanently stops the old player. Pilot feedback and notification controls remain hidden until those API flows are implemented. GCP and explicit legacy builds are unchanged.
+
+**Reader validation, 2026-10-17:** 37 Swift Package tests and 60 iOS simulator tests pass, including refreshed-token failures, late responses, cached admission, account isolation, scoped content routing and playback shutdown. The signed development phone build passes signature/bundle/configuration checks using the existing temporary override without CarPlay; the full entitlement build still fails on Apple's unapproved CarPlay entitlement. The newly connected iPhone needs inclusion in the development profile before installation. Live phone reading and the two-account journey are not yet claimed.
+
 ### 5. Durable notifications and controlled sender cutover
 
 **Targets:** a new API migration, publication/outbox DB code, a small Rust worker, Compose configuration, and recipient filtering in legacy functions where needed.
@@ -146,7 +152,7 @@ Fill this table during execution; unchecked tasks and blank evidence mean the ga
 |---|---|---|
 | Baseline | Revisions, CI, config presence, attributed cost worksheet and thresholds | Pending |
 | API access | Real sign-in/invite, engineering membership, ownership/revocation checks | Admin email/OTP admission and engineering membership verified 2026-10-17; native Apple sign-in previously verified. Second-account and real ownership/revocation checks remain open. |
-| Data | History parity, next scheduled run, outage + reconciliation proof | 29 production briefs verified, replay inserted zero (2026-10-17). Reconciliation activation, scheduled-run parity and production outage proof pending. |
+| Data | History parity, next scheduled run, outage + reconciliation proof | 29 production briefs verified, replay inserted zero (2026-10-17). Reconciliation deployed and live freshness current (2026-10-17); scheduled-run parity and production outage proof pending. |
 | Recovery | Timed restore, alert tests, rollback procedure/results | Pending |
 | Swift | Two-account real-device checks, offline account switching, TTS/CarPlay | Sign-in/admission checkpoint simulator-tested and native Apple sign-in verified on one iPhone 2026-10-15; reader migration, two-account journey and CarPlay gates pending |
 | Delivery | Actual email/APNs receipt, preferences, retry/replay and legacy isolation | Pending |
