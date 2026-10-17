@@ -369,6 +369,7 @@ jobs:
           mountpoint -q "$(dirname "$PG_DATA")" || { echo "postgres volume not mounted at $PG_DATA"; exit 1; }
           echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           docker compose pull -q && docker compose up -d
+          docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
           for i in $(seq 1 30); do curl -sf localhost:8080/healthz | grep -q '"db":"ok"' && exit 0; sleep 2; done
           docker compose logs --tail 50 pulse-api; exit 1
       env:
