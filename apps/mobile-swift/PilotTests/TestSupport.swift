@@ -72,3 +72,5 @@ actor PausedTransport: PilotTransport {
         pending.removeValue(forKey: index)?.resume(returning: (Data(body.utf8), status))
     }
 }
+
+let verifiedEngineeringFeed = "[{\"id\":\"33333333-3333-3333-3333-333333333333\",\"slug\":\"engineering\",\"is_active\":true,\"member\":true}]"

@@ -28,7 +28,7 @@ final class PilotAccountModel: ObservableObject {
     private let admissionStorage: (any PilotCredentialStorage)?
     private var operation = UUID()
     private var appleAttempt: UUID?
-    private struct Admission: Codable { let identity: UUID; let user: PilotUser }
+    private struct Admission: Codable { let identity: UUID; let user: PilotUser; let feed: String }
 
     init(auth: PilotAuthClient, api: PilotAPIClient, admissionStorage: (any PilotCredentialStorage)? = nil) {
         self.auth = auth; self.api = api; self.admissionStorage = admissionStorage
@@ -93,7 +93,7 @@ final class PilotAccountModel: ObservableObject {
         guard case .needsInvite(let session) = phase else { return }
         await run {
             let user = try await self.api.acceptInvite(code, session: session)
-            return (Phase.admitted(session, user), nil as String?)
+            return try await self.admission(session, user: user)
         } apply: { self.apply($0) }
     }
 
@@ -135,8 +135,14 @@ final class PilotAccountModel: ObservableObject {
         errorMessage = "Apple sign-in could not finish. Please try again or sign in by email."
     }
 
-    private func admission(_ session: PilotSession) async throws -> (Phase, String?) {
-        do { return (.admitted(session, try await api.currentUser(session: session)), nil) }
+    private func admission(_ session: PilotSession, user knownUser: PilotUser? = nil) async throws -> (Phase, String?) {
+        do {
+            let user: PilotUser
+            if let knownUser { user = knownUser }
+            else { user = try await api.currentUser(session: session) }
+            _ = try await api.engineeringFeedID(session: session)
+            return (.admitted(session, user), nil)
+        }
         catch PilotError.inviteRequired {
             try? admissionStorage?.write(nil)
             return (.needsInvite(session), nil)
@@ -149,7 +155,7 @@ final class PilotAccountModel: ObservableObject {
         catch PilotError.sessionChanged { throw PilotError.sessionChanged }
         catch {
             if pilotAllowsOffline(error), let data = try? admissionStorage?.read(),
-               let saved = try? JSONDecoder().decode(Admission.self, from: data), saved.identity == session.identity.id {
+               let saved = try? JSONDecoder().decode(Admission.self, from: data), saved.identity == session.identity.id, saved.feed == "engineering" {
                 return (.admitted(session, saved.user), "Offline. You can read your saved briefs.")
             }
             return (.waiting(session), Self.message(for: error))
@@ -158,7 +164,7 @@ final class PilotAccountModel: ObservableObject {
 
     private func apply(_ result: (Phase, String?)) {
         if case .admitted(let session, let user) = result.0,
-           let data = try? JSONEncoder().encode(Admission(identity: session.identity.id, user: user)) {
+           let data = try? JSONEncoder().encode(Admission(identity: session.identity.id, user: user, feed: "engineering")) {
             try? admissionStorage?.write(data)
         }
         phase = result.0

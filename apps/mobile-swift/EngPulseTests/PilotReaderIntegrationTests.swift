@@ -142,6 +142,9 @@ private struct OfflineTransport: PilotTransport {
 
 private struct UserTransport: PilotTransport {
     func send(_ request: URLRequest) async throws -> (Data, Int) {
-        (Data(#"{"id":"11111111-1111-1111-1111-111111111111","email":"pilot@example.com","is_admin":false}"#.utf8), 200)
+        if request.url?.lastPathComponent == "feeds" {
+            return (Data(#"[{"id":"33333333-3333-3333-3333-333333333333","slug":"engineering","is_active":true,"member":true}]"#.utf8), 200)
+        }
+        return (Data(#"{"id":"11111111-1111-1111-1111-111111111111","email":"pilot@example.com","is_admin":false}"#.utf8), 200)
     }
 }

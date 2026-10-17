@@ -26,13 +26,18 @@ extension PilotBriefSummary {
 }
 
 extension PilotAPIClient {
-    func engineeringBriefs(session: PilotSession) async throws -> [PilotBriefSummary] {
+    func engineeringFeedID(session: PilotSession) async throws -> UUID {
         struct Feed: Decodable { let id: UUID; let slug: String; let member: Bool; let is_active: Bool }
         let data = try await request(path: "feeds", session: session)
         guard let feeds = try? JSONDecoder().decode([Feed].self, from: data) else { throw PilotError.invalidResponse }
         let engineering = feeds.filter { $0.slug == "engineering" && $0.member && $0.is_active }
         guard engineering.count == 1, let feed = engineering.first else { throw PilotError.accessDenied }
-        let rows = try await request(path: "feeds/\(feed.id.uuidString.lowercased())/briefs",
+        return feed.id
+    }
+
+    func engineeringBriefs(session: PilotSession) async throws -> [PilotBriefSummary] {
+        let feedID = try await engineeringFeedID(session: session)
+        let rows = try await request(path: "feeds/\(feedID.uuidString.lowercased())/briefs",
             query: [URLQueryItem(name: "limit", value: "100")], session: session)
         guard let briefs = try? JSONDecoder().decode([PilotBriefSummary].self, from: rows),
               briefs.count <= 100, briefs.allSatisfy({ PilotBriefSummary.validDate($0.date) }),

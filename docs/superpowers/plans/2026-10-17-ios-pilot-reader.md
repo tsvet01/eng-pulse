@@ -17,7 +17,7 @@
 
 ## Builder decisions
 
-Fetch the latest 100 API brief summaries (the API's bounded maximum; the initial mirror has 29). Persist that list and downloaded full payloads under the authenticated identity and application user UUID plus engineering. Prefetch the latest five. Use per-account synthetic summary URLs so existing playback-position keys cannot collide between accounts. Offline admission requires the same saved Supabase identity and a previously API-confirmed user record in a separate Keychain item; new identities never enter via an outage. A definite denial clears that local admission and closes the reader. Transient outages preserve access only to that account's already saved data. The existing sign-in/invite flow remains the entry point; sign-out is available from reader settings.
+Fetch the latest 100 API brief summaries (the API's bounded maximum; the initial mirror has 29). Persist that list and downloaded full payloads under the authenticated identity and application user UUID plus engineering. Prefetch the latest five. Use per-account synthetic summary URLs so existing playback-position keys cannot collide between accounts. Offline admission requires the same saved Supabase identity and a previously API-confirmed user and active engineering membership record in a separate Keychain item; new identities never enter via an outage. A definite denial clears that local admission and closes the reader. Transient outages preserve access only to that account's already saved data. The existing sign-in/invite flow remains the entry point; sign-out is available from reader settings.
 
 ## Review Focus
 
@@ -49,6 +49,6 @@ Fetch the latest 100 API brief summaries (the API's bounded maximum; the initial
 
 **Files:** Existing pilot plan/runbook/mobile README and PR #190 description.
 
-- [ ] Verify PR #201 CI deployment, public health/freshness and the independent freshness workflow; retain production report references without secrets. Keep GCP dual-write/configuration unchanged.
-- [ ] Record simulator/build and live API evidence; perform a real-device reader check when a device/session is available. A required human login is requested without collecting codes in chat.
+- [x] Verify PR #201 CI deployment, public health/freshness and the independent freshness workflow; retain production report references without secrets. Keep GCP dual-write/configuration unchanged.
+- [x] Record simulator/build and live API evidence; perform a real-device reader check when a device/session is available. A required human login is requested without collecting codes in chat.
 - [ ] Run one fresh review of the final iOS branch, fix Important findings with failing regression tests, update PR #190 against main, and wait for CI. Do not claim full pilot launch or production notification readiness.

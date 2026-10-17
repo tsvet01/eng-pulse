@@ -73,9 +73,13 @@ actor PilotAuthClient {
             let transport = transport
             operation = (UUID(), Task {
                 let (data, status) = try await transport.send(request)
-                if status == 400 || status == 401 { throw PilotError.signInRequired }
-                guard status == 200 else { throw status == 429 ? PilotError.rateLimited : PilotError.unavailable }
-                return try Self.decodeCredentials(data)
+                switch status {
+                case 200: return try Self.decodeCredentials(data)
+                case 400, 401, 403: throw PilotError.signInRequired
+                case 429: throw PilotError.rateLimited
+                case 500...599: throw PilotError.unavailable
+                default: throw PilotError.invalidResponse
+                }
             })
             refresh = operation
         }
