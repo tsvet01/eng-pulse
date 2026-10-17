@@ -17,6 +17,7 @@ use serde_json::{json, Value};
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/internal/feeds", get(list_feeds))
+        .route("/internal/reconciliation", get(reconciliation_status))
         .route("/internal/briefs", post(ingest_brief))
         .route("/internal/runs", post(ingest_runs))
         .route("/internal/feedback", get(list_feedback))
@@ -122,4 +123,14 @@ async fn list_feedback(
     Ok(Json(
         feedback::list_since(&s.pool, feed_id, parse_date(&q.since)?).await?,
     ))
+}
+
+async fn reconciliation_status(
+    State(s): State<AppState>,
+    _t: ServiceToken,
+) -> Result<Json<Option<crate::reconciliation::Snapshot>>, ApiError> {
+    crate::reconciliation::status(&s.pool)
+        .await
+        .map(Json)
+        .map_err(ApiError::Internal)
 }

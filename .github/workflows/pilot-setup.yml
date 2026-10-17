@@ -1,0 +1,55 @@
+name: Pilot setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_api_revision:
+        description: 'Full commit SHA of the API already deployed to Hetzner'
+        required: true
+        type: string
+        default: '1d90f1797d89fa0c9ac3ae472608492d271adfbb'
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: python3 -m unittest discover -s scripts/tests -v
+
+  seed:
+    needs: checks
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency: { group: deploy-api-main, cancel-in-progress: false }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate setup inputs before SSH
+        env:
+          EXPECTED_API_REVISION: ${{ inputs.expected_api_revision }}
+          PILOT_INVITE_CODE: ${{ secrets.PILOT_BOOTSTRAP_INVITE }}
+        run: bash scripts/bootstrap-pilot.sh --check-inputs
+      - name: Load reviewed setup script
+        run: |
+          { echo 'FILE_PILOT_BOOTSTRAP<<PULSE_SCRIPT_EOF'; cat scripts/bootstrap-pilot.sh; echo PULSE_SCRIPT_EOF; } >> "$GITHUB_ENV"
+      - name: Seed and verify the existing API
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        env:
+          EXPECTED_API_REVISION: ${{ inputs.expected_api_revision }}
+          PILOT_INVITE_CODE: ${{ secrets.PILOT_BOOTSTRAP_INVITE }}
+        with:
+          host: api.eng-pulse.tsvetkov.org
+          username: deploy
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          fingerprint: ${{ secrets.DEPLOY_HOST_FINGERPRINT }}
+          envs: EXPECTED_API_REVISION,PILOT_INVITE_CODE,FILE_PILOT_BOOTSTRAP
+          script: |
+            set -eu
+            cd /opt/pulse
+            bash -c "$FILE_PILOT_BOOTSTRAP" </dev/null

@@ -4,6 +4,8 @@ pub mod db;
 pub mod error;
 pub mod feedcheck;
 pub mod health;
+pub mod history;
+pub mod reconciliation;
 pub mod routes;
 pub mod seed;
 pub mod state;
@@ -35,6 +37,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return seed::run(&pool, &args[1..]).await.map_err(Into::into);
     }
 
+    if args.first().map(String::as_str) == Some("import-history") {
+        return history::run(&pool, &args[1..]).await.map_err(Into::into);
+    }
+
     // Bounded: a refresh holds a lock every request needing a key waits on.
     let http = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
@@ -50,6 +56,17 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     let listener = tokio::net::TcpListener::bind(&cfg.bind_addr).await?;
     info!(bind = %cfg.bind_addr, "pulse-api listening");
-    axum::serve(listener, routes::router(state)).await?;
+    if cfg.reconcile_history_enabled {
+        let worker = reconciliation::run(state.pool.clone());
+        tokio::select! {
+            result = axum::serve(listener, routes::router(state)) => result?,
+            result = worker => {
+                result?;
+                return Err("reconciliation worker stopped unexpectedly".into());
+            }
+        }
+    } else {
+        axum::serve(listener, routes::router(state)).await?;
+    }
     Ok(())
 }

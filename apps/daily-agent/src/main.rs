@@ -110,6 +110,8 @@ const MAX_ARTICLE_CHARS: usize = 50_000;
 /// Minimum extracted content length to attempt summarization.
 /// Pages below this threshold are likely JS-rendered SPAs or paywalled.
 const MIN_ARTICLE_CHARS: usize = 200;
+/// Brief re-requests when the model answer is not a parsable Insight Brief.
+const BRIEF_PARSE_ATTEMPTS: usize = 3;
 
 /// The entry that represents a day's pick: the V3 brief, or the V1 summary
 /// on days before V3 existed. Excludes beta lanes.
@@ -270,6 +272,7 @@ async fn run_smoke(
 }
 
 /// A validated Insight Brief: the JSON object as uploaded plus its key idea.
+#[derive(Debug)]
 struct InsightBrief {
     json: String,
     key_idea: String,
@@ -288,6 +291,38 @@ fn parse_insight_brief(response: &str) -> Option<InsightBrief> {
         json: json.to_string(),
         key_idea,
     })
+}
+
+/// Re-request the brief when the model returns something unparsable (empty
+/// text, prose, truncated JSON). Transport errors are already retried inside
+/// `call_llm`, so an `Err` from `call` fails immediately.
+async fn generate_insight_brief<F, Fut>(
+    attempts: usize,
+    mut call: F,
+) -> Result<InsightBrief, String>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>>,
+{
+    for attempt in 1..=attempts {
+        let response = call()
+            .await
+            .map_err(|e| format!("V3 Insight Brief generation failed: {}", e))?;
+        if let Some(brief) = parse_insight_brief(&response) {
+            return Ok(brief);
+        }
+        warn!(
+            attempt,
+            attempts,
+            response_len = response.len(),
+            response = %response.chars().take(500).collect::<String>(),
+            "V3 response is not a valid Insight Brief"
+        );
+    }
+    Err(format!(
+        "V3 response is not a valid Insight Brief after {} attempts (invalid JSON or missing fields)",
+        attempts
+    ))
 }
 
 /// Truncate text to the manifest snippet length, marking the cut.
@@ -600,17 +635,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let v3_prompt =
         prompts::summary_prompt(&best_article.source, &best_article.title, &truncated_text);
     let v3_options = LlmOptions::default();
-    let response = call_llm(
-        &http_client,
-        LlmProvider::Claude,
-        &keys.claude,
-        v3_prompt,
-        &v3_options,
-    )
-    .await
-    .map_err(|e| format!("V3 Insight Brief generation failed: {}", e))?;
-    let brief = parse_insight_brief(&response)
-        .ok_or("V3 response is not a valid Insight Brief (invalid JSON or missing fields)")?;
+    let brief = generate_insight_brief(BRIEF_PARSE_ATTEMPTS, || {
+        call_llm(
+            &http_client,
+            LlmProvider::Claude,
+            &keys.claude,
+            v3_prompt.clone(),
+            &v3_options,
+        )
+    })
+    .await?;
 
     let object_path = format!("summaries/v3/{}.json", today);
     gcs_client
@@ -1023,6 +1057,59 @@ mod tests {
         assert!(parse_insight_brief("not json").is_none());
         assert!(parse_insight_brief("{\"key_idea\": ").is_none());
         assert!(parse_insight_brief("} then {").is_none());
+    }
+
+    // --- Insight Brief generation retry ---
+
+    type LlmResult = Result<String, Box<dyn std::error::Error + Send + Sync>>;
+    type LlmFuture = std::pin::Pin<Box<dyn std::future::Future<Output = LlmResult>>>;
+
+    /// Scripted LLM: hands out `responses` in order and counts calls.
+    fn scripted_llm(
+        responses: Vec<Result<&'static str, &'static str>>,
+    ) -> (
+        impl FnMut() -> LlmFuture,
+        std::rc::Rc<std::cell::Cell<usize>>,
+    ) {
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let mut queue: std::collections::VecDeque<_> = responses.into_iter().collect();
+        let counter = calls.clone();
+        let call = move || -> LlmFuture {
+            counter.set(counter.get() + 1);
+            let next = queue
+                .pop_front()
+                .expect("more calls than scripted responses");
+            Box::pin(async move { next.map(str::to_string).map_err(Into::into) })
+        };
+        (call, calls)
+    }
+
+    const VALID_BRIEF: &str = "{\"key_idea\": \"Idea\", \"deep_dive\": \"Body\"}";
+
+    #[tokio::test]
+    async fn test_generate_insight_brief_retries_unparsable_response() {
+        let (call, calls) = scripted_llm(vec![Ok("I can't help with that."), Ok(VALID_BRIEF)]);
+        let brief = generate_insight_brief(3, call).await.unwrap();
+        assert_eq!(brief.key_idea, "Idea");
+        assert_eq!(calls.get(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_generate_insight_brief_gives_up_after_attempts() {
+        let (call, calls) = scripted_llm(vec![Ok("nope"), Ok(""), Ok("{}")]);
+        let err = generate_insight_brief(3, call).await.unwrap_err();
+        assert!(err.contains("not a valid Insight Brief"), "{err}");
+        assert!(err.contains("3 attempts"), "{err}");
+        assert_eq!(calls.get(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_generate_insight_brief_fails_fast_on_llm_error() {
+        let (call, calls) = scripted_llm(vec![Err("Claude API returned 401"), Ok(VALID_BRIEF)]);
+        let err = generate_insight_brief(3, call).await.unwrap_err();
+        assert!(err.contains("generation failed"), "{err}");
+        assert!(err.contains("401"), "{err}");
+        assert_eq!(calls.get(), 1);
     }
 
     #[test]
