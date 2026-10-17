@@ -25,10 +25,14 @@ final class PilotAccountModel: ObservableObject {
     @Published private(set) var codeSentTo: String?
     private let auth: PilotAuthClient
     private let api: PilotAPIClient
+    private let admissionStorage: (any PilotCredentialStorage)?
     private var operation = UUID()
     private var appleAttempt: UUID?
+    private struct Admission: Codable { let identity: UUID; let user: PilotUser }
 
-    init(auth: PilotAuthClient, api: PilotAPIClient) { self.auth = auth; self.api = api }
+    init(auth: PilotAuthClient, api: PilotAPIClient, admissionStorage: (any PilotCredentialStorage)? = nil) {
+        self.auth = auth; self.api = api; self.admissionStorage = admissionStorage
+    }
 
     func restore() async {
         await run {
@@ -99,6 +103,7 @@ final class PilotAccountModel: ObservableObject {
         let version = operation
         let previous = phase
         phase = .signedOut
+        try? admissionStorage?.write(nil)
         codeSentTo = nil
         errorMessage = nil
         isBusy = true
@@ -111,20 +116,47 @@ final class PilotAccountModel: ObservableObject {
         if operation == version { isBusy = false }
     }
 
+    func readerFailed(_ error: PilotError, session: PilotSession) {
+        guard phase.session == session else { return }
+        try? admissionStorage?.write(nil)
+        switch error {
+        case .accessDenied, .inviteRequired: phase = .blocked(session)
+        case .signInRequired, .sessionChanged: phase = .signedOut
+        default: return
+        }
+        errorMessage = error.localizedDescription
+    }
+
     func reportAppleError() {
         errorMessage = "Apple sign-in could not finish. Please try again or sign in by email."
     }
 
     private func admission(_ session: PilotSession) async throws -> (Phase, String?) {
         do { return (.admitted(session, try await api.currentUser(session: session)), nil) }
-        catch PilotError.inviteRequired { return (.needsInvite(session), nil) }
-        catch PilotError.accessDenied { return (.blocked(session), PilotError.accessDenied.localizedDescription) }
+        catch PilotError.inviteRequired {
+            try? admissionStorage?.write(nil)
+            return (.needsInvite(session), nil)
+        }
+        catch PilotError.accessDenied {
+            try? admissionStorage?.write(nil)
+            return (.blocked(session), PilotError.accessDenied.localizedDescription)
+        }
         catch PilotError.signInRequired { throw PilotError.signInRequired }
         catch PilotError.sessionChanged { throw PilotError.sessionChanged }
-        catch { return (.waiting(session), Self.message(for: error)) }
+        catch {
+            if pilotAllowsOffline(error), let data = try? admissionStorage?.read(),
+               let saved = try? JSONDecoder().decode(Admission.self, from: data), saved.identity == session.identity.id {
+                return (.admitted(session, saved.user), "Offline. You can read your saved briefs.")
+            }
+            return (.waiting(session), Self.message(for: error))
+        }
     }
 
     private func apply(_ result: (Phase, String?)) {
+        if case .admitted(let session, let user) = result.0,
+           let data = try? JSONEncoder().encode(Admission(identity: session.identity.id, user: user)) {
+            try? admissionStorage?.write(data)
+        }
         phase = result.0
         errorMessage = result.1
         codeSentTo = nil
@@ -142,9 +174,11 @@ final class PilotAccountModel: ObservableObject {
         } catch {
             guard operation == version else { return }
             if error as? PilotError == .signInRequired || error as? PilotError == .sessionChanged {
+                try? admissionStorage?.write(nil)
                 phase = .signedOut
                 codeSentTo = nil
             } else if error as? PilotError == .accessDenied, let session = phase.session {
+                try? admissionStorage?.write(nil)
                 phase = .blocked(session)
             }
             errorMessage = Self.message(for: error)

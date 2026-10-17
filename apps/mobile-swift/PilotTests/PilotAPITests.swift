@@ -29,7 +29,7 @@ final class PilotAPITests: XCTestCase {
         let cases: [(Int, String, PilotError)] = [
             (403, "forbidden", .accessDenied), (422, "bad_request", .invalidInvite),
             (409, "conflict", .accountConflict), (429, "rate_limited", .rateLimited),
-            (503, "unavailable", .unavailable), (302, "", .unavailable),
+            (503, "unavailable", .unavailable), (302, "", .invalidResponse),
             (200, "not_a_user", .invalidResponse)
         ]
         for (status, code, expected) in cases {

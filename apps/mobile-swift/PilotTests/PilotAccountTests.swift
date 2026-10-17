@@ -88,4 +88,49 @@ final class PilotAccountTests: XCTestCase {
         XCTAssertEqual(requestsAfterCancel.count, 1)
     }
 
+    func testOfflineRestartRequiresPriorAdmissionForTheSameIdentity() async throws {
+        let credentials = MemoryCredentials(data: try JSONEncoder().encode(testSession()))
+        let admission = MemoryCredentials()
+        let auth = PilotAuthClient(configuration: .test, transport: RecordingTransport([]), storage: credentials)
+        let userJSON = "{\"id\":\"\(userA)\",\"email\":\"pilot@example.com\",\"is_admin\":true}"
+        let first = PilotAccountModel(auth: auth, api: PilotAPIClient(configuration: .test, auth: auth,
+            transport: RecordingTransport([.ok(userJSON)])), admissionStorage: admission)
+        await first.restore()
+        XCTAssertNotNil(try admission.read())
+        let offline = PilotAccountModel(auth: auth, api: PilotAPIClient(configuration: .test, auth: auth,
+            transport: RecordingTransport([.failure(URLError(.notConnectedToInternet))])), admissionStorage: admission)
+        await offline.restore()
+        if case .admitted(_, let user) = offline.phase { XCTAssertEqual(user.id, userA) }
+        else { XCTFail("Previously admitted identity can read its saved data offline") }
+        let b = PilotCredentials(accessToken: "b", refreshToken: "b", expiresAt: 4102444800,
+            identity: PilotIdentity(id: userB, email: "b@example.com"))
+        let otherAuth = PilotAuthClient(configuration: .test, transport: RecordingTransport([]), storage: MemoryCredentials(data: try JSONEncoder().encode(b)))
+        let other = PilotAccountModel(auth: otherAuth, api: PilotAPIClient(configuration: .test, auth: otherAuth,
+            transport: RecordingTransport([.failure(URLError(.notConnectedToInternet))])), admissionStorage: admission)
+        await other.restore()
+        guard case .waiting = other.phase else { return XCTFail("Never reuse another identity's admission") }
+    }
+
+    func testServerDenialClearsOfflineAdmission() async throws {
+        let receipt = Data("{\"identity\":\"\(userA)\",\"user\":{\"id\":\"\(userA)\",\"email\":\"pilot@example.com\",\"is_admin\":false}}".utf8)
+        let admission = MemoryCredentials(data: receipt)
+        let auth = PilotAuthClient(configuration: .test, transport: RecordingTransport([]), storage: MemoryCredentials(data: try JSONEncoder().encode(testSession())))
+        let model = PilotAccountModel(auth: auth, api: PilotAPIClient(configuration: .test, auth: auth,
+            transport: RecordingTransport([.response(403, "{\"error\":\"forbidden\"}")])), admissionStorage: admission)
+        await model.restore()
+        guard case .blocked = model.phase else { return XCTFail("Block denied account") }
+        XCTAssertNil(try admission.read())
+    }
+
+    func testExplicitLogoutClearsOfflineAdmissionAsWellAsCredentials() async throws {
+        let admission = MemoryCredentials(data: Data("saved admission".utf8))
+        let credentials = MemoryCredentials(data: try JSONEncoder().encode(testSession()))
+        let auth = PilotAuthClient(configuration: .test, transport: RecordingTransport([.failure(URLError(.notConnectedToInternet))]), storage: credentials)
+        let model = PilotAccountModel(auth: auth, api: PilotAPIClient(configuration: .test, auth: auth, transport: RecordingTransport([])), admissionStorage: admission)
+        await model.signOut()
+        XCTAssertEqual(model.phase, .signedOut)
+        XCTAssertNil(try admission.read())
+        XCTAssertNil(try credentials.read())
+    }
+
 }

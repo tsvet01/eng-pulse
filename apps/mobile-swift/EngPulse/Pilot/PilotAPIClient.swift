@@ -1,6 +1,6 @@
 import Foundation
 
-struct PilotUser: Decodable, Equatable, Sendable {
+struct PilotUser: Codable, Equatable, Sendable {
     let id: UUID
     let email: String
     let isAdmin: Bool
@@ -32,9 +32,18 @@ struct PilotAPIClient: Sendable {
     }
 
     private func userRequest(path: String, method: String, body: Data?, session: PilotSession) async throws -> PilotUser {
+        let data = try await request(path: path, method: method, body: body, session: session)
+        guard let user = try? JSONDecoder().decode(PilotUser.self, from: data) else { throw PilotError.invalidResponse }
+        return user
+    }
+
+    func request(path: String, method: String = "GET", body: Data? = nil,
+                 query: [URLQueryItem] = [], session: PilotSession) async throws -> Data {
         for attempt in 0...1 {
             let token = try await auth.accessToken(for: session, forceRefresh: attempt == 1)
-            var request = URLRequest(url: configuration.apiURL.appendingPathComponent(path))
+            var components = URLComponents(url: configuration.apiURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
+            if !query.isEmpty { components.queryItems = query }
+            var request = URLRequest(url: components.url!)
             request.httpMethod = method
             request.httpBody = body
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -48,10 +57,7 @@ struct PilotAPIClient: Sendable {
                 throw PilotError.signInRequired
             }
             if status == 200 || status == 201 {
-                guard let user = try? JSONDecoder().decode(PilotUser.self, from: data) else {
-                    throw PilotError.invalidResponse
-                }
-                return user
+                return data
             }
             struct Failure: Decodable { let error: String }
             let code = (try? JSONDecoder().decode(Failure.self, from: data))?.error
@@ -60,7 +66,8 @@ struct PilotAPIClient: Sendable {
             case 409: throw PilotError.accountConflict
             case 422: throw method == "POST" ? PilotError.invalidInvite : .invalidResponse
             case 429: throw PilotError.rateLimited
-            default: throw PilotError.unavailable
+            case 500...599: throw PilotError.unavailable
+            default: throw PilotError.invalidResponse
             }
         }
         throw PilotError.signInRequired
