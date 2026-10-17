@@ -4,7 +4,7 @@ Native iOS app for viewing AI-curated daily software engineering summaries.
 
 > Part of [Eng Pulse](../../README.md) - see root README for system overview.
 
-## Features
+## Existing reader features
 
 - **Daily Summaries**: View AI-generated article summaries with markdown rendering
 - **Model Filter**: Filter by AI model (Gemini, Claude, GPT) via toolbar menu
@@ -15,6 +15,8 @@ Native iOS app for viewing AI-curated daily software engineering summaries.
 - **Pull to Refresh**: Manual refresh for latest content
 - **Share**: Share articles with other apps
 - **Original Links**: Direct links to source articles
+
+The renamed pilot build connects admitted accounts to the Hetzner engineering feed, with saved offline articles and listening. Feedback and notification delivery remain gated; their legacy controls are hidden in the pilot.
 
 ## Architecture
 
@@ -49,6 +51,36 @@ EngPulse/
 - Apple Developer account (for device testing)
 
 ## Setup
+
+### Pilot app identity
+
+The pilot bundle ID is `org.tsvetkov.eng-pulse`; the display name remains **Eng Pulse**. Before distributing a device build, complete the [app identity setup](../../docs/runbooks/phase0-setup.md#pilot-app-identity).
+
+This installs as a separate app from `org.tsvetkov.EngPulseSwift`, with separate local data and device tokens. The existing GCP notifier still targets the old app. The pilot's API device registration and APNs sender must be ready before enabling notifications for the new app; do not change the legacy sender's default bundle ID. Firebase Auth remains in source for explicit legacy builds. The new bundle never initializes Firebase, registers a token with the legacy sender, submits legacy feedback, or opens the legacy cache. The CI Firebase plist is a build placeholder, not a working configuration.
+
+### Pilot reader
+
+The build defaults to `PILOT_AUTH_ENABLED=YES` for `org.tsvetkov.eng-pulse`. Native Apple and email-code sign-in use Supabase; `/v1/me` confirms admission and the active engineering membership gates feed reads. An admitted account opens the existing reading screen. All phone windows and CarPlay share one account, reader and playback service.
+
+The API returns the latest 100 brief summaries. The app prefetches the latest five complete V3 payloads and saves downloaded articles under the Supabase identity, API user and engineering feed. Playback positions and audio are account-scoped too. A cold offline restart requires a matching saved identity and prior API admission with verified active engineering membership; first-time accounts cannot enter during an outage. Sign-out closes every reader and stops playback. A server denial clears cached admission; revocation cannot be detected while fully offline. Pilot content never falls back to public GCS, and bearer tokens are sent only to the configured API.
+
+1. Copy `Secrets.xcconfig.example` to the ignored `Secrets.xcconfig` if it does not exist. Set `SUPABASE_PUBLISHABLE_KEY` to this project's **public publishable key**, never the service-role key, SMTP password, or signing key. Keep actual configuration out of git.
+2. The tracked `EngPulse/Info.plist` uses build-setting substitutions for credentials. Keep it that way; actual values belong in the ignored `Secrets.xcconfig`. `Info.plist.template` has matching pilot substitutions if a fresh template is needed.
+3. For simulator builds, use the tracked `GoogleService-Info.plist.ci` placeholder as the ignored `EngPulse/GoogleService-Info.plist` build resource. Firebase is not initialized in pilot mode.
+4. Run the app. Sign-in uses the configured Supabase project; admission uses `https://api.eng-pulse.tsvetkov.org/v1`. The API is deployed, engineering history is populated, and the administrator has completed email-code admission. Use that same sign-in method/account; a separate Apple identity may still need its own invitation.
+5. Use a signed device build to verify native Apple sign-in. Existing legacy readers are preserved; an explicit legacy development build must use both `PILOT_AUTH_ENABLED=NO` and the old `org.tsvetkov.EngPulseSwift` bundle ID with matching Firebase/provisioning settings.
+
+Automated authentication tests use fake server responses and send no emails.
+
+```bash
+swift test --package-path apps/mobile-swift
+xcodebuild -project apps/mobile-swift/EngPulse.xcodeproj -scheme EngPulse \
+  -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
+  CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=YES CODE_SIGNING_ALLOWED=YES \
+  SUPABASE_PUBLISHABLE_KEY=public-test-placeholder test
+```
+
+The simulator needs local ad-hoc signing for the Keychain integration test; disabling signing prevents secure-storage access. CI runs the package tests and existing iOS suite, and checks the built app contains the pilot settings. The full two-account device journey, physical CarPlay provisioning, feedback queues, device cleanup and actual notification delivery remain launch gates in the [pilot plan](../../docs/superpowers/plans/2026-10-13-hetzner-multiuser-pilot.md).
 
 ### Build and Run
 
@@ -180,7 +212,7 @@ Selection persists via `@AppStorage`.
 
 ### API Endpoint
 
-Configure in `APIService.swift`:
+The pilot uses `https://api.eng-pulse.tsvetkov.org/v1` from `PilotConfiguration`. The explicit legacy build uses `APIService.swift`:
 
 ```swift
 private let baseURL = "https://storage.googleapis.com/tsvet01-agent-brain"
@@ -209,7 +241,7 @@ xcodebuild -scheme EngPulse -sdk iphonesimulator -destination 'platform=iOS Simu
 xcrun devicectl device install app --device <DEVICE_ID> build/Debug-iphoneos/EngPulse.app
 
 # Launch
-xcrun devicectl device process launch --device <DEVICE_ID> org.tsvetkov.EngPulseSwift
+xcrun devicectl device process launch --device <DEVICE_ID> org.tsvetkov.eng-pulse
 ```
 
 ### Send Test Notification

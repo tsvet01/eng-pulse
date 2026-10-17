@@ -32,6 +32,7 @@ final class CarPlayContentManager {
     private var articleItemsByUrl: [String: [CPListItem]] = [:]
 
     private var isPresentingNowPlaying = false
+    private var isConnected = false
 
     /// Leave room for the Play All row within CarPlay's list item limit.
     private var articleLimit: Int {
@@ -47,6 +48,7 @@ final class CarPlayContentManager {
     }
 
     func connect() {
+        isConnected = true
         let tabBar = CPTabBarTemplate(templates: [latestTemplate, topicsTemplate])
         interfaceController.setRootTemplate(tabBar, animated: false, completion: nil)
 
@@ -59,6 +61,7 @@ final class CarPlayContentManager {
     }
 
     func disconnect() {
+        isConnected = false
         cancellables.removeAll()
         articleItemsByUrl.removeAll()
     }
@@ -145,6 +148,7 @@ final class CarPlayContentManager {
     }
 
     private func showCategory(_ category: Category) {
+        guard isConnected else { return }
         let groups = CarPlayContentBuilder.categoryGroups(from: appState.summaries, limitPerCategory: articleLimit)
         let articles = groups.first(where: { $0.category == category })?.articles ?? []
         let template = CPListTemplate(title: category.displayName, sections: playableSections(for: articles))
@@ -189,6 +193,7 @@ final class CarPlayContentManager {
     // MARK: - Playback
 
     private func play(_ articles: [Summary]) {
+        guard isConnected else { return }
         ttsService.playQueue(articles)
         showNowPlaying()
     }

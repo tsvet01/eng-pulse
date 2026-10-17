@@ -19,6 +19,7 @@ struct ArticleContentLoader {
     }
 
     static func load(_ summary: Summary, cacheService: CacheService) async throws -> String {
+        if let content = try await cacheService.loadScopedContent(summary) { return content }
         if let cached = await cacheService.getCachedContent(for: summary.url) {
             return cached
         }

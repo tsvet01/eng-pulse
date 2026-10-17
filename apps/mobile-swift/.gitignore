@@ -1,4 +1,7 @@
 build/
-# Contains API key - don't commit
-EngPulse/Info.plist
+# Local keys - don't commit
 Secrets.xcconfig
+
+# Swift package test artifacts
+.build/
+.swiftpm/
