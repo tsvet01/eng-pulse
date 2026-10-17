@@ -136,11 +136,13 @@ class AppState: ObservableObject {
     private let pilotReader: PilotFeedReader?
     private let scope: String?
     private var isActive = true
+    private var didLoadPilotCache = false
 
     init(cacheService: CacheService = CacheService(), pilotReader: PilotFeedReader? = nil, scope: String? = nil) {
         self.cacheService = cacheService
         self.pilotReader = pilotReader
         self.scope = scope
+        isLoading = pilotReader != nil
     }
 
     /// Coalesces concurrent callers (phone UI and the CarPlay scene can both
@@ -188,11 +190,18 @@ class AppState: ObservableObject {
         isLoading = false
     }
 
-    private func performPilotLoad(_ reader: PilotFeedReader) async {
-        errorMessage = nil
-        if summaries.isEmpty, let cached = try? await reader.cachedSummaries(), isActive {
+    func loadCachedSummaries() async {
+        guard let reader = pilotReader, isActive, !didLoadPilotCache else { return }
+        didLoadPilotCache = true
+        if let cached = try? await reader.cachedSummaries(), isActive, !Task.isCancelled {
             summaries = cached.map(pilotSummary)
         }
+        if isActive { isLoading = summaries.isEmpty }
+    }
+
+    private func performPilotLoad(_ reader: PilotFeedReader) async {
+        errorMessage = nil
+        await loadCachedSummaries()
         guard isActive else { return }
         isLoading = summaries.isEmpty
         defer { isLoading = false }
