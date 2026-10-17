@@ -28,6 +28,8 @@ The [Cloud Run deployment flags](https://docs.cloud.google.com/sdk/gcloud/refere
 
 ## Pilot readiness after setup
 
+**Recorded setup, 2026-10-17:** [Pilot setup run 39018382733](https://github.com/tsvet01/eng-pulse/actions/runs/39018382733) succeeded on the initial API revision. The initial administrator redeemed the single-use invitation through real Supabase email/OTP sign-in; account and engineering-membership reads succeeded. Engineering has 50 active sources and zero API briefs. Do not generate another bootstrap invitation for this existing account. Continue with history import and the remaining gates; keep `PULSE_API_ENABLED` unset until activation prerequisites pass.
+
 Use the evidence table in the active pilot plan. In particular, confirm seeded engineering membership for new users, import recent history without LLM calls or historical notifications, test scheduled reconciliation after an API outage, and prove a backup restore. The new Swift experience and per-user email/APNs with legacy sender isolation must pass real-device checks before inviting the pilot group. Record release/build IDs and results there; never record secret values.
 
 ## Revoke pilot access / departure
