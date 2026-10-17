@@ -2,5 +2,6 @@
   "SUPABASE_JWKS_URL": "https://zimjnykjqsxwsidwmemd.supabase.co/auth/v1/.well-known/jwks.json",
   "SUPABASE_ISSUER": "https://zimjnykjqsxwsidwmemd.supabase.co/auth/v1",
   "SUPABASE_AUDIENCE": "authenticated",
-  "ADMIN_EMAIL": "anton.tsvetkov@gmail.com"
+  "ADMIN_EMAIL": "anton.tsvetkov@gmail.com",
+  "RECONCILE_HISTORY_ENABLED": "true"
 }

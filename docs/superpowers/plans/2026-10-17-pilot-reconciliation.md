@@ -40,9 +40,15 @@ The approved design leaves cadence and process layout to implementation. Run imm
 **Files:** `config/pilot-auth.json`, `scripts/prepare_api_env.py`, `scripts/tests/test_prepare_api_env.py`, `.github/workflows/pilot-freshness.yml`, `scripts/check-pilot-freshness.sh`, `scripts/tests/test_pilot_freshness.py`, existing pilot plan and runbook.
 **Interfaces:** Reviewed public runtime overlay enables the worker without replacing any secret. Monitor uses fixed HTTPS endpoint with bounded requests, rejects redirects/invalid JSON/degraded status, and exits nonzero on failure; no external sender credentials or messages.
 
-- [ ] Add failing configuration and monitor tests with real local HTTP fixtures, then implement the minimal runtime overlay/monitor. Expect no cloud calls and preserved existing private values.
-- [ ] Add hourly/manual monitoring workflow with pinned checkout and read-only permissions. Document alert routing, cadence, startup/recovery behavior and limitations.
-- [ ] Update historical evidence: 29 production imports, 0 replay inserts, 29 verified, 10 October source gap; PR #200 release succeeded.
+- [x] Add failing configuration and monitor tests with real local HTTP fixtures, then implement the minimal runtime overlay/monitor. Expect no cloud calls and preserved existing private values.
+- [x] Add hourly/manual monitoring workflow with pinned checkout and read-only permissions. Document alert routing, cadence, startup/recovery behavior and limitations.
+- [x] Update historical evidence: 29 production imports, 0 replay inserts, 29 verified, 10 October source gap; PR #200 release succeeded.
 - [ ] Run API/release tests, formatting/Clippy/ShellCheck/Actionlint; request one fresh whole-branch review, fix important findings with RED→GREEN, and publish a PR.
 
 Production activation, the next 06:00 UTC comparison, a controlled production outage rehearsal and P2 delivery/device gates are separate release evidence; do not infer them from local tests.
+
+## Local evidence, 2026-10-17
+
+- 70 API tests and 38 release-script tests passed, including worker cancellation, duplicate-worker ownership, retry exhaustion, source/DB staleness and real HTTP monitor failures. All-target API Clippy, rustfmt, ShellCheck and Actionlint for the added workflow passed.
+- A real local API process using public GCS artifacts and disposable Postgres imported and verified 29 briefs on startup. Restart inserted zero and verified 29 unchanged. Removing one brief only from that disposable database while the API was stopped, then restarting, restored exactly one and verified all 29. Each completed stage returned a current freshness probe; notifications remained zero.
+- This proves local startup/restart repair and real-source compatibility. It is not a production outage rehearsal, next-morning comparison or delivered alert.
