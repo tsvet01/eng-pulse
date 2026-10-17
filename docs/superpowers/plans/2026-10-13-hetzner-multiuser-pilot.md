@@ -73,7 +73,7 @@ Snapshot from the 2026-10-13 review; recheck before deployment:
 
 **Release evidence, 2026-10-16:** PR #185, including release guards and safe public Supabase configuration, merged as `1d90f17`. [CI run 38971413771](https://github.com/tsvet01/eng-pulse/actions/runs/38971413771) completed successfully: API deployment, daily/explorer GCP updates and real-provider smoke passed. Public API checks returned healthy API/database and 401 for an unauthenticated account request. Private production credentials were retained; API integration remains default-off. Native Apple sign-in and Supabase email/OTP delivery were verified earlier. This is API deployment evidence, not authenticated API admission or pilot launch.
 
-**Next setup slice:** Run the manual `Pilot setup` workflow through the existing production gate to seed engineering and a private single-use administrator invite on the deployed revision. Then verify real admin admission and engineering membership. Keep history import/reconciliation, GCP activation, reader migration and notifications as the remaining gates above and below.
+**Setup evidence, 2026-10-17:** [PR #196](https://github.com/tsvet01/eng-pulse/pull/196) added the guarded manual bootstrap. [Pilot setup run 39018382733](https://github.com/tsvet01/eng-pulse/actions/runs/39018382733) passed all 29 release-script tests and verified the existing API revision, database health, service-token access, active engineering sources and private single-use invite. Real Supabase email/OTP sign-in then returned initial `/v1/me` 403 `invite_required`, signup 201, and subsequent account/feed reads 200 with administrator status and engineering membership. The feed has 50 active sources; its brief list is currently empty. The temporary verification session was signed out locally. No GCP activation or container restart occurred. History import/reconciliation, GCP activation, reader migration, recovery and notifications remain required gates.
 
 ### 3. Prove recovery and operational visibility
 
@@ -127,7 +127,7 @@ Fill this table during execution; unchecked tasks and blank evidence mean the ga
 | Gate | Required evidence | Result / date / reference |
 |---|---|---|
 | Baseline | Revisions, CI, config presence, attributed cost worksheet and thresholds | Pending |
-| API access | Real sign-in/invite, engineering membership, ownership/revocation checks | Pending |
+| API access | Real sign-in/invite, engineering membership, ownership/revocation checks | Admin email/OTP admission and engineering membership verified 2026-10-17; native Apple sign-in previously verified. Second-account and real ownership/revocation checks remain open. |
 | Data | History parity, next scheduled run, outage + reconciliation proof | Pending |
 | Recovery | Timed restore, alert tests, rollback procedure/results | Pending |
 | Swift | Two-account real-device checks, offline account switching, TTS/CarPlay | Pending |
