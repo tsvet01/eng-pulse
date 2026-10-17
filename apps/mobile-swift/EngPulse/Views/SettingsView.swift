@@ -21,6 +21,7 @@ struct SettingsSection<Content: View>: View {
             content()
         }
         .padding(DesignTokens.cardPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.container)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
     }
