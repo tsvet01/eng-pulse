@@ -214,6 +214,7 @@ fn is_transient_error(err: &str) -> bool {
         "504",
         "temporarily",
         "overloaded",
+        "no content returned", // 200 with no text block: seen on Opus 5, retry
     ];
 
     let err_lower = err.to_lowercase();
@@ -753,6 +754,12 @@ mod tests {
     fn test_is_transient_error_connection() {
         assert!(is_transient_error("Connection refused"));
         assert!(is_transient_error("connection reset by peer"));
+    }
+
+    #[test]
+    fn test_is_transient_error_empty_model_answer() {
+        assert!(is_transient_error("No content returned from Claude"));
+        assert!(is_transient_error("No content returned from OpenAI"));
     }
 
     #[test]
