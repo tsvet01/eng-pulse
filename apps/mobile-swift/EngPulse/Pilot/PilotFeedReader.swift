@@ -78,6 +78,16 @@ actor PilotFeedStore {
         guard FileManager.default.fileExists(atPath: file.path) else { return nil }
         return try String(contentsOf: file, encoding: .utf8)
     }
+    func cacheSize() -> Int64 {
+        guard let files = FileManager.default.enumerator(at: directory,
+            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey]) else { return 0 }
+        return files.reduce(Int64(0)) { total, file in
+            guard let file = file as? URL,
+                  let values = try? file.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
+                  values.isRegularFile == true else { return total }
+            return total + Int64(values.fileSize ?? 0)
+        }
+    }
     func clear() throws {
         if FileManager.default.fileExists(atPath: directory.path) { try FileManager.default.removeItem(at: directory) }
     }

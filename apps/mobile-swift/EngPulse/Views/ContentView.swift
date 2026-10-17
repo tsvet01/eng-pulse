@@ -32,12 +32,14 @@ struct ContentView: View {
     }
 
     private func checkPendingArticle() {
+        guard PilotBuild.allowsLegacyServices else { return }
         if let url = UserDefaults.standard.string(forKey: "pendingArticleUrl") {
             navigateToArticle(url: url)
         }
     }
 
     private func navigateToArticle(url: String) {
+        guard PilotBuild.allowsLegacyServices else { return }
         guard !appState.summaries.isEmpty else { return }
         UserDefaults.standard.removeObject(forKey: "pendingArticleUrl")
         if let summary = appState.summaries.first(where: { $0.url == url }) {

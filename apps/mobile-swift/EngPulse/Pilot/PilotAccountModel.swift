@@ -117,7 +117,11 @@ final class PilotAccountModel: ObservableObject {
     }
 
     func readerFailed(_ error: PilotError, session: PilotSession) {
-        guard phase.session == session else { return }
+        guard phase.session == session,
+              [.accessDenied, .inviteRequired, .signInRequired, .sessionChanged].contains(error) else { return }
+        operation = UUID()
+        appleAttempt = nil
+        isBusy = false
         try? admissionStorage?.write(nil)
         switch error {
         case .accessDenied, .inviteRequired: phase = .blocked(session)

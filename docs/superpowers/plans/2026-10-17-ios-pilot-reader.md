@@ -41,9 +41,9 @@ Fetch the latest 100 API brief summaries (the API's bounded maximum; the initial
 **Files:** `AppServices.swift`, `EngPulseApp.swift`, `Services/{CacheService,ArticleContentLoader}.swift`, `Views/{PilotSignInView,DetailView,SettingsView}.swift`, `CarPlay/{CarPlaySceneDelegate,CarPlayContentManager}.swift`, Xcode project, focused `EngPulseTests`.
 **Interfaces:** `PilotReaderContext` owns reader/scoped cache/AppState/TTS for one session; `AppServices` publishes its current context from account phase changes. A scoped CacheService content-loader override feeds the existing detail/TTS loader. AppState maps API summaries and honors invalidation. Phone/CarPlay use the same context and rebuild on changes.
 
-- [ ] Add regression tests for scoped caches/loader behavior and context invalidation, then implement routing to the existing ContentView for admitted sessions.
-- [ ] Wire reader settings sign-out, scope playback identity, stop/clear old context and hide legacy-only feedback/stats in pilot mode. Restore the same context on CarPlay and require phone sign-in when absent.
-- [ ] Run Swift Package tests, Xcode simulator tests and a signed device build. Preserve existing ignored signing/configuration files; do not change Apple/Supabase trust settings.
+- [x] Add regression tests for scoped caches/loader behavior and context invalidation, then implement routing to the existing ContentView for admitted sessions.
+- [x] Wire reader settings sign-out, scope playback identity, stop/clear old context and hide legacy-only feedback/stats in pilot mode. Restore the same context on CarPlay and require phone sign-in when absent.
+- [x] Run Swift Package tests, Xcode simulator tests and a signed device build. Preserve existing ignored signing/configuration files; do not change Apple/Supabase trust settings.
 
 ### Task 3: Release evidence and review
 

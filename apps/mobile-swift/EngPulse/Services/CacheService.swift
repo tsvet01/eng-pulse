@@ -13,9 +13,8 @@ actor CacheService {
             .appendingPathComponent("EngPulse", isDirectory: true)
     }
 
-    private var cacheDirectory: URL {
-        Self.baseCacheDirectory
-    }
+    private let cacheDirectory: URL
+    private let contentLoader: (@Sendable (Summary) async throws -> String)?
 
     private var summariesFile: URL {
         cacheDirectory.appendingPathComponent("summaries.json")
@@ -23,13 +22,18 @@ actor CacheService {
 
     private var directoryCreated = false
 
-    init() {
-        // Directory creation is deferred to first use
+    init(directory: URL? = nil, contentLoader: (@Sendable (Summary) async throws -> String)? = nil) {
+        cacheDirectory = directory ?? Self.baseCacheDirectory
+        self.contentLoader = contentLoader
+    }
+
+    func loadScopedContent(_ summary: Summary) async throws -> String? {
+        try await contentLoader?(summary)
     }
 
     /// Ensure the cache directory exists
     private func ensureDirectoryExists() {
-        guard !directoryCreated else { return }
+        guard !directoryCreated || !fileManager.fileExists(atPath: cacheDirectory.path) else { return }
         try? fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
         directoryCreated = true
     }

@@ -54,6 +54,7 @@
 		AC100007 /* PilotSignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200007 /* PilotSignInView.swift */; };
 		AC100008 /* PilotKeychainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200008 /* PilotKeychainTests.swift */; };
 		AC100009 /* PilotFeedReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200009 /* PilotFeedReader.swift */; };
+		AC100010 /* PilotReaderIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200010 /* PilotReaderIntegrationTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -118,6 +119,7 @@
 		AC200007 /* PilotSignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/PilotSignInView.swift; sourceTree = "<group>"; };
 		AC200008 /* PilotKeychainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotKeychainTests.swift; sourceTree = "<group>"; };
 		AC200009 /* PilotFeedReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pilot/PilotFeedReader.swift; sourceTree = "<group>"; };
+		AC200010 /* PilotReaderIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotReaderIntegrationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -244,6 +246,7 @@
 			children = (
 				B2000003 /* MarkdownRendererTests.swift */,
 				AC200008 /* PilotKeychainTests.swift */,
+				AC200010 /* PilotReaderIntegrationTests.swift */,
 				C2000005 /* TextCleanerTests.swift */,
 				D2000003 /* LocalTTSServiceTests.swift */,
 				CP200007 /* CarPlayContentBuilderTests.swift */,
@@ -402,6 +405,7 @@
 			files = (
 				B1000003 /* MarkdownRendererTests.swift in Sources */,
 				AC100008 /* PilotKeychainTests.swift in Sources */,
+				AC100010 /* PilotReaderIntegrationTests.swift in Sources */,
 				C1000005 /* TextCleanerTests.swift in Sources */,
 				D1000002 /* LocalTTSServiceTests.swift in Sources */,
 				CP100007 /* CarPlayContentBuilderTests.swift in Sources */,

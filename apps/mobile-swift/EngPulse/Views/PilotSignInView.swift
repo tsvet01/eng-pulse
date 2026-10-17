@@ -4,25 +4,38 @@ import Security
 import SwiftUI
 
 struct PilotEntryView: View {
-    let model: PilotAccountModel?
-
-    init() {
-        model = AppServices.shared.pilotAccountModel
-    }
+    @ObservedObject private var services = AppServices.shared
+    @Environment(\.scenePhase) private var scenePhase
+    var model: PilotAccountModel? { services.pilotAccountModel }
 
     var body: some View {
-        if let model {
-            PilotSignInView(model: model)
-        } else {
-            ContentUnavailableView("Sign-in unavailable", systemImage: "person.crop.circle.badge.exclamationmark",
-                description: Text("This build needs its pilot sign-in settings before you can continue."))
+        Group {
+            if let context = services.pilotReader {
+                ContentView()
+                    .environmentObject(context.appState)
+                    .environmentObject(context.ttsService)
+                    .id(context.id)
+            } else if let model {
+                PilotSignInView(model: model)
+            } else {
+                ContentUnavailableView("Sign-in unavailable", systemImage: "person.crop.circle.badge.exclamationmark",
+                    description: Text("This build needs its pilot sign-in settings before you can continue."))
+            }
+        }
+        .task { await model?.restore() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active, let model, model.phase != .signedOut {
+                Task {
+                    await model.restore()
+                    await services.pilotReader?.appState.refreshSummaries()
+                }
+            }
         }
     }
 }
 
 private struct PilotSignInView: View {
     @ObservedObject var model: PilotAccountModel
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
     @State private var email = ""
     @State private var code = ""
@@ -52,7 +65,7 @@ private struct PilotSignInView: View {
                     Section("Account connected") {
                         Label("Pilot access confirmed", systemImage: "checkmark.circle.fill")
                         Text(user.email)
-                        Text("Your account is ready. Reading and notifications will open in a later pilot build.")
+                        Text("Opening your engineering feed…")
                             .foregroundStyle(.secondary)
                     }
                 case .waiting(let session):
@@ -81,10 +94,6 @@ private struct PilotSignInView: View {
                 }
             }
             .navigationTitle("Eng Pulse")
-        }
-        .task { await model.restore() }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active, model.phase != .signedOut { Task { await model.restore() } }
         }
         .onChange(of: model.phase) { _, phase in
             if phase != .signedOut { code = ""; invite = ""; appleNonce = nil }

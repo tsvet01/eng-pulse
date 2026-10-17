@@ -133,4 +133,27 @@ final class PilotAccountTests: XCTestCase {
         XCTAssertNil(try credentials.read())
     }
 
+    func testReaderRevocationCannotBeUndoneByAnInFlightAdmissionRefresh() async throws {
+        let admission = MemoryCredentials()
+        let auth = PilotAuthClient(configuration: .test, transport: RecordingTransport([]),
+            storage: MemoryCredentials(data: try JSONEncoder().encode(testSession())))
+        let transport = PausedTransport()
+        let model = PilotAccountModel(auth: auth,
+            api: PilotAPIClient(configuration: .test, auth: auth, transport: transport), admissionStorage: admission)
+        let userJSON = "{\"id\":\"\(userA)\",\"email\":\"pilot@example.com\",\"is_admin\":true}"
+        let initial = Task { await model.restore() }
+        await transport.waitForRequests(1)
+        await transport.respond(0, body: userJSON)
+        await initial.value
+        let session = try XCTUnwrap(model.phase.session)
+        let refresh = Task { await model.restore() }
+        await transport.waitForRequests(2)
+        model.readerFailed(.accessDenied, session: session)
+        await transport.respond(1, body: userJSON)
+        await refresh.value
+        XCTAssertEqual(model.phase, .blocked(session))
+        XCTAssertNil(try admission.read())
+        XCTAssertFalse(model.isBusy)
+    }
+
 }

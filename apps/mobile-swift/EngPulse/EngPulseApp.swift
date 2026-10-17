@@ -133,15 +133,20 @@ class AppState: ObservableObject {
     private let apiService = APIService()
     let cacheService: CacheService
     private var activeLoad: Task<Void, Never>?
+    private let pilotReader: PilotFeedReader?
+    private let scope: String?
+    private var isActive = true
 
-    init(cacheService: CacheService = CacheService()) {
+    init(cacheService: CacheService = CacheService(), pilotReader: PilotFeedReader? = nil, scope: String? = nil) {
         self.cacheService = cacheService
+        self.pilotReader = pilotReader
+        self.scope = scope
     }
 
     /// Coalesces concurrent callers (phone UI and the CarPlay scene can both
     /// trigger a load at launch) into a single fetch.
     func loadSummaries() async {
-        guard PilotBuild.allowsLegacyServices else { return }
+        guard isActive, pilotReader != nil || PilotBuild.allowsLegacyServices else { return }
         if let activeLoad {
             await activeLoad.value
             return
@@ -153,6 +158,7 @@ class AppState: ObservableObject {
     }
 
     private func performLoadSummaries() async {
+        if let pilotReader { await performPilotLoad(pilotReader); return }
         errorMessage = nil
         isOffline = false
 
@@ -182,12 +188,59 @@ class AppState: ObservableObject {
         isLoading = false
     }
 
+    private func performPilotLoad(_ reader: PilotFeedReader) async {
+        errorMessage = nil
+        if summaries.isEmpty, let cached = try? await reader.cachedSummaries(), isActive {
+            summaries = cached.map(pilotSummary)
+        }
+        guard isActive else { return }
+        isLoading = summaries.isEmpty
+        defer { isLoading = false }
+        do {
+            let result = try await reader.summaries()
+            guard isActive, !Task.isCancelled else { return }
+            summaries = result.items.map(pilotSummary)
+            isOffline = result.offline
+            prefetchArticles(Array(summaries.prefix(5)))
+        } catch {
+            guard isActive, !Task.isCancelled else { return }
+            summaries = []
+            isOffline = false
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func pilotSummary(_ row: PilotBriefSummary) -> Summary {
+        Summary(date: row.date, url: "eng-pulse://\(scope ?? "")/engineering/\(row.date)",
+            title: row.title, summarySnippet: row.snippet, originalUrl: row.articleURL,
+            model: row.model, evalScore: row.evalScore, format: "insight-brief-v3")
+    }
+
+    func invalidate() {
+        isActive = false
+        activeLoad?.cancel()
+        activeLoad = nil
+        summaries = []
+        isLoading = false
+        isOffline = false
+        errorMessage = nil
+    }
+
     func refreshSummaries() async {
         await loadSummaries()
     }
 
     func clearCache() async {
+        try? await pilotReader?.clearCache()
         await cacheService.clearAll()
+    }
+
+    func formattedCacheSize() async -> String {
+        if let pilotReader {
+            let bytes = await pilotReader.store.cacheSize()
+            return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        }
+        return await cacheService.formattedCacheSize()
     }
 
     private func prefetchArticles(_ articles: [Summary]) {
