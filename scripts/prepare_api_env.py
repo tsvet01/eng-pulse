@@ -8,7 +8,7 @@ import re
 import sys
 
 
-PUBLIC_KEYS = {"SUPABASE_JWKS_URL", "SUPABASE_ISSUER", "SUPABASE_AUDIENCE", "ADMIN_EMAIL"}
+PUBLIC_KEYS = {"SUPABASE_JWKS_URL", "SUPABASE_ISSUER", "SUPABASE_AUDIENCE", "ADMIN_EMAIL", "RECONCILE_HISTORY_ENABLED"}
 PRIVATE_KEYS = ("POSTGRES_PASSWORD", "PIPELINE_SERVICE_TOKEN")
 # The deployment sources this file as shell input as well as using it for Compose.
 SAFE_VALUE = re.compile(r"[A-Za-z0-9_./:@,+%=\-]*", re.ASCII)
@@ -16,7 +16,7 @@ SAFE_VALUE = re.compile(r"[A-Za-z0-9_./:@,+%=\-]*", re.ASCII)
 
 def prepare_runtime(base, public):
     if not isinstance(public, dict) or set(public) != PUBLIC_KEYS:
-        raise ValueError("Public configuration must contain exactly the four pilot auth settings")
+        raise ValueError("Public configuration must contain exactly the pilot runtime settings")
     for key, value in public.items():
         if not isinstance(value, str) or not value or not SAFE_VALUE.fullmatch(value):
             raise ValueError(f"Invalid public setting: {key}")
@@ -29,6 +29,8 @@ def prepare_runtime(base, public):
         raise ValueError("SUPABASE_AUDIENCE must be authenticated")
     if not re.fullmatch(r"[^@]+@[^@]+\.[^@]+", public["ADMIN_EMAIL"]):
         raise ValueError("Invalid ADMIN_EMAIL")
+    if public["RECONCILE_HISTORY_ENABLED"] not in ("true", "false"):
+        raise ValueError("RECONCILE_HISTORY_ENABLED must be true or false")
 
     settings = {}
     for number, line in enumerate(base.splitlines(), 1):

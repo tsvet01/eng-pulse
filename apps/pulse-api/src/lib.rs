@@ -5,6 +5,7 @@ pub mod error;
 pub mod feedcheck;
 pub mod health;
 pub mod history;
+pub mod reconciliation;
 pub mod routes;
 pub mod seed;
 pub mod state;
@@ -55,6 +56,17 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     let listener = tokio::net::TcpListener::bind(&cfg.bind_addr).await?;
     info!(bind = %cfg.bind_addr, "pulse-api listening");
-    axum::serve(listener, routes::router(state)).await?;
+    if cfg.reconcile_history_enabled {
+        let worker = reconciliation::run(state.pool.clone());
+        tokio::select! {
+            result = axum::serve(listener, routes::router(state)) => result?,
+            result = worker => {
+                result?;
+                return Err("reconciliation worker stopped unexpectedly".into());
+            }
+        }
+    } else {
+        axum::serve(listener, routes::router(state)).await?;
+    }
     Ok(())
 }

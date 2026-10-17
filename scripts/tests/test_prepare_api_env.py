@@ -18,6 +18,7 @@ PUBLIC = {
     "SUPABASE_ISSUER": "https://testproject.supabase.co/auth/v1",
     "SUPABASE_AUDIENCE": "authenticated",
     "ADMIN_EMAIL": "admin@example.com",
+    "RECONCILE_HISTORY_ENABLED": "true",
 }
 PASSWORD = "test-existing-database-password"
 TOKEN = "test-existing-service-token"
@@ -31,6 +32,15 @@ class PrepareApiEnvTest(unittest.TestCase):
         self.assertEqual(dict(line.split("=", 1) for line in result.splitlines()),
                          {"POSTGRES_PASSWORD": PASSWORD, "PIPELINE_SERVICE_TOKEN": TOKEN,
                           "RUST_LOG": "info", **PUBLIC})
+
+    def test_reconciliation_flag_is_reviewed_strict_and_overrides_secret_copy(self):
+        result = MODULE.prepare_runtime(BASE + "RECONCILE_HISTORY_ENABLED=false\n", PUBLIC)
+        self.assertIn("RECONCILE_HISTORY_ENABLED=true\n", result)
+        self.assertIn("RECONCILE_HISTORY_ENABLED=false\n", MODULE.prepare_runtime(
+            BASE, {**PUBLIC, "RECONCILE_HISTORY_ENABLED": "false"}))
+        for value in ("yes", "TRUE", "", True):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                MODULE.prepare_runtime(BASE, {**PUBLIC, "RECONCILE_HISTORY_ENABLED": value})
 
     def test_rejects_missing_empty_and_placeholder_private_fields(self):
         for base in ("", BASE.replace(f"POSTGRES_PASSWORD={PASSWORD}\n", ""),
