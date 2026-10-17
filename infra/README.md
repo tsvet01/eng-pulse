@@ -49,7 +49,17 @@ and the cloud-init payload that installs Docker and seeds
 Once the host is up, GitHub Actions CI owns deploys — it builds and pushes
 the `pulse-api` image, syncs `docker-compose.yml`, `Caddyfile` and
 `backup.sh` from `infra/hetzner/files` to `/opt/pulse`, writes `.env`, and
-runs `docker compose up -d`. The server ignores later `user_data` drift
+runs `docker compose up -d`, then gracefully reloads Caddy's configuration.
+Both named HTTPS hosts send `Strict-Transport-Security: max-age=31536000`;
+the policy is host-only, without `includeSubDomains` or preload. Keep valid
+HTTPS available for the advertised year, including during rollback. To
+withdraw the policy, serve `max-age=0` over valid HTTPS; removing the header
+alone does not clear browsers' cached policy.
+
+Caddyfile-only changes require CI dispatch on `main` with `deploy_api=true`
+and `deploy_agents=false`; Terraform does not update the running proxy.
+After release, check both HTTPS hosts for HSTS and HTTP-to-HTTPS redirects.
+The server ignores later `user_data` drift
 (`lifecycle.ignore_changes`), so editing those files never replaces the box;
 to rebuild it on purpose use `terraform apply -replace=hcloud_server.pulse`. Re-running `terraform apply` should be a no-op
 between infrastructure changes; it must never be part of the normal release

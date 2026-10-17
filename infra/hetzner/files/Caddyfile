@@ -1,6 +1,8 @@
 api.eng-pulse.tsvetkov.org {
+	header Strict-Transport-Security "max-age=31536000"
 	reverse_proxy pulse-api:8080
 }
 eng-pulse.tsvetkov.org {
+	header Strict-Transport-Security "max-age=31536000"
 	respond "eng-pulse" 200
 }
