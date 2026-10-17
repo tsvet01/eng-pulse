@@ -36,6 +36,9 @@ struct EngPulseApp: App {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 UNUserNotificationCenter.current().setBadgeCount(0)
+            } else if newPhase == .background, !PilotBuild.allowsLegacyServices {
+                // A fresh process restores the feed, not the last article shown.
+                UIApplication.shared.ignoreSnapshotOnNextApplicationLaunch()
             }
         }
     }

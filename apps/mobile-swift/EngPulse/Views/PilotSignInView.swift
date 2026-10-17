@@ -42,24 +42,27 @@ private struct PilotSignInView: View {
     @State private var invite = ""
     @State private var appleNonce: String?
     @State private var appleAttempt: UUID?
+    @State private var showsRestoreProgress = false
 
     var body: some View {
         Group {
             switch model.phase {
             case .restoring, .admitted:
-                NavigationStack {
-                    Group {
-                        if let message = model.errorMessage, !model.isBusy {
-                            ErrorView(message: message) { Task { await model.restore() } }
-                        } else {
-                            SkeletonFeedView()
-                        }
+                ZStack {
+                    Color.surface.ignoresSafeArea()
+                    if model.phase == .restoring, let message = model.errorMessage, !model.isBusy {
+                        ErrorView(message: message) { Task { await model.restore() } }
+                    } else if showsRestoreProgress {
+                        ProgressView().accessibilityLabel("Opening Eng Pulse")
                     }
-                    .background(Color.surface)
-                    .navigationTitle("Eng Pulse")
-                    .navigationBarTitleDisplayMode(.inline)
                 }
                 .accessibilityIdentifier("pilot.restoring")
+                .task {
+                    do { try await Task.sleep(for: .milliseconds(300)) }
+                    catch { return }
+                    showsRestoreProgress = true
+                }
+                .onDisappear { showsRestoreProgress = false }
             default: accountForm
             }
         }
