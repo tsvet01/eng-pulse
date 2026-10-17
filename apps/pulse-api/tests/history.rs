@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use sqlx::PgPool;
 use uuid::Uuid;
 use wiremock::{
-    matchers::{method, path},
+    matchers::{method, path, query_param},
     Mock, MockServer, ResponseTemplate,
 };
 
@@ -12,7 +12,7 @@ fn end() -> NaiveDate {
     NaiveDate::from_ymd_opt(2026, 10, 17).unwrap()
 }
 fn entry(server: &MockServer, date: &str) -> Value {
-    json!({"date":date,"url":format!("{}/summaries/v3/{date}.json",server.uri()),
+    json!({"date":date,"url":format!("{}/archive/summaries/v3/{date}.json",server.uri()),
         "title":"A title", "original_url":"https://example.org/article",
         "model":"test-model", "eval_score":0.987654321, "format":"insight-brief-v3"})
 }
@@ -28,22 +28,48 @@ async fn feed(pool: &PgPool) -> Uuid {
     .await
     .unwrap()
 }
+async fn metadata(server: &MockServer, name: &str, created: &str) {
+    Mock::given(path(format!(
+        "/storage/v1/b/archive/o/{}",
+        urlencoding::encode(name)
+    )))
+    .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+        "generation":"123", "timeCreated":created
+    })))
+    .mount(server)
+    .await;
+}
 async fn manifest(server: &MockServer, rows: Value) {
+    metadata(server, "manifest.json", "2026-10-17T12:00:00.500Z").await;
     Mock::given(method("GET"))
-        .and(path("/manifest.json"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(rows))
+        .and(path("/archive/manifest.json"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-goog-generation", "123")
+                .set_body_json(rows),
+        )
         .mount(server)
         .await;
 }
 async fn artifact(server: &MockServer, date: &str, body: Value) {
+    metadata(
+        server,
+        &format!("summaries/v3/{date}.json"),
+        "2026-10-17T12:00:00.100Z",
+    )
+    .await;
     Mock::given(method("GET"))
-        .and(path(format!("/summaries/v3/{date}.json")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .and(path(format!("/archive/summaries/v3/{date}.json")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-goog-generation", "123")
+                .set_body_json(body),
+        )
         .mount(server)
         .await;
 }
 fn source(server: &MockServer) -> PublicArchive {
-    PublicArchive::new(format!("{}/", server.uri()).parse().unwrap()).unwrap()
+    PublicArchive::new(format!("{}/archive/", server.uri()).parse().unwrap()).unwrap()
 }
 async fn count(pool: &PgPool) -> i64 {
     sqlx::query_scalar("select count(*) from briefs")
@@ -194,7 +220,10 @@ async fn rejects_untrusted_or_ambiguous_manifest_before_artifact_fetch(pool: PgP
         match kind {
             "external" => row["url"] = json!("https://untrusted.invalid/brief.json"),
             "query" => {
-                row["url"] = json!(format!("{}/summaries/v3/2026-10-17.json?x=1", server.uri()))
+                row["url"] = json!(format!(
+                    "{}/archive/summaries/v3/2026-10-17.json?x=1",
+                    server.uri()
+                ))
             }
             "missing_article" => row
                 .as_object_mut()
@@ -217,7 +246,7 @@ async fn rejects_untrusted_or_ambiguous_manifest_before_artifact_fetch(pool: PgP
             import_window(&pool, &source(&server), end()).await.is_err(),
             "{kind}"
         );
-        assert_eq!(server.received_requests().await.unwrap().len(), 1, "{kind}");
+        assert_eq!(server.received_requests().await.unwrap().len(), 2, "{kind}");
         assert_eq!(count(&pool).await, 0);
     }
 }
@@ -240,8 +269,14 @@ async fn missing_malformed_redirected_or_large_artifact_never_partially_imports(
                 .insert_header("Location", format!("{}/unexpected", server.uri())),
             _ => ResponseTemplate::new(200).set_body_string("x".repeat(2 * 1024 * 1024 + 1)),
         };
-        Mock::given(path("/summaries/v3/2026-10-17.json"))
-            .respond_with(response)
+        metadata(
+            &server,
+            "summaries/v3/2026-10-17.json",
+            "2026-10-17T12:00:00.100Z",
+        )
+        .await;
+        Mock::given(path("/archive/summaries/v3/2026-10-17.json"))
+            .respond_with(response.insert_header("x-goog-generation", "123"))
             .mount(&server)
             .await;
         assert!(
@@ -249,7 +284,7 @@ async fn missing_malformed_redirected_or_large_artifact_never_partially_imports(
             "{kind}"
         );
         assert_eq!(count(&pool).await, 0, "{kind}");
-        assert_eq!(server.received_requests().await.unwrap().len(), 3, "{kind}");
+        assert_eq!(server.received_requests().await.unwrap().len(), 6, "{kind}");
         assert!(!server
             .received_requests()
             .await
@@ -283,7 +318,7 @@ async fn ignores_other_formats_and_dates_outside_the_window(pool: PgPool) {
     assert_eq!(
         requests
             .iter()
-            .filter(|r| r.url.path().starts_with("/summaries/"))
+            .filter(|r| r.url.path().starts_with("/archive/summaries/"))
             .count(),
         1
     );
@@ -301,8 +336,9 @@ async fn rejects_failed_redirected_or_oversized_manifest_without_writes(pool: Pg
             "malformed" => ResponseTemplate::new(200).set_body_json(json!({"not":"an array"})),
             _ => ResponseTemplate::new(200).set_body_string("x".repeat(4 * 1024 * 1024 + 1)),
         };
-        Mock::given(path("/manifest.json"))
-            .respond_with(response)
+        metadata(&server, "manifest.json", "2026-10-17T12:00:00.500Z").await;
+        Mock::given(path("/archive/manifest.json"))
+            .respond_with(response.insert_header("x-goog-generation", "123"))
             .mount(&server)
             .await;
         assert!(
@@ -310,7 +346,7 @@ async fn rejects_failed_redirected_or_oversized_manifest_without_writes(pool: Pg
             "{kind}"
         );
         assert_eq!(count(&pool).await, 0);
-        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
     }
 }
 
@@ -327,14 +363,17 @@ async fn changing_manifest_during_download_aborts_before_writes(pool: PgPool) {
     second["title"] = json!("Replacement publication");
     let calls = Arc::new(AtomicUsize::new(0));
     let counter = calls.clone();
-    Mock::given(path("/manifest.json"))
+    metadata(&server, "manifest.json", "2026-10-17T12:00:00.500Z").await;
+    Mock::given(path("/archive/manifest.json"))
         .respond_with(move |_: &wiremock::Request| {
             let row = if counter.fetch_add(1, Ordering::SeqCst) == 0 {
                 first.clone()
             } else {
                 second.clone()
             };
-            ResponseTemplate::new(200).set_body_json(json!([row]))
+            ResponseTemplate::new(200)
+                .insert_header("x-goog-generation", "123")
+                .set_body_json(json!([row]))
         })
         .mount(&server)
         .await;
@@ -354,4 +393,129 @@ async fn cli_rejects_options_before_network_or_database_work(pool: PgPool) {
         .unwrap_err();
     assert!(error.contains("takes no arguments"));
     assert_eq!(count(&pool).await, 0);
+}
+
+#[sqlx::test]
+async fn unchanged_manifest_with_newer_or_equal_artifact_aborts_before_writes(pool: PgPool) {
+    feed(&pool).await;
+    for created in ["2026-10-17T12:00:00.501Z", "2026-10-17T12:00:00.500Z"] {
+        let server = MockServer::start().await;
+        manifest(&server, json!([entry(&server, "2026-10-17")])).await;
+        metadata(&server, "summaries/v3/2026-10-17.json", created).await;
+        Mock::given(path("/archive/summaries/v3/2026-10-17.json"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("x-goog-generation", "123")
+                    .set_body_json(json!({"deep_dive":"New article, old manifest metadata"})),
+            )
+            .mount(&server)
+            .await;
+        let error = import_window(&pool, &source(&server), end())
+            .await
+            .unwrap_err();
+        assert!(error.contains("publication"), "{error}");
+        assert_eq!(count(&pool).await, 0);
+    }
+}
+
+#[sqlx::test]
+async fn downloads_exact_generation_instead_of_stale_cached_artifact(pool: PgPool) {
+    let id = feed(&pool).await;
+    let server = MockServer::start().await;
+    manifest(&server, json!([entry(&server, "2026-10-17")])).await;
+    metadata(
+        &server,
+        "summaries/v3/2026-10-17.json",
+        "2026-10-17T12:00:00.100Z",
+    )
+    .await;
+    Mock::given(path("/archive/summaries/v3/2026-10-17.json"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-goog-generation", "122")
+                .set_body_json(json!({"deep_dive":"Old cached content"})),
+        )
+        .with_priority(2)
+        .mount(&server)
+        .await;
+    Mock::given(path("/archive/summaries/v3/2026-10-17.json"))
+        .and(query_param("generation", "123"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-goog-generation", "123")
+                .set_body_json(payload()),
+        )
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    import_window(&pool, &source(&server), end()).await.unwrap();
+    assert_eq!(
+        pulse_api::db::briefs::get(&pool, id, end())
+            .await
+            .unwrap()
+            .unwrap()
+            .payload,
+        payload()
+    );
+}
+
+#[sqlx::test]
+async fn invalid_object_metadata_or_unavailable_generation_never_writes(pool: PgPool) {
+    feed(&pool).await;
+    for kind in [
+        "missing_metadata",
+        "bad_timestamp",
+        "bad_generation",
+        "large_metadata",
+        "redirect_metadata",
+        "wrong_generation",
+        "missing_generation",
+        "gone_generation",
+    ] {
+        let server = MockServer::start().await;
+        manifest(&server, json!([entry(&server, "2026-10-17")])).await;
+        let metadata_response = match kind {
+            "missing_metadata" => ResponseTemplate::new(404),
+            "bad_timestamp" => ResponseTemplate::new(200)
+                .set_body_json(json!({"generation":"123", "timeCreated":"invalid"})),
+            "bad_generation" => ResponseTemplate::new(200)
+                .set_body_json(json!({"generation":"0", "timeCreated":"2026-10-17T12:00:00.100Z"})),
+            "large_metadata" => {
+                ResponseTemplate::new(200).set_body_string("x".repeat(16 * 1024 + 1))
+            }
+            "redirect_metadata" => ResponseTemplate::new(302)
+                .insert_header("Location", format!("{}/unexpected", server.uri())),
+            _ => ResponseTemplate::new(200).set_body_json(
+                json!({"generation":"123", "timeCreated":"2026-10-17T12:00:00.100Z"}),
+            ),
+        };
+        Mock::given(path(
+            "/storage/v1/b/archive/o/summaries%2Fv3%2F2026-10-17.json",
+        ))
+        .respond_with(metadata_response)
+        .mount(&server)
+        .await;
+        let body_response = match kind {
+            "gone_generation" => ResponseTemplate::new(404),
+            "missing_generation" => ResponseTemplate::new(200).set_body_json(payload()),
+            _ => ResponseTemplate::new(200)
+                .insert_header("x-goog-generation", "122")
+                .set_body_json(payload()),
+        };
+        Mock::given(path("/archive/summaries/v3/2026-10-17.json"))
+            .respond_with(body_response)
+            .mount(&server)
+            .await;
+        assert!(
+            import_window(&pool, &source(&server), end()).await.is_err(),
+            "{kind}"
+        );
+        assert_eq!(count(&pool).await, 0, "{kind}");
+        assert!(!server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .any(|r| r.url.path() == "/unexpected"));
+    }
 }

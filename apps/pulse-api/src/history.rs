@@ -1,6 +1,6 @@
 //! Silent, atomic import of already-published engineering briefs.
 use crate::db::briefs::BriefRow;
-use chrono::{Days, NaiveDate, Utc};
+use chrono::{DateTime, Days, NaiveDate, Utc};
 use pulse_core::Brief;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -9,10 +9,18 @@ use std::{collections::BTreeMap, time::Duration};
 pub const GCS_ROOT: &str = "https://storage.googleapis.com/tsvet01-agent-brain/";
 const MANIFEST_LIMIT: usize = 4 * 1024 * 1024;
 const ARTIFACT_LIMIT: usize = 2 * 1024 * 1024;
+const METADATA_LIMIT: usize = 16 * 1024;
 
 pub struct PublicArchive {
     base: reqwest::Url,
     http: reqwest::Client,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+struct ObjectVersion {
+    generation: String,
+    #[serde(rename = "timeCreated")]
+    created: DateTime<Utc>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -46,6 +54,12 @@ impl PublicArchive {
             || base.query().is_some()
             || base.fragment().is_some()
             || !base.path().ends_with('/')
+            || base.path().trim_matches('/').is_empty()
+            || !base
+                .path()
+                .trim_matches('/')
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
         {
             return Err("invalid archive root".into());
         }
@@ -58,11 +72,13 @@ impl PublicArchive {
         Ok(Self { base, http })
     }
 
-    async fn bytes(&self, relative: &str, limit: usize) -> Result<Vec<u8>, String> {
-        let url = self
-            .base
-            .join(relative)
-            .map_err(|_| "invalid archive path")?;
+    async fn bytes(
+        &self,
+        url: reqwest::Url,
+        limit: usize,
+        generation: Option<&str>,
+    ) -> Result<Vec<u8>, String> {
+        let relative = url.path().to_owned();
         let mut response = self
             .http
             .get(url)
@@ -74,6 +90,16 @@ impl PublicArchive {
                 "archive returned HTTP {} for {relative}",
                 response.status().as_u16()
             ));
+        }
+        if let Some(expected) = generation {
+            if response
+                .headers()
+                .get("x-goog-generation")
+                .and_then(|h| h.to_str().ok())
+                != Some(expected)
+            {
+                return Err(format!("archive object generation mismatch: {relative}"));
+            }
         }
         if response
             .content_length()
@@ -95,12 +121,51 @@ impl PublicArchive {
         Ok(data)
     }
 
+    async fn object(
+        &self,
+        relative: &str,
+        limit: usize,
+    ) -> Result<(Vec<u8>, ObjectVersion), String> {
+        // Metadata is revalidated; the public object's ordinary URL can be cached.
+        let mut metadata_url = self
+            .base
+            .join(&format!(
+                "/storage/v1/b/{}/o/{}",
+                self.base.path().trim_matches('/'),
+                urlencoding::encode(relative)
+            ))
+            .map_err(|_| "invalid archive metadata path")?;
+        metadata_url
+            .query_pairs_mut()
+            .append_pair("fields", "generation,timeCreated");
+        let data = self.bytes(metadata_url, METADATA_LIMIT, None).await?;
+        let version: ObjectVersion = serde_json::from_slice(&data)
+            .map_err(|_| format!("invalid archive object metadata: {relative}"))?;
+        if version
+            .generation
+            .parse::<u64>()
+            .ok()
+            .filter(|g| *g > 0)
+            .is_none()
+        {
+            return Err(format!("invalid archive object generation: {relative}"));
+        }
+        let mut url = self
+            .base
+            .join(relative)
+            .map_err(|_| "invalid archive path")?;
+        url.query_pairs_mut()
+            .append_pair("generation", &version.generation);
+        let data = self.bytes(url, limit, Some(&version.generation)).await?;
+        Ok((data, version))
+    }
+
     async fn manifest(
         &self,
         start: NaiveDate,
         end: NaiveDate,
-    ) -> Result<BTreeMap<NaiveDate, ManifestEntry>, String> {
-        let data = self.bytes("manifest.json", MANIFEST_LIMIT).await?;
+    ) -> Result<(BTreeMap<NaiveDate, ManifestEntry>, ObjectVersion), String> {
+        let (data, version) = self.object("manifest.json", MANIFEST_LIMIT).await?;
         let entries: Vec<ManifestEntry> =
             serde_json::from_slice(&data).map_err(|_| "invalid archive manifest")?;
         let mut selected = BTreeMap::new();
@@ -141,16 +206,22 @@ impl PublicArchive {
         if selected.is_empty() {
             return Err("no published V3 briefs in the requested window".into());
         }
-        Ok(selected)
+        Ok((selected, version))
     }
 
     async fn briefs(&self, start: NaiveDate, end: NaiveDate) -> Result<Vec<Brief>, String> {
-        let entries = self.manifest(start, end).await?;
+        let (entries, manifest_version) = self.manifest(start, end).await?;
         let mut briefs = Vec::with_capacity(entries.len());
         for (date, entry) in &entries {
-            let bytes = self
-                .bytes(&format!("summaries/v3/{date}.json"), ARTIFACT_LIMIT)
+            let (bytes, version) = self
+                .object(&format!("summaries/v3/{date}.json"), ARTIFACT_LIMIT)
                 .await?;
+            // Publisher writes the artifact before replacing its manifest entry.
+            if version.created >= manifest_version.created {
+                return Err(format!(
+                    "archive publication in progress for {date}; retry later"
+                ));
+            }
             let payload = serde_json::from_slice(&bytes)
                 .map_err(|_| format!("invalid artifact JSON for {date}"))?;
             pulse_core::validate_payload(&payload)
@@ -170,7 +241,7 @@ impl PublicArchive {
             });
         }
         // A concurrent publication must not mix two manifest snapshots.
-        if self.manifest(start, end).await? != entries {
+        if self.manifest(start, end).await? != (entries, manifest_version) {
             return Err("archive manifest changed during import; retry".into());
         }
         Ok(briefs)
