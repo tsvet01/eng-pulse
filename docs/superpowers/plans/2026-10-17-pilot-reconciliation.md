@@ -3,7 +3,7 @@
 > **For agentic workers:** Use superpowers:executing-plans to implement this approved pilot slice task-by-task, with tests before code.
 
 **Goal:** Keep the engineering API mirror current from published GCS artifacts and expose a stopped or stale mirror before switching app reads.
-**Architecture:** Reuse the atomic, generation-pinned 30-day importer in a supervised API background loop on Hetzner. Persist attempt/outcome checkpoints in Postgres, serialize workers with a database advisory transaction lock, and expose a minimal public freshness probe plus service-token-protected details. An hourly GitHub Actions probe provides a failed-run signal independently of the API process.
+**Architecture:** Reuse the atomic, generation-pinned 30-day importer in a supervised API background loop on Hetzner. Persist attempt/outcome checkpoints in Postgres, serialize workers with a database advisory session lock, and expose a minimal public freshness probe plus service-token-protected details. An hourly GitHub Actions probe provides a failed-run signal independently of the API process.
 **Tech Stack:** Existing Rust/axum/sqlx/Tokio, Postgres18, GitHub Actions; no new dependency or cloud credential.
 **Spec:** `docs/superpowers/specs/2026-09-01-multiuser-cohorts-design.md`, implementing P1.2 of `2026-10-13-hetzner-multiuser-pilot.md`.
 
@@ -16,7 +16,7 @@
 
 ## Builder decisions
 
-The approved design leaves cadence and process layout to implementation. Run immediately on API startup and every 15 minutes thereafter, with missed ticks skipped and no overlapping cycles. Each cycle tries at most 3 imports, 30 seconds apart; each import retains its 180-second limit, and the entire cycle is bounded to 11 minutes. A separate transaction holds an advisory lock and has a 12-minute idle timeout to release a dead worker. Completed checkpoints survive restart. A successful parity check must be at most 45 minutes old, the public source and database must contain at least yesterday's date before 07:30 UTC or today's date thereafter. Old source gaps are reported but do not make current data stale. The hourly probe runs at minute23; GitHub scheduling/notification preferences affect alert delivery and are not an SLA.
+The approved design leaves cadence and process layout to implementation. Run immediately on API startup and every 15 minutes thereafter, with missed ticks skipped and no overlapping cycles. Each cycle tries at most 3 imports, 30 seconds apart; each import retains its 180-second limit, and the entire cycle is bounded to 11 minutes. A dedicated connection holds an advisory session lock and has a 12-minute idle timeout to release a dead worker. Completed checkpoints survive restart. A successful parity check must be at most 45 minutes old, the public source and database must contain at least yesterday's date before 07:30 UTC or today's date thereafter. Old source gaps are reported but do not make current data stale. The hourly probe runs at minute 23; GitHub scheduling/notification preferences affect alert delivery and are not an SLA.
 
 ## Review Focus
 
@@ -43,12 +43,14 @@ The approved design leaves cadence and process layout to implementation. Run imm
 - [x] Add failing configuration and monitor tests with real local HTTP fixtures, then implement the minimal runtime overlay/monitor. Expect no cloud calls and preserved existing private values.
 - [x] Add hourly/manual monitoring workflow with pinned checkout and read-only permissions. Document alert routing, cadence, startup/recovery behavior and limitations.
 - [x] Update historical evidence: 29 production imports, 0 replay inserts, 29 verified, 10 October source gap; PR #200 release succeeded.
-- [ ] Run API/release tests, formatting/Clippy/ShellCheck/Actionlint; request one fresh whole-branch review, fix important findings with RED→GREEN, and publish a PR.
+- [x] Run API/release tests, formatting/Clippy/ShellCheck/Actionlint; request one fresh whole-branch review, fix important findings with RED→GREEN, and publish a PR.
 
 Production activation, the next 06:00 UTC comparison, a controlled production outage rehearsal and P2 delivery/device gates are separate release evidence; do not infer them from local tests.
 
 ## Local evidence, 2026-10-17
 
-- 70 API tests and 38 release-script tests passed, including worker cancellation, duplicate-worker ownership, retry exhaustion, source/DB staleness and real HTTP monitor failures. All-target API Clippy, rustfmt, ShellCheck and Actionlint for the added workflow passed.
+- 72 API tests and 38 release-script tests passed, including worker cancellation, duplicate-worker ownership, retry exhaustion, source/DB staleness and real HTTP monitor failures. All-target API Clippy, rustfmt, ShellCheck and Actionlint for the added workflow passed.
 - A real local API process using public GCS artifacts and disposable Postgres imported and verified 29 briefs on startup. Restart inserted zero and verified 29 unchanged. Removing one brief only from that disposable database while the API was stopped, then restarting, restored exactly one and verified all 29. Each completed stage returned a current freshness probe; notifications remained zero.
 - This proves local startup/restart repair and real-source compatibility. It is not a production outage rehearsal, next-morning comparison or delivered alert.
+
+Independent whole-branch review identified lost-owner checkpoint writes and future-dated rows masking current-feed gaps. Both were reproduced by failing tests and fixed; all 72 API tests passed afterward. [PR #201](https://github.com/tsvet01/eng-pulse/pull/201) carries the implementation. Production activation remains pending.

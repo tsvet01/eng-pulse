@@ -357,3 +357,81 @@ async fn cancelled_worker_releases_ownership_and_does_not_invent_success(pool: P
         CycleOutcome::Succeeded
     );
 }
+
+#[sqlx::test]
+async fn lost_owner_cannot_overwrite_a_successor_checkpoint(pool: PgPool) {
+    feed(&pool).await;
+    let entered = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+    let resume = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+    let entered_handler = entered.clone();
+    let resume_handler = resume.clone();
+    let app = axum::Router::new().fallback(move || {
+        let entered = entered_handler.clone();
+        let resume = resume_handler.clone();
+        async move {
+            entered.add_permits(1);
+            resume.acquire().await.unwrap().forget();
+            axum::http::StatusCode::SERVICE_UNAVAILABLE
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let old_pool = pool.clone();
+    let old_source =
+        PublicArchive::new(format!("http://{address}/archive/").parse().unwrap()).unwrap();
+    let old_worker = tokio::spawn(async move {
+        reconciliation::reconcile_cycle(&old_pool, &old_source, end(), Duration::ZERO).await
+    });
+    tokio::time::timeout(Duration::from_secs(3), entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    // Kill only this test database's lock owner, while its source request is paused.
+    let killed: bool = sqlx::query_scalar("select pg_terminate_backend(pid) from pg_locks where locktype='advisory' and classid=0 and objid::bigint=$1 and database=(select oid from pg_database where datname=current_database()) and granted")
+        .bind(reconciliation::LOCK_ID).fetch_one(&pool).await.unwrap();
+    assert!(killed);
+    let successor_source = MockServer::start().await;
+    archive(&successor_source).await;
+    assert_eq!(
+        cycle(&pool, &successor_source).await.unwrap(),
+        CycleOutcome::Succeeded
+    );
+    let successor = serde_json::to_value(reconciliation::status(&pool).await.unwrap()).unwrap();
+    resume.add_permits(3);
+    let old_result = tokio::time::timeout(Duration::from_secs(5), old_worker)
+        .await
+        .unwrap()
+        .unwrap();
+    server.abort();
+    assert!(old_result.is_err());
+    assert_eq!(
+        serde_json::to_value(reconciliation::status(&pool).await.unwrap()).unwrap(),
+        successor
+    );
+}
+
+#[sqlx::test]
+async fn future_dated_row_cannot_mask_a_missing_current_brief(pool: PgPool) {
+    feed(&pool).await;
+    let server = MockServer::start().await;
+    archive(&server).await;
+    cycle(&pool, &server).await.unwrap();
+    sqlx::query("update reconciliation_state set last_success_at=$1")
+        .bind(now())
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("update briefs set date='2026-10-18'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        reconciliation::probe(&pool, true, now())
+            .await
+            .unwrap()
+            .reason,
+        "mirror_behind"
+    );
+}

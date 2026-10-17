@@ -89,8 +89,8 @@ pub async fn probe(pool: &PgPool, enabled: bool, now: DateTime<Utc>) -> Result<F
     {
         return Ok(Freshness::degraded("source_behind"));
     }
-    let latest: Option<NaiveDate> = db(sqlx::query_scalar("select max(b.date) from briefs b join feeds f on f.id=b.feed_id where f.slug='engineering' and f.is_active")
-        .fetch_one(pool)).await?;
+    let latest: Option<NaiveDate> = db(sqlx::query_scalar("select max(b.date) from briefs b join feeds f on f.id=b.feed_id where f.slug='engineering' and f.is_active and b.date <= $1")
+        .bind(now.date_naive()).fetch_one(pool)).await?;
     if latest.is_none_or(|date| date < expected) {
         return Ok(Freshness::degraded("mirror_behind"));
     }
@@ -129,11 +129,11 @@ async fn cycle_inner(
     end: NaiveDate,
     retry_delay: Duration,
 ) -> Result<CycleOutcome, String> {
-    // This transaction owns only the worker lock; checkpoints commit independently.
-    let mut owner = db(pool.begin()).await?;
-    db(sqlx::query("set local idle_in_transaction_session_timeout = '12min'").execute(&mut *owner))
-        .await?;
-    let locked: bool = db(sqlx::query_scalar("select pg_try_advisory_xact_lock($1)")
+    // Autocommitted checkpoints use the lock's session; a lost owner cannot write again.
+    let mut owner = db(pool.acquire()).await?;
+    owner.close_on_drop(); // Never return a session holding this lock to the pool.
+    db(sqlx::query("set idle_session_timeout = '12min'").execute(&mut *owner)).await?;
+    let locked: bool = db(sqlx::query_scalar("select pg_try_advisory_lock($1)")
         .bind(LOCK_ID)
         .fetch_one(&mut *owner))
     .await?;
@@ -141,12 +141,12 @@ async fn cycle_inner(
         return Ok(CycleOutcome::Skipped);
     }
     db(sqlx::query("insert into reconciliation_state(id,started_at,outcome) values(1,clock_timestamp(),'running') on conflict(id) do update set started_at=clock_timestamp(),finished_at=null,outcome='running',attempts=0,last_error=null")
-        .execute(pool)).await?;
+        .execute(&mut *owner)).await?;
     for attempt in 1..=MAX_ATTEMPTS {
         db(
             sqlx::query("update reconciliation_state set attempts=$1 where id=1")
                 .bind(attempt)
-                .execute(pool),
+                .execute(&mut *owner),
         )
         .await?;
         match history::import_window(pool, source, end).await {
@@ -155,8 +155,8 @@ async fn cycle_inner(
                 let json = serde_json::to_value(&report)
                     .map_err(|_| "could not encode reconciliation report")?;
                 db(sqlx::query("update reconciliation_state set finished_at=clock_timestamp(),last_success_at=clock_timestamp(),outcome='ok',consecutive_failures=0,last_error=null,latest_source_date=$1,report=$2 where id=1")
-                    .bind(latest).bind(json).execute(pool)).await?;
-                db(owner.rollback()).await?;
+                    .bind(latest).bind(json).execute(&mut *owner)).await?;
+                db(owner.close()).await?;
                 return Ok(CycleOutcome::Succeeded);
             }
             Err(error) => {
@@ -164,7 +164,7 @@ async fn cycle_inner(
                 db(
                     sqlx::query("update reconciliation_state set last_error=$1 where id=1")
                         .bind(error)
-                        .execute(pool),
+                        .execute(&mut *owner),
                 )
                 .await?;
                 if attempt < MAX_ATTEMPTS {
@@ -174,8 +174,8 @@ async fn cycle_inner(
         }
     }
     db(sqlx::query("update reconciliation_state set finished_at=clock_timestamp(),outcome='error',consecutive_failures=consecutive_failures+1 where id=1")
-        .execute(pool)).await?;
-    db(owner.rollback()).await?;
+        .execute(&mut *owner)).await?;
+    db(owner.close()).await?;
     Ok(CycleOutcome::Failed)
 }
 
