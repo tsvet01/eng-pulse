@@ -32,6 +32,7 @@ actor FeedbackService {
     /// Local UserDefaults still captures it. Offline queuing deferred to future iteration.
     func submitFeedback(summaryURL: String, selectionFeedback: String?,
                         summaryFeedback: String?, promptVersion: String?) async {
+        guard PilotBuild.allowsLegacyServices else { return }
         guard selectionFeedback != nil || summaryFeedback != nil else { return }
         guard let user = Auth.auth().currentUser else {
             print("FeedbackService: No authenticated user, skipping upload")

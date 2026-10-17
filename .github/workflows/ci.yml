@@ -139,6 +139,8 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+    - name: Test pilot authentication and admission
+      run: swift test --package-path apps/mobile-swift
     - name: Decode API brief fixtures with the app model
       run: |
         swiftc apps/mobile-swift/EngPulse/Models/InsightBrief.swift scripts/check-brief-contracts.swift -o /tmp/check-brief-contracts
@@ -154,7 +156,8 @@ jobs:
           | first // empty | "\(.udid) \(.name)"')
         xcodebuild test -scheme EngPulse -sdk iphonesimulator \
           -destination "platform=iOS Simulator,id=${DEVICE%% *}" \
-          CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO
+          CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=YES CODE_SIGNING_ALLOWED=YES \
+          SUPABASE_PUBLISHABLE_KEY=public-ci-placeholder
 
   python:
     needs: changes

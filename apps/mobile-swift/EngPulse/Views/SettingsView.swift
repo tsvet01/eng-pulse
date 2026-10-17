@@ -76,6 +76,7 @@ struct SettingsView: View {
                     }
                 }
 
+                if PilotBuild.allowsLegacyServices {
                 // Notifications
                 SettingsSection(title: "Notifications", icon: "bell.badge") {
                     VStack(alignment: .leading, spacing: 4) {
@@ -125,6 +126,15 @@ struct SettingsView: View {
                                 .foregroundColor(.onSurfaceVariant)
                         }
                         Spacer()
+                    }
+                }
+
+                } else if let model = AppServices.shared.pilotAccountModel,
+                          case .admitted(_, let user) = model.phase {
+                    SettingsSection(title: "Account", icon: "person.crop.circle") {
+                        Text(user.email).font(.subheadline)
+                        Button("Sign out", role: .destructive) { Task { await model.signOut() } }
+                            .accessibilityIdentifier("pilot.signOut")
                     }
                 }
 
@@ -185,7 +195,7 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
         .task {
-            loadReadCount()
+            if PilotBuild.allowsLegacyServices { loadReadCount() }
             await loadCacheSize()
         }
         .alert("Clear Cache?", isPresented: $showClearCacheAlert) {
@@ -219,26 +229,7 @@ struct SettingsView: View {
     }
 
     private func loadCacheSize() async {
-        let size = await Task.detached(priority: .utility) {
-            guard let cachesURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
-                return "Unknown"
-            }
-            let engPulseCache = cachesURL.appendingPathComponent("EngPulse")
-            guard let enumerator = FileManager.default.enumerator(
-                at: engPulseCache,
-                includingPropertiesForKeys: [.fileSizeKey],
-                options: [.skipsHiddenFiles]
-            ) else { return "0 MB" }
-            var totalBytes: Int = 0
-            for case let fileURL as URL in enumerator {
-                if let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
-                    totalBytes += size
-                }
-            }
-            let mb = Double(totalBytes) / 1_048_576
-            return String(format: "%.1f MB", mb)
-        }.value
-        cacheSize = size
+        cacheSize = await appState.formattedCacheSize()
     }
 
     private func clearCache() {

@@ -162,8 +162,10 @@ struct DetailView: View {
                 }
 
                 if fullContent != nil || loadingError != nil {
-                    FeedbackWidget(summaryUrl: summary.url, promptVersion: summary.promptVersion)
-                        .padding(.top, DesignTokens.sectionSpacing)
+                    if PilotBuild.allowsLegacyServices {
+                        FeedbackWidget(summaryUrl: summary.url, promptVersion: summary.promptVersion)
+                            .padding(.top, DesignTokens.sectionSpacing)
+                    }
 
                     ArticleNavigation(allSummaries: allSummaries, currentIndex: currentIndex)
                         .padding(.top, 12)
@@ -260,21 +262,15 @@ struct DetailView: View {
         loadingError = nil
         let cache = cacheService ?? CacheService()
 
-        // Phase 1: Show cached content instantly
-        if let cached = await cache.getCachedContent(for: summary.url) {
-            setContent(cached)
-            return
-        }
-
-        // Phase 2: Fetch fresh from network
         if fullContent == nil { isLoadingContent = true }
         defer { isLoadingContent = false }
 
         do {
             let content = try await ArticleContentLoader.load(summary, cacheService: cache)
+            guard !Task.isCancelled else { return }
             setContent(content)
         } catch {
-            guard fullContent == nil else { return }
+            guard !Task.isCancelled, fullContent == nil else { return }
             if let error = error as? URLError, error.code == .timedOut {
                 loadingError = "Request timed out. Please try again."
             } else if let error = error as? ArticleContentLoader.LoadError {

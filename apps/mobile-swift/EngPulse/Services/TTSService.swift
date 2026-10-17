@@ -40,6 +40,7 @@ class TTSService: ObservableObject {
     private var currentText: String?
     private var currentCacheKey: String?
     private var cancellables = Set<AnyCancellable>()
+    private var isActive = true
 
     init(cacheService: CacheService = CacheService(), cloudTTS: CloudTTSService? = nil, audioPlayer: AudioPlayerService? = nil) {
         self.cacheService = cacheService
@@ -73,6 +74,7 @@ class TTSService: ObservableObject {
     }
 
     private func handlePlaybackStateChange(_ isPlaying: Bool) {
+        guard isActive else { return }
         if isPlaying {
             state = .playing
         } else if state == .playing {
@@ -94,6 +96,7 @@ class TTSService: ObservableObject {
     /// Explicit natural-finish signal from the players — the only path that
     /// clears resume positions and advances the playlist.
     private func handleTrackFinished(clearPosition: Bool) {
+        guard isActive else { return }
         guard state == .playing else { return }
         if clearPosition, let url = currentArticleUrl { clearSavedPosition(for: url) }
         // Discard the finished player so its end position can't be re-saved
@@ -123,7 +126,7 @@ class TTSService: ObservableObject {
         audioPlayer.$progress
             .receive(on: RunLoop.main)
             .sink { [weak self] newProgress in
-                guard let self = self else { return }
+                guard let self = self, self.isActive else { return }
                 guard abs(self.progress - newProgress) > 0.001 else { return }
                 self.progress = newProgress
                 if self.state == .playing {
@@ -152,7 +155,7 @@ class TTSService: ObservableObject {
         localTTS.$progress
             .receive(on: RunLoop.main)
             .sink { [weak self] newProgress in
-                guard let self = self, abs(self.progress - newProgress) > 0.001 else { return }
+                guard let self = self, self.isActive, abs(self.progress - newProgress) > 0.001 else { return }
                 self.progress = newProgress
             }
             .store(in: &cancellables)
@@ -162,6 +165,7 @@ class TTSService: ObservableObject {
 
     /// Start speaking text, stopping any current playback first
     func startSpeaking(_ text: String, articleUrl: String? = nil, articleTitle: String? = nil) {
+        guard isActive else { return }
         // Stop while currentArticleUrl still points at the previous article, so its
         // resume position is saved under its own URL — not the new article's.
         stopPlayback()
@@ -312,6 +316,7 @@ class TTSService: ObservableObject {
     }
 
     func resume() {
+        guard isActive else { return }
         if state == .paused {
             if isUsingLocalTTS {
                 localTTS?.resume()
@@ -341,7 +346,16 @@ class TTSService: ObservableObject {
         NowPlayingService.shared.clearNowPlaying()
     }
 
+    /// Permanently closes playback for an account that has left this context.
+    func invalidate() {
+        guard isActive else { return }
+        stop()
+        isActive = false
+        cancellables.removeAll()
+    }
+
     func stop() {
+        guard isActive else { return }
         if let url = currentArticleUrl { clearSavedPosition(for: url) }
         stopPlayback()
         currentArticleUrl = nil
@@ -369,6 +383,7 @@ class TTSService: ObservableObject {
     /// Play a list of articles as a playlist. Content is fetched per article
     /// (cache first) and playback auto-advances when an article finishes.
     func playQueue(_ summaries: [Summary]) {
+        guard isActive else { return }
         guard !summaries.isEmpty else { return }
         queue = summaries
         queueIndex = 0
@@ -403,6 +418,7 @@ class TTSService: ObservableObject {
     }
 
     private func playCurrentQueueItem() {
+        guard isActive else { return }
         let summary = queue[queueIndex]
         updateQueueCommands()
         queueLoadTask?.cancel()
