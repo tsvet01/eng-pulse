@@ -56,7 +56,7 @@ struct PilotAPIClient: Sendable {
                 try await auth.discard(session)
                 throw PilotError.signInRequired
             }
-            if status == 200 || status == 201 {
+            if status == 200 || status == 201 || status == 204 {
                 return data
             }
             struct Failure: Decodable { let error: String }
