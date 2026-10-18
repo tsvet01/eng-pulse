@@ -59,6 +59,7 @@ struct SettingsView: View {
                         }
                         Slider(value: $speechRate, in: 0.25...0.75, step: 0.05)
                             .tint(.accentColor)
+                            .accessibilityLabel("Speech Rate")
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
@@ -74,6 +75,7 @@ struct SettingsView: View {
                         }
                         Slider(value: $pitch, in: 0.5...1.5, step: 0.1)
                             .tint(.accentColor)
+                            .accessibilityLabel("Voice Pitch")
                     }
                 }
 
