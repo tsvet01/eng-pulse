@@ -57,7 +57,7 @@ extension Color {
         static let onSurface = Color(hex: 0x1A1C2E)
         static let onSurfaceVariant = Color(hex: 0x5C607A)
         static let outlineVariant = Color(hex: 0xDCDDE8)
-        static let tertiary = Color(hex: 0xD97721)
+        static let tertiary = Color(hex: 0xA64B12)
     }
 }
 
@@ -76,9 +76,9 @@ extension Color {
 
 // MARK: - Layout constants
 enum DesignTokens {
-    static let cardRadius: CGFloat = 16
+    static let cardRadius: CGFloat = 20
     static let pillRadius: CGFloat = 20
-    static let cardPadding: CGFloat = 16
+    static let cardPadding: CGFloat = 20
     static let sectionSpacing: CGFloat = 24
 }
 
@@ -89,5 +89,23 @@ extension TimeInterval {
         let mins = Int(self) / 60
         let secs = Int(self) % 60
         return String(format: "%d:%02d", mins, secs)
+    }
+}
+
+// A native companion to the existing bolt app icon.
+struct PulseMark: View {
+    var size: CGFloat = 32
+
+    var body: some View {
+        Image(systemName: "bolt.fill")
+            .font(.system(size: size * 0.52, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(
+                LinearGradient(colors: [Color(hex: 0x6861ED), Color(hex: 0x4F46CE)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing),
+                in: RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+            )
+            .accessibilityHidden(true)
     }
 }
