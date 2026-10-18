@@ -33,6 +33,8 @@ struct HomeViewContent: View {
                 }
             } else if summariesStore.summaries.isEmpty {
                 EmptyStateView()
+            } else if filteredSummaries.isEmpty {
+                ContentUnavailableView.search(text: searchText)
             } else {
                 summaryList
             }
