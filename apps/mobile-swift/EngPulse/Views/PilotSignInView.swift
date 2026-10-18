@@ -14,7 +14,9 @@ struct PilotEntryView: View {
                 ContentView()
                     .environmentObject(context.appState)
                     .environmentObject(context.ttsService)
+                    .environmentObject(context.personalState)
                     .id(context.id)
+                    .task { await context.personalState.flush() }
             } else if let model {
                 PilotSignInView(model: model)
             } else {
@@ -28,6 +30,7 @@ struct PilotEntryView: View {
                 Task {
                     await model.restore()
                     await services.pilotReader?.appState.refreshSummaries()
+                    await services.pilotReader?.personalState.flush()
                 }
             }
         }

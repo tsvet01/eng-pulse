@@ -89,8 +89,8 @@ final class PilotReaderIntegrationTests: XCTestCase {
         } catch { XCTAssertEqual(error as? PilotError, .accessDenied) }
     }
     @MainActor
-    private func context(root: URL, user: UUID = UUID()) async throws -> PilotReaderContext {
-        let identity = PilotIdentity(id: UUID(), email: "pilot@example.com")
+    private func context(root: URL, user: UUID = UUID(), identityID: UUID = UUID()) async throws -> PilotReaderContext {
+        let identity = PilotIdentity(id: identityID, email: "pilot@example.com")
         let credentials = PilotCredentials(accessToken: "test", refreshToken: "test", expiresAt: 4102444800, identity: identity)
         let config = PilotConfiguration(supabaseURL: URL(string: "https://auth.invalid")!, publishableKey: "public-test",
             apiURL: URL(string: "https://api.invalid/v1")!)
@@ -131,6 +131,9 @@ final class PilotReaderIntegrationTests: XCTestCase {
         XCTAssertEqual(context.ttsService.state, .loading)
         context.invalidate()
         XCTAssertFalse(context.reader.isActive)
+        XCTAssertFalse(context.personalState.isActive)
+        await context.personalState.rate(date: "2026-10-18", aspect: .brief, value: 1)
+        XCTAssertTrue(context.personalState.feedback.isEmpty)
         XCTAssertTrue(context.appState.summaries.isEmpty)
         XCTAssertNil(context.ttsService.currentArticleUrl)
         XCTAssertEqual(context.ttsService.state, .stopped)
@@ -143,6 +146,24 @@ final class PilotReaderIntegrationTests: XCTestCase {
         XCTAssertEqual(context.ttsService.state, .stopped, "Stale UI commands cannot restart a signed-out player")
         XCTAssertTrue(context.ttsService.queue.isEmpty)
         context.ttsService.stop()
+    }
+
+    @MainActor
+    func testPendingRatingSurvivesArticleCacheClearingAndStaysInItsAccount() async throws {
+        let root = try root()
+        let first = try await context(root: root)
+        await first.personalState.rate(date: "2026-10-18", aspect: .selection, value: -1)
+        XCTAssertTrue(first.personalState.hasPending(date: "2026-10-18"))
+        await first.appState.clearCache()
+        let second = try await context(root: root)
+        await second.personalState.flush()
+        XCTAssertTrue(second.personalState.feedback.isEmpty)
+        first.invalidate(); second.invalidate()
+        let reopened = try await context(root: root, user: first.user.id, identityID: first.session.identity.id)
+        await reopened.personalState.flush()
+        XCTAssertTrue(reopened.personalState.hasPending(date: "2026-10-18"))
+        XCTAssertEqual(reopened.personalState.feedback["2026-10-18"]?.selection, -1)
+        reopened.invalidate()
     }
 
     @MainActor
