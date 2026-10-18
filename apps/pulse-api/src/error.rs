@@ -9,6 +9,7 @@ use serde_json::json;
 pub enum ApiError {
     Unauthorized(&'static str),
     InviteRequired,
+    FeedbackConflict,
     Forbidden,
     NotFound(&'static str),
     Conflict(&'static str),
@@ -26,6 +27,11 @@ impl ApiError {
                 StatusCode::FORBIDDEN,
                 "invite_required",
                 "sign-up needs an invite code".into(),
+            ),
+            Self::FeedbackConflict => (
+                StatusCode::CONFLICT,
+                "feedback_conflict",
+                "feedback changed; reload before retrying".into(),
             ),
             Self::Forbidden => (StatusCode::FORBIDDEN, "forbidden", "not allowed".into()),
             Self::NotFound(m) => (StatusCode::NOT_FOUND, "not_found", m.to_string()),

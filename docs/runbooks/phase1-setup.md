@@ -81,3 +81,10 @@ For account deletion, separately review retention and dependent records, then pe
 Only active `engineering` is exposed to readers and `/internal` consumers. Feed creation and source/topic writes return 403 for every registered role, including admins/owners. Apply reviewed source changes through the existing GCP configuration workflow, then refresh the API seed; no HTTP edit changes generation behavior. Join/leave and notification preference updates remain available to active users.
 
 Migration `0003_pilot_readiness.sql` adds account disabling and widens evaluation scores to double precision. Existing rounded scores need re-ingestion to restore source precision. Do not roll back to an API build that ignores `is_active` after revoking a user; that would restore access. Any emergency rollback needs a compatible forward fix or a maintenance window with authenticated routes unavailable.
+
+
+### Account feedback revisions
+
+Migration `0005_feedback_revisions.sql` preserves existing votes at revision 1 and allows null-valued undo tombstones. GET `/v1/briefs/{slug}/{date}/feedback` returns the authenticated account's `selection` and `brief` values/revisions. Pilot PUT and DELETE send `X-Expected-Revision`; successful writes return 204 with `X-Feedback-Revision`. A 409 `feedback_conflict` requires reloading the current vote before a fresh user choice. DELETE requires the expected revision; compatibility PUT without it remains unconditional and advances the revision. Internal feedback export omits tombstones.
+
+Deploy this API before distributing the feedback-enabled pilot app. After applying 0005, do not roll back to a pre-0005 API binary: SQLx validates migration history, and the older feedback queries do not understand tombstones or advance revisions. Use a compatible forward fix retaining 0005, account checks, tombstones and revision semantics. If a compatible image is unavailable, keep authenticated mutation routes unavailable during recovery; do not delete undo records, rewrite migration history, or reset revisions to make an old image run. The GCP daily pipeline and legacy Firebase feedback path are unchanged by this release.
