@@ -24,7 +24,7 @@ struct PilotEntryView: View {
         }
         .task { await model?.restore() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active, let model, model.phase != .signedOut {
+            if phase == .active, let model, model.phase.session != nil, !model.isBusy {
                 Task {
                     await model.restore()
                     await services.pilotReader?.appState.refreshSummaries()
@@ -42,8 +42,33 @@ private struct PilotSignInView: View {
     @State private var invite = ""
     @State private var appleNonce: String?
     @State private var appleAttempt: UUID?
+    @State private var showsRestoreProgress = false
 
     var body: some View {
+        Group {
+            switch model.phase {
+            case .restoring, .admitted:
+                ZStack {
+                    Color.surface.ignoresSafeArea()
+                    if model.phase == .restoring, let message = model.errorMessage, !model.isBusy {
+                        ErrorView(message: message) { Task { await model.restore() } }
+                    } else if showsRestoreProgress {
+                        ProgressView().accessibilityLabel("Opening Eng Pulse")
+                    }
+                }
+                .accessibilityIdentifier("pilot.restoring")
+                .task {
+                    do { try await Task.sleep(for: .milliseconds(300)) }
+                    catch { return }
+                    showsRestoreProgress = true
+                }
+                .onDisappear { showsRestoreProgress = false }
+            default: accountForm
+            }
+        }
+    }
+
+    private var accountForm: some View {
         NavigationStack {
             Form {
                 Section {
@@ -51,6 +76,7 @@ private struct PilotSignInView: View {
                     Text("Your daily engineering brief, with your own account.").foregroundStyle(.secondary)
                 }
                 switch model.phase {
+                case .restoring, .admitted: EmptyView()
                 case .signedOut: signIn
                 case .needsInvite(let session):
                     Section("Join the pilot") {
@@ -60,13 +86,6 @@ private struct PilotSignInView: View {
                             .accessibilityIdentifier("pilot.invite")
                         Button("Join engineering") { Task { await model.acceptInvite(invite) } }
                             .disabled(invite.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isBusy)
-                    }
-                case .admitted(_, let user):
-                    Section("Account connected") {
-                        Label("Pilot access confirmed", systemImage: "checkmark.circle.fill")
-                        Text(user.email)
-                        Text("Opening your engineering feed…")
-                            .foregroundStyle(.secondary)
                     }
                 case .waiting(let session):
                     Section("Finish connecting") {

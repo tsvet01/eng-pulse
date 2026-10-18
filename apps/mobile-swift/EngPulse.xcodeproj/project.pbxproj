@@ -56,6 +56,7 @@
 		AC100009 /* PilotFeedReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200009 /* PilotFeedReader.swift */; };
 		AC100010 /* PilotReaderIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200010 /* PilotReaderIntegrationTests.swift */; };
 		PC100001 /* PlaybackChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = PC200001 /* PlaybackChromeTests.swift */; };
+		AD100001 /* AudioCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD200001 /* AudioCacheTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -122,6 +123,7 @@
 		AC200009 /* PilotFeedReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pilot/PilotFeedReader.swift; sourceTree = "<group>"; };
 		AC200010 /* PilotReaderIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotReaderIntegrationTests.swift; sourceTree = "<group>"; };
 		PC200001 /* PlaybackChromeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackChromeTests.swift; sourceTree = "<group>"; };
+		AD200001 /* AudioCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCacheTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -254,6 +256,7 @@
 				CP200007 /* CarPlayContentBuilderTests.swift */,
 				CP200008 /* SpeechTextBuilderTests.swift */,
 				PC200001 /* PlaybackChromeTests.swift */,
+				AD200001 /* AudioCacheTests.swift */,
 			);
 			path = EngPulseTests;
 			sourceTree = "<group>";
@@ -414,6 +417,7 @@
 				CP100007 /* CarPlayContentBuilderTests.swift in Sources */,
 				CP100008 /* SpeechTextBuilderTests.swift in Sources */,
 				PC100001 /* PlaybackChromeTests.swift in Sources */,
+				AD100001 /* AudioCacheTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

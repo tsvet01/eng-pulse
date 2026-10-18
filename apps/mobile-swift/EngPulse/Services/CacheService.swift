@@ -95,14 +95,41 @@ actor CacheService {
     /// Cache audio data for TTS
     func cacheAudio(_ audioData: Data, for cacheKey: String) async throws {
         ensureDirectoryExists()
-        let audioFile = cacheDirectory.appendingPathComponent("audio_\(cacheKey).mp3")
-        try audioData.write(to: audioFile)
+        let fileExtension = Self.isWAV(audioData) ? "wav" : "mp3"
+        let audioFile = audioFile(for: cacheKey, extension: fileExtension)
+        try audioData.write(to: audioFile, options: .atomic)
+        let oldFile = self.audioFile(for: cacheKey, extension: fileExtension == "wav" ? "mp3" : "wav")
+        if fileManager.fileExists(atPath: oldFile.path) {
+            try fileManager.removeItem(at: oldFile)
+        }
     }
 
     /// Get cached audio URL if it exists
     func getCachedAudioURL(for cacheKey: String) async -> URL? {
-        let audioFile = cacheDirectory.appendingPathComponent("audio_\(cacheKey).mp3")
-        return fileManager.fileExists(atPath: audioFile.path) ? audioFile : nil
+        let wavFile = audioFile(for: cacheKey, extension: "wav")
+        if fileManager.fileExists(atPath: wavFile.path) { return wavFile }
+        let mp3File = audioFile(for: cacheKey, extension: "mp3")
+        guard let file = try? FileHandle(forReadingFrom: mp3File) else { return nil }
+        defer { try? file.close() }
+        guard let header = try? file.read(upToCount: 12) else { return nil }
+        guard Self.isWAV(header) else { return mp3File }
+
+        // Older builds saved multi-chunk WAV speech with an MP3 extension.
+        do {
+            try fileManager.moveItem(at: mp3File, to: wavFile)
+            return wavFile
+        } catch {
+            return nil
+        }
+    }
+
+    private func audioFile(for cacheKey: String, extension fileExtension: String) -> URL {
+        cacheDirectory.appendingPathComponent("audio_\(cacheKey).\(fileExtension)")
+    }
+
+    private static func isWAV(_ data: Data) -> Bool {
+        data.count >= 12 && data.prefix(4) == Data("RIFF".utf8) &&
+            data.dropFirst(8).prefix(4) == Data("WAVE".utf8)
     }
 
     /// Generate cache key from text and TTS configuration string

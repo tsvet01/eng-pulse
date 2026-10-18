@@ -11,6 +11,8 @@ final class AppServices: ObservableObject {
     let pilotAccountModel: PilotAccountModel?
     @Published private(set) var pilotReader: PilotReaderContext?
     private var accountObservation: AnyCancellable?
+    private var readerPreparation: Task<Void, Never>?
+    private var preparingReader: PilotReaderContext?
 
     private convenience init() {
         if PilotBuild.isEnabled, let config = try? PilotConfiguration.from() {
@@ -38,9 +40,14 @@ final class AppServices: ObservableObject {
 
     private func updateReader(_ phase: PilotAccountModel.Phase, api: PilotAPIClient, root: URL) {
         if case .admitted(let session, let user) = phase,
-           let current = pilotReader, current.session == session, current.user.id == user.id, current.reader.isActive {
+           let current = pilotReader ?? preparingReader,
+           current.session == session, current.user.id == user.id, current.reader.isActive {
             return
         }
+        readerPreparation?.cancel()
+        readerPreparation = nil
+        preparingReader?.invalidate()
+        preparingReader = nil
         pilotReader?.invalidate()
         pilotReader = nil
         guard case .admitted(let session, let user) = phase else { return }
@@ -49,7 +56,14 @@ final class AppServices: ObservableObject {
             guard let self, let context, self.pilotReader === context else { return }
             self.pilotAccountModel?.readerFailed(error, session: session)
         }
-        pilotReader = context
+        preparingReader = context
+        readerPreparation = Task { [weak self] in
+            await context.appState.loadCachedSummaries()
+            guard let self, !Task.isCancelled, self.preparingReader === context else { return }
+            self.preparingReader = nil
+            self.pilotReader = context
+            self.readerPreparation = nil
+        }
     }
 }
 

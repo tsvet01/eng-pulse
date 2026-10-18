@@ -3,6 +3,52 @@ import XCTest
 
 @MainActor
 final class PilotAccountTests: XCTestCase {
+    func testStartupDoesNotOfferLoginUntilStoredSessionHasBeenChecked() async throws {
+        let auth = PilotAuthClient(configuration: .test, transport: RecordingTransport([]), storage: MemoryCredentials())
+        let model = PilotAccountModel(auth: auth, api: PilotAPIClient(configuration: .test, auth: auth))
+        XCTAssertNotEqual(model.phase, .signedOut, "Unresolved startup must not display login")
+        await model.restore()
+        XCTAssertEqual(model.phase, .signedOut, "Show login once storage confirms there is no account")
+    }
+
+    func testReturningAccountOpensBeforeNetworkAndClosesIfAccessIsRevoked() async throws {
+        let receipt = Data("{\"identity\":\"\(userA)\",\"feed\":\"engineering\",\"user\":{\"id\":\"\(userA)\",\"email\":\"pilot@example.com\",\"is_admin\":false}}".utf8)
+        let admission = MemoryCredentials(data: receipt)
+        let auth = PilotAuthClient(configuration: .test, transport: RecordingTransport([]),
+            storage: MemoryCredentials(data: try JSONEncoder().encode(testSession())))
+        let transport = PausedTransport()
+        let model = PilotAccountModel(auth: auth, api: PilotAPIClient(configuration: .test, auth: auth,
+            transport: transport), admissionStorage: admission)
+        let restore = Task { await model.restore() }
+        await transport.waitForRequests(1)
+        if case .admitted(_, let user) = model.phase {
+            XCTAssertEqual(user.id, userA)
+        } else { XCTFail("A verified returning account must open while the server is still pending") }
+        await transport.respond(0, status: 403, body: "{\"error\":\"forbidden\"}")
+        await restore.value
+        guard case .blocked = model.phase else { return XCTFail("Server revocation must remove the reader") }
+        XCTAssertNil(try admission.read())
+    }
+
+    func testStartupNeverOpensAnotherIdentityOrAnUnverifiedReceipt() async throws {
+        for receipt in [
+            "{\"identity\":\"\(userB)\",\"feed\":\"engineering\",\"user\":{\"id\":\"\(userB)\",\"email\":\"other@example.com\",\"is_admin\":false}}",
+            "{\"identity\":\"\(userA)\",\"user\":{\"id\":\"\(userA)\",\"email\":\"pilot@example.com\",\"is_admin\":false}}"
+        ] {
+            let auth = PilotAuthClient(configuration: .test, transport: RecordingTransport([]),
+                storage: MemoryCredentials(data: try JSONEncoder().encode(testSession())))
+            let transport = PausedTransport()
+            let model = PilotAccountModel(auth: auth, api: PilotAPIClient(configuration: .test, auth: auth,
+                transport: transport), admissionStorage: MemoryCredentials(data: Data(receipt.utf8)))
+            let restore = Task { await model.restore() }
+            await transport.waitForRequests(1)
+            if case .admitted = model.phase { XCTFail("Unverified or unrelated receipt must not open saved articles") }
+            await transport.respond(0, status: 503)
+            await restore.value
+            guard case .waiting = model.phase else { return XCTFail("Keep unverified accounts outside the reader") }
+        }
+    }
+
     func testExistingSessionNeedsInviteAndCanRetryAnInvalidCode() async throws {
         let store = MemoryCredentials(data: try JSONEncoder().encode(testSession()))
         let auth = PilotAuthClient(configuration: .test, transport: RecordingTransport([]), storage: store)
@@ -62,6 +108,7 @@ final class PilotAccountTests: XCTestCase {
         let store = MemoryCredentials()
         let auth = PilotAuthClient(configuration: .test, transport: transport, storage: store)
         let model = PilotAccountModel(auth: auth, api: PilotAPIClient(configuration: .test, auth: auth, transport: RecordingTransport([])))
+        await model.restore()
         let attempt = try XCTUnwrap(model.beginAppleSignIn())
         XCTAssertTrue(model.isBusy)
         await model.signOut()
@@ -76,6 +123,7 @@ final class PilotAccountTests: XCTestCase {
         let transport = RecordingTransport([.ok("{}")])
         let auth = PilotAuthClient(configuration: .test, transport: transport, storage: MemoryCredentials())
         let model = PilotAccountModel(auth: auth, api: PilotAPIClient(configuration: .test, auth: auth, transport: RecordingTransport([])))
+        await model.restore()
         let attempt = try XCTUnwrap(model.beginAppleSignIn())
         XCTAssertNil(model.beginAppleSignIn())
         await model.sendCode(email: "pilot@example.com")

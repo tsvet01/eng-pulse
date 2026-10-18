@@ -117,20 +117,29 @@ struct HomeViewContent: View {
     }
 
     private var summaryList: some View {
-        List(filteredSummaries) { summary in
-            NavigationLink(value: summary) {
-                SummaryCardView(
-                    summary: summary,
-                    isRead: isArticleRead(summary.url),
-                    playbackBadge: playbackBadge(for: summary.url)
-                )
+        ScrollView {
+            LazyVStack(spacing: 8) {
+                ForEach(filteredSummaries) { summary in
+                    NavigationLink(value: summary) {
+                        HStack(spacing: 12) {
+                            SummaryCardView(
+                                summary: summary,
+                                isRead: isArticleRead(summary.url),
+                                playbackBadge: playbackBadge(for: summary.url)
+                            )
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.tertiary)
+                                .accessibilityHidden(true)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 4)
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
         .background(Color.surface)
     }
 
