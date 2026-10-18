@@ -18,7 +18,11 @@ struct PilotFeedback: Codable, Equatable, Sendable {
         guard values.contains(.selection), values.contains(.brief) else { throw PilotError.invalidResponse }
         selection = try values.decodeIfPresent(Int.self, forKey: .selection)
         brief = try values.decodeIfPresent(Int.self, forKey: .brief)
-        guard [selection, brief].allSatisfy({ $0 == nil || $0 == -1 || $0 == 1 }) else { throw PilotError.invalidResponse }
+        guard Self.validValue(selection), Self.validValue(brief) else { throw PilotError.invalidResponse }
+    }
+    static func validValue(_ value: Int?) -> Bool {
+        guard let value else { return true }
+        return value == -1 || value == 1
     }
     func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
@@ -48,7 +52,7 @@ extension PilotAPIClient {
     }
 
     func setFeedback(date: String, aspect: PilotFeedbackAspect, value: Int?, session: PilotSession) async throws {
-        guard PilotBriefSummary.validDate(date), value == nil || value == -1 || value == 1 else { throw PilotError.invalidResponse }
+        guard PilotBriefSummary.validDate(date), PilotFeedback.validValue(value) else { throw PilotError.invalidResponse }
         var body: [String: Any] = ["aspect": aspect.rawValue]
         if let value { body["value"] = value }
         _ = try await request(path: "briefs/engineering/\(date)/feedback", method: value == nil ? "DELETE" : "PUT",
@@ -131,7 +135,7 @@ final class PilotPersonalState: ObservableObject {
             guard saved.feedback.keys.allSatisfy(PilotBriefSummary.validDate),
                   saved.pending.allSatisfy({ key, edit in
                       key == edit.key && PilotBriefSummary.validDate(edit.date) &&
-                      (edit.value == nil || edit.value == -1 || edit.value == 1)
+                      PilotFeedback.validValue(edit.value)
                   }) else { throw PilotError.invalidResponse }
             publish(saved)
         }
@@ -175,7 +179,7 @@ final class PilotPersonalState: ObservableObject {
     func rate(date: String, aspect: PilotFeedbackAspect, value: Int?) async {
         do {
             try await requireCurrent()
-            guard PilotBriefSummary.validDate(date), value == nil || value == -1 || value == 1 else { throw PilotError.invalidResponse }
+            guard PilotBriefSummary.validDate(date), PilotFeedback.validValue(value) else { throw PilotError.invalidResponse }
             try load()
             let edit = Edit(id: UUID(), date: date, aspect: aspect, value: value)
             var updated = snapshot
