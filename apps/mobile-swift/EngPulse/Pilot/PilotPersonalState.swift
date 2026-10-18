@@ -100,6 +100,8 @@ final class PilotPersonalState: ObservableObject {
     private var snapshot = Snapshot()
     private var loaded = false
     private var revisions: [String: UUID] = [:]
+    // Context invalidation cannot recall a request already dispatched to the server.
+    private static var writes: [URL: (id: UUID, task: Task<Void, Error>)] = [:]
 
     init(api: PilotAPIClient, session: PilotSession, user: UUID, root: URL) {
         self.api = api; self.session = session
@@ -197,9 +199,15 @@ final class PilotPersonalState: ObservableObject {
         do {
             try await requireCurrent()
             try load()
-            while let edit = snapshot.pending.sorted(by: { $0.key < $1.key }).first?.value {
+            var attempted: Set<UUID> = []
+            // Allow one superseding tap per initial edit, without an unbounded drain.
+            let budget = snapshot.pending.count * 2
+            while attempted.count < budget,
+                  let edit = snapshot.pending.values.filter({ !attempted.contains($0.id) })
+                    .sorted(by: { $0.key < $1.key }).first {
+                attempted.insert(edit.id)
                 do {
-                    try await api.setFeedback(date: edit.date, aspect: edit.aspect, value: edit.value, session: session)
+                    try await send(edit)
                     try await requireCurrent()
                     // A newer tap may have replaced the in-flight edit.
                     if snapshot.pending[edit.key]?.id == edit.id {
@@ -212,10 +220,23 @@ final class PilotPersonalState: ObservableObject {
                 } catch {
                     await accessFailed(error)
                     if isActive { feedbackErrors[edit.date] = "Your rating is saved on this device but hasn't synced yet. Please retry when connected." }
-                    return
+                    if !isActive || error as? PilotError != .invalidResponse { return }
                 }
             }
         } catch { await accessFailed(error) }
+    }
+
+    private func send(_ edit: Edit) async throws {
+        let predecessor = Self.writes[file]?.task
+        let id = UUID()
+        let task = Task { @MainActor in
+            if let predecessor { _ = await predecessor.result }
+            try await self.requireCurrent()
+            try await self.api.setFeedback(date: edit.date, aspect: edit.aspect, value: edit.value, session: self.session)
+        }
+        Self.writes[file] = (id, task)
+        defer { if Self.writes[file]?.id == id { Self.writes[file] = nil } }
+        try await task.value
     }
 
     func loadPreferences() async { await updatePreferences(nil) }

@@ -219,4 +219,73 @@ final class PilotPersonalStateTests: XCTestCase {
         await read.value
         XCTAssertNil(state.preferences)
     }
+
+    func testMissingOldBriefDoesNotBlockLaterRatingsAfterRestart() async throws {
+        let root = root()
+        let offline = try await model(RecordingTransport([
+            .failure(URLError(.notConnectedToInternet)), .failure(URLError(.notConnectedToInternet))]), root: root)
+        await offline.rate(date: "2026-10-17", aspect: .brief, value: 1)
+        await offline.rate(date: date, aspect: .brief, value: -1)
+        offline.invalidate()
+        let transport = RecordingTransport([.response(404, "{}"), .response(204, "")])
+        let resumed = try await model(transport, root: root)
+        await resumed.flush()
+        XCTAssertTrue(resumed.hasPending(date: "2026-10-17"))
+        XCTAssertNotNil(resumed.feedbackErrors["2026-10-17"])
+        XCTAssertFalse(resumed.hasPending(date: date))
+        let requests = await transport.requests
+        XCTAssertEqual(requests.map { $0.url!.path }, ["/v1/briefs/engineering/2026-10-17/feedback", "/v1/briefs/engineering/2026-10-18/feedback"])
+        resumed.invalidate()
+        let reopened = try await model(RecordingTransport([.response(404, "{}")]), root: root)
+        await reopened.flush()
+        XCTAssertFalse(reopened.hasPending(date: date))
+        XCTAssertEqual(reopened.feedback[date]?.brief, -1)
+    }
+
+    func testReplacementContextWaitsForDispatchedWriteSoServerKeepsNewestRating() async throws {
+        let root = root()
+        let overlap = expectation(description: "Replacement must not overtake an already dispatched write")
+        overlap.isInverted = true
+        let transport = DelayedFeedbackServer(secondWrite: { overlap.fulfill() })
+        let original = try await model(transport, root: root)
+        let oldWrite = Task { await original.rate(date: date, aspect: .brief, value: 1) }
+        await transport.waitForFirstWrite()
+        original.invalidate()
+        let replacement = try await model(transport, root: root)
+        let newWrite = Task { await replacement.rate(date: date, aspect: .brief, value: -1) }
+        await fulfillment(of: [overlap], timeout: 0.2)
+        await transport.releaseFirstWrite()
+        await oldWrite.value
+        await newWrite.value
+        let serverValue = await transport.value
+        XCTAssertEqual(serverValue, -1, "The old request must not mutate the server after the replacement write")
+        await replacement.refreshFeedback(date: date)
+        XCTAssertEqual(replacement.feedback[date]?.brief, -1)
+        XCTAssertFalse(replacement.hasPending(date: date))
+    }
+}
+
+private actor DelayedFeedbackServer: PilotTransport {
+    private(set) var value: Int?
+    private var writes = 0
+    private var held: CheckedContinuation<Void, Never>?
+    private var ready: CheckedContinuation<Void, Never>?
+    private let secondWrite: () -> Void
+    init(secondWrite: @escaping () -> Void) { self.secondWrite = secondWrite }
+    func send(_ request: URLRequest) async throws -> (Data, Int) {
+        if request.httpMethod == "GET" {
+            return (Data("{\"selection\":null,\"brief\":\(value.map(String.init) ?? "null")}".utf8), 200)
+        }
+        writes += 1
+        if writes == 1 {
+            await withCheckedContinuation { held = $0; ready?.resume(); ready = nil }
+        } else { secondWrite() }
+        value = try body(request)["value"] as? Int
+        return (Data(), 204)
+    }
+    func waitForFirstWrite() async {
+        if held != nil { return }
+        await withCheckedContinuation { ready = $0 }
+    }
+    func releaseFirstWrite() { held?.resume(); held = nil }
 }

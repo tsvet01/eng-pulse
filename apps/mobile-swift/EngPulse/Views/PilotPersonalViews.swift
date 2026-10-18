@@ -14,6 +14,8 @@ struct PilotFeedbackView: View {
             }
             if let error = state.feedbackErrors[date] {
                 Text(error).font(.caption).foregroundStyle(.secondary)
+            }
+            if state.feedbackErrors[date] != nil || state.hasPending(date: date) {
                 Button("Retry") {
                     Task {
                         await state.flush()
