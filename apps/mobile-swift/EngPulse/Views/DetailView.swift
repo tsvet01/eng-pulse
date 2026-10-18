@@ -115,6 +115,7 @@ struct DetailView: View {
     let allSummaries: [Summary]
     let currentIndex: Int
     let cacheService: CacheService?
+    let feedback: PilotFeedbackModel?
 
     @EnvironmentObject private var ttsService: TTSService
     @Environment(\.openURL) private var openURL
@@ -126,11 +127,12 @@ struct DetailView: View {
     @State private var insightBrief: InsightBrief?
     @State private var savedPosition: TimeInterval?
 
-    init(summary: Summary, allSummaries: [Summary] = [], cacheService: CacheService? = nil) {
+    init(summary: Summary, allSummaries: [Summary] = [], cacheService: CacheService? = nil, feedback: PilotFeedbackModel? = nil) {
         self.summary = summary
         self.allSummaries = allSummaries
         self.currentIndex = allSummaries.firstIndex(of: summary) ?? 0
         self.cacheService = cacheService
+        self.feedback = feedback
     }
 
     // MARK: - TTS State
@@ -186,6 +188,10 @@ struct DetailView: View {
                 }
 
                 if fullContent != nil || loadingError != nil {
+                    if fullContent != nil, let feedback {
+                        PilotFeedbackView(model: feedback, date: summary.date)
+                            .padding(.top, DesignTokens.sectionSpacing)
+                    }
                     if PilotBuild.allowsLegacyServices {
                         FeedbackWidget(summaryUrl: summary.url, promptVersion: summary.promptVersion)
                             .padding(.top, DesignTokens.sectionSpacing)

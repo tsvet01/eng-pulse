@@ -42,7 +42,8 @@ struct HomeViewContent: View {
             DetailView(
                 summary: summary,
                 allSummaries: summariesStore.summaries,
-                cacheService: summariesStore.cacheService
+                cacheService: summariesStore.cacheService,
+                feedback: summariesStore.pilotFeedback
             )
         }
         .navigationDestination(for: String.self) { value in

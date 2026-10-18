@@ -24,7 +24,7 @@ final class AppServices: ObservableObject {
         } else { self.init(account: nil, api: nil) }
     }
 
-    init(account: PilotAccountModel?, api: PilotAPIClient?, cacheRoot: URL? = nil) {
+    init(account: PilotAccountModel?, api: PilotAPIClient?, cacheRoot: URL? = nil, feedbackRoot: URL? = nil) {
         let cache = CacheService()
         cacheService = cache
         appState = AppState(cacheService: cache)
@@ -33,12 +33,15 @@ final class AppServices: ObservableObject {
         guard let account, let api else { return }
         let root = cacheRoot ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("EngPulsePilot", isDirectory: true)
+        let feedbackRoot = feedbackRoot ?? cacheRoot?.appendingPathComponent("feedback-state")
+            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("EngPulsePilotFeedback", isDirectory: true)
         accountObservation = account.$phase.removeDuplicates().sink { [weak self] phase in
-            self?.updateReader(phase, api: api, root: root)
+            self?.updateReader(phase, api: api, root: root, feedbackRoot: feedbackRoot)
         }
     }
 
-    private func updateReader(_ phase: PilotAccountModel.Phase, api: PilotAPIClient, root: URL) {
+    private func updateReader(_ phase: PilotAccountModel.Phase, api: PilotAPIClient, root: URL, feedbackRoot: URL) {
         if case .admitted(let session, let user) = phase,
            let current = pilotReader ?? preparingReader,
            current.session == session, current.user.id == user.id, current.reader.isActive {
@@ -51,11 +54,12 @@ final class AppServices: ObservableObject {
         pilotReader?.invalidate()
         pilotReader = nil
         guard case .admitted(let session, let user) = phase else { return }
-        let context = PilotReaderContext(api: api, session: session, user: user, root: root)
+        let context = PilotReaderContext(api: api, session: session, user: user, root: root, feedbackRoot: feedbackRoot)
         context.reader.onAccessFailure = { [weak self, weak context] error in
             guard let self, let context, self.pilotReader === context else { return }
             self.pilotAccountModel?.readerFailed(error, session: session)
         }
+        context.feedback.onAccessFailure = context.reader.onAccessFailure
         preparingReader = context
         readerPreparation = Task { [weak self] in
             await context.appState.loadCachedSummaries()
@@ -63,6 +67,7 @@ final class AppServices: ObservableObject {
             self.preparingReader = nil
             self.pilotReader = context
             self.readerPreparation = nil
+            await context.feedback.synchronize()
         }
     }
 }
@@ -72,24 +77,28 @@ final class PilotReaderContext {
     let session: PilotSession
     let user: PilotUser
     let reader: PilotFeedReader
+    let feedback: PilotFeedbackModel
     let appState: AppState
     let ttsService: TTSService
     var id: UUID { session.id }
 
-    init(api: PilotAPIClient, session: PilotSession, user: PilotUser, root: URL) {
+    init(api: PilotAPIClient, session: PilotSession, user: PilotUser, root: URL, feedbackRoot: URL? = nil) {
         self.session = session; self.user = user
         let store = PilotFeedStore(root: root, identity: session.identity.id, user: user.id)
         let reader = PilotFeedReader(api: api, session: session, store: store)
         self.reader = reader
+        feedback = PilotFeedbackModel(api: api, session: session, store: PilotFeedbackStore(
+            root: feedbackRoot ?? root.appendingPathComponent("feedback-state"), identity: session.identity.id, user: user.id))
         let cache = CacheService(directory: store.directory.appendingPathComponent("media")) { summary in
             try await reader.content(date: summary.date)
         }
-        appState = AppState(cacheService: cache, pilotReader: reader, scope: "\(session.identity.id)/\(user.id)")
+        appState = AppState(cacheService: cache, pilotReader: reader, pilotFeedback: feedback, scope: "\(session.identity.id)/\(user.id)")
         ttsService = TTSService(cacheService: cache)
     }
 
     func invalidate() {
         reader.invalidate()
+        feedback.invalidate()
         appState.invalidate()
         ttsService.invalidate()
     }

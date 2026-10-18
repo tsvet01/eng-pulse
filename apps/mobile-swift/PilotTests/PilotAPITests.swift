@@ -4,6 +4,31 @@ import XCTest
 private let registeredUser = "{\"id\":\"33333333-3333-3333-3333-333333333333\",\"email\":\"pilot@example.com\",\"is_admin\":true}"
 
 final class PilotAPITests: XCTestCase {
+    func testEmptyMutationSuccessDoesNotMakeEmptyReadsValid() async throws {
+        let auth = PilotAuthClient(configuration: .test, transport: RecordingTransport([]),
+            storage: MemoryCredentials(data: try JSONEncoder().encode(testSession())))
+        let transport = RecordingTransport([.response(204, ""), .response(204, ""), .response(204, "")])
+        let api = PilotAPIClient(configuration: .test, auth: auth, transport: transport)
+        let current = try await auth.currentSession()
+        let session = try XCTUnwrap(current)
+        let saved = try await api.request(path: "briefs/engineering/2026-10-18/feedback", method: "PUT", session: session)
+        XCTAssertTrue(saved.isEmpty)
+        let cleared = try await api.request(path: "briefs/engineering/2026-10-18/feedback/brief", method: "DELETE", session: session)
+        XCTAssertTrue(cleared.isEmpty)
+        do { _ = try await api.request(path: "me", session: session); XCTFail("Empty reads must be rejected") }
+        catch { XCTAssertEqual(error as? PilotError, .invalidResponse) }
+    }
+
+    func testFeedbackConflictIsNotAnAccountIdentityCollision() async throws {
+        let auth = PilotAuthClient(configuration: .test, transport: RecordingTransport([]),
+            storage: MemoryCredentials(data: try JSONEncoder().encode(testSession())))
+        let api = PilotAPIClient(configuration: .test, auth: auth,
+            transport: RecordingTransport([.response(409, "{\"error\":\"feedback_conflict\"}")]))
+        let current = try await auth.currentSession()
+        do { _ = try await api.request(path: "briefs/engineering/2026-10-18/feedback", method: "PUT", session: XCTUnwrap(current)); XCTFail("Must reject stale feedback") }
+        catch { XCTAssertNotEqual(error as? PilotError, .accountConflict) }
+    }
+
     func testInviteAdmissionSendsCapturedAccountTokenAndReturnsAPIIdentity() async throws {
         let auth = PilotAuthClient(configuration: .test, transport: RecordingTransport([]),
             storage: MemoryCredentials(data: try JSONEncoder().encode(testSession())))

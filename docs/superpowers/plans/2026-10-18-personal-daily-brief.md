@@ -46,17 +46,19 @@ New Swift files must be registered in `apps/mobile-swift/EngPulse.xcodeproj/proj
 
 ---
 
+**Implementation status (2026-10-18):** API work is prepared in PR #208; the app slice is implemented and locally verified (58 core tests, 75 app tests, and a fixture-backed simulator journey). Production release and real authenticated app verification remain pending. Tasks 3–6 are not started. GCP generation is unchanged.
+
 ### Task 1: Complete account feedback read/change/undo on the current brief
 
 **Files:** API `src/routes/briefs.rs`, `src/db/feedback.rs`, next migration, `tests/feedback.rs`; reuse `tests/common/mod.rs` and existing authentication tests.
 
 **Interfaces:** Keep existing PUT `/v1/briefs/{slug}/{date}/feedback` compatible. Add GET at that path returning only the caller's records, and DELETE `.../feedback/{aspect}` for `selection|brief`. The pilot sends `X-Expected-Revision: N`: 0 means no prior record; server revisions start at 1 and increment atomically. Include each aspect's revision in GET and `X-Feedback-Revision` in successful mutation responses; a mismatch returns 409 with error `feedback_conflict`. A deleted record remains a tombstone with its revision. Legacy PUT without a conditional header retains existing compatibility but increments the revision.
 
-- [ ] Add failing database/HTTP cases: two users rate the same brief independently; GET reveals only self; membership/revocation reject every operation; missing brief rejects writes; invalid aspect/value rejects; change and undo persist; a stale expected revision returns 409 and leaves state unchanged; stale PUT after DELETE cannot resurrect a vote. A compatibility PUT increments the same revision.
-- [ ] Run `cargo test -p pulse-api --test feedback` against a disposable Postgres database and confirm failures for missing behavior, not missing infrastructure. Use the harness in `tests/common/mod.rs`.
-- [ ] Implement revision-aware feedback records/queries and the routes. A repeated DELETE of an already-deleted current revision is a no-op. Keep the current internal export compatible and exclude tombstones from active signals. Do not connect this data to the shared GCP selector yet.
-- [ ] Run `cargo test -p pulse-api --test feedback --test briefs --test auth` against disposable Postgres; expect zero failures. Review query ownership and indexes with two-account fixtures.
-- [ ] Commit only API/migration/test changes as `feat(api): complete account feedback lifecycle`.
+- [x] Add failing database/HTTP cases: two users rate the same brief independently; GET reveals only self; membership/revocation reject every operation; missing brief rejects writes; invalid aspect/value rejects; change and undo persist; a stale expected revision returns 409 and leaves state unchanged; stale PUT after DELETE cannot resurrect a vote. A compatibility PUT increments the same revision.
+- [x] Run `cargo test -p pulse-api --test feedback` against a disposable Postgres database and confirm failures for missing behavior, not missing infrastructure. Use the harness in `tests/common/mod.rs`.
+- [x] Implement revision-aware feedback records/queries and the routes. A repeated DELETE of an already-deleted current revision is a no-op. Keep the current internal export compatible and exclude tombstones from active signals. Do not connect this data to the shared GCP selector yet.
+- [x] Run `cargo test -p pulse-api --test feedback --test briefs --test auth` against disposable Postgres; expect zero failures. Review query ownership and indexes with two-account fixtures.
+- [x] Commit only API/migration/test changes as `feat(api): complete account feedback lifecycle`.
 
 ### Task 2: Wire durable account feedback into the pilot app
 
@@ -64,12 +66,12 @@ New Swift files must be registered in `apps/mobile-swift/EngPulse.xcodeproj/proj
 
 **Interfaces:** Add `PilotFeedbackSnapshot` containing current `selection`/`brief` values and revisions. `PilotFeedbackStore` stores snapshots and pending intents under API user + Supabase identity + feed/date/aspect. `PilotFeedbackClient` exposes `load`, `set(value:expectedRevision:)`, and `clear(expectedRevision:)` using the existing `PilotSession`. Extend authenticated HTTP handling to return status/headers and accept 204 for mutations without making model reads accept empty bodies. Decode `feedback_conflict` separately from the existing 409 account-identity conflict.
 
-- [ ] Add failing tests for GET, 204 PUT/DELETE, token refresh, offline restart, coalesced local changes, A -> logout -> B with queued writes and late responses, returning to A, revoked access, stale-device conflict, and response loss after a successful server write. Assert no mutation is sent using B's session for A's queue.
-- [ ] Run `swift test --package-path apps/mobile-swift`; confirm the new cases fail for the intended missing behavior.
-- [ ] Implement a serial per-account queue with durable pending state and retry after transient failures. On an uncertain result, reload: matching desired state acknowledges the intent; a different server revision becomes a visible conflict, with no automatic overwrite. Bind completion to the active session generation.
-- [ ] Add the pilot widget with “Article relevance” and “Summary quality”, thumbs up/down, undo, and pending/failed state. Read server state on another device; keep the legacy widget behind the legacy build gate. Do not interpret a generic down vote as a global quality failure.
+- [x] Add failing tests for GET, 204 PUT/DELETE, token refresh, offline restart, coalesced local changes, A -> logout -> B with queued writes and late responses, returning to A, revoked access, stale-device conflict, and response loss after a successful server write. Assert no mutation is sent using B's session for A's queue.
+- [x] Run `swift test --package-path apps/mobile-swift`; confirm the new cases fail for the intended missing behavior.
+- [x] Implement a serial per-account queue with durable pending state and retry after transient failures. On an uncertain result, reload: matching desired state acknowledges the intent; a different server revision becomes a visible conflict, with no automatic overwrite. Bind completion to the active session generation.
+- [x] Add the pilot widget with “Article relevance” and “Summary quality”, thumbs up/down, undo, and pending/failed state. Read server state on another device; keep the legacy widget behind the legacy build gate. Do not interpret a generic down vote as a global quality failure.
 - [ ] Run package tests and relevant iOS tests. Verify two accounts, offline queue/restart, undo, and one real authenticated PUT/GET/DELETE through the normal app path; record build and API revision without credentials. This is the first independently useful release slice.
-- [ ] Commit as `feat(ios): sync personal feedback with account isolation`.
+- [x] Commit as `feat(ios): sync personal feedback with account isolation`.
 
 ### Task 3: Add stable content identities and explicit preferences
 
