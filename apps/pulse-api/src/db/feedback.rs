@@ -10,6 +10,56 @@ pub struct FeedbackRow {
     pub value: i16,
 }
 
+#[derive(Debug, Default, serde::Serialize)]
+pub struct PersonalFeedback {
+    pub selection: Option<i16>,
+    pub brief: Option<i16>,
+}
+
+pub async fn for_user(
+    pool: &PgPool,
+    user: Uuid,
+    feed: Uuid,
+    date: NaiveDate,
+) -> sqlx::Result<PersonalFeedback> {
+    let rows: Vec<(String, i16)> = sqlx::query_as(
+        "select aspect, value from feedback where user_id = $1 and feed_id = $2 and date = $3",
+    )
+    .bind(user)
+    .bind(feed)
+    .bind(date)
+    .fetch_all(pool)
+    .await?;
+    let mut result = PersonalFeedback::default();
+    for (aspect, value) in rows {
+        match aspect.as_str() {
+            "selection" => result.selection = Some(value),
+            "brief" => result.brief = Some(value),
+            _ => {}
+        }
+    }
+    Ok(result)
+}
+
+pub async fn delete(
+    pool: &PgPool,
+    user: Uuid,
+    feed: Uuid,
+    date: NaiveDate,
+    aspect: &str,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "delete from feedback where user_id = $1 and feed_id = $2 and date = $3 and aspect = $4",
+    )
+    .bind(user)
+    .bind(feed)
+    .bind(date)
+    .bind(aspect)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
 pub async fn upsert(
     pool: &PgPool,
     user_id: Uuid,

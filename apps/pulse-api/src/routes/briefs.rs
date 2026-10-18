@@ -7,7 +7,7 @@ use crate::{
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    routing::{get, put},
+    routing::get,
     Json, Router,
 };
 use chrono::NaiveDate;
@@ -19,7 +19,10 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/feeds/{id}/briefs", get(list))
         .route("/v1/briefs/{slug}/{date}", get(get_one))
-        .route("/v1/briefs/{slug}/{date}/feedback", put(put_feedback))
+        .route(
+            "/v1/briefs/{slug}/{date}/feedback",
+            get(get_feedback).put(put_feedback).delete(delete_feedback),
+        )
 }
 
 #[derive(Deserialize)]
@@ -87,6 +90,55 @@ struct FeedbackBody {
     value: i16,
 }
 
+async fn feedback_target(
+    s: &AppState,
+    user: &AuthUser,
+    slug: &str,
+    date: &str,
+) -> Result<(Uuid, NaiveDate), ApiError> {
+    let feed_id = briefs::feed_id_by_slug(&s.pool, slug)
+        .await?
+        .ok_or(ApiError::NotFound("feed"))?;
+    member_feed(s, user, feed_id).await?;
+    let date = parse_date(date)?;
+    briefs::get(&s.pool, feed_id, date)
+        .await?
+        .ok_or(ApiError::NotFound("brief"))?;
+    Ok((feed_id, date))
+}
+
+async fn get_feedback(
+    State(s): State<AppState>,
+    user: AuthUser,
+    Path((slug, date)): Path<(String, String)>,
+) -> Result<Json<feedback::PersonalFeedback>, ApiError> {
+    let (feed_id, date) = feedback_target(&s, &user, &slug, &date).await?;
+    Ok(Json(
+        feedback::for_user(&s.pool, user.id, feed_id, date).await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct DeleteFeedbackBody {
+    aspect: String,
+}
+
+async fn delete_feedback(
+    State(s): State<AppState>,
+    user: AuthUser,
+    Path((slug, date)): Path<(String, String)>,
+    Json(b): Json<DeleteFeedbackBody>,
+) -> Result<StatusCode, ApiError> {
+    if !matches!(b.aspect.as_str(), "brief" | "selection") {
+        return Err(ApiError::BadRequest(
+            "aspect must be brief|selection".into(),
+        ));
+    }
+    let (feed_id, date) = feedback_target(&s, &user, &slug, &date).await?;
+    feedback::delete(&s.pool, user.id, feed_id, date, &b.aspect).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn put_feedback(
     State(s): State<AppState>,
     user: AuthUser,
@@ -98,14 +150,7 @@ async fn put_feedback(
             "aspect must be brief|selection and value -1|1".into(),
         ));
     }
-    let feed_id = briefs::feed_id_by_slug(&s.pool, &slug)
-        .await?
-        .ok_or(ApiError::NotFound("feed"))?;
-    member_feed(&s, &user, feed_id).await?;
-    let date = parse_date(&date)?;
-    briefs::get(&s.pool, feed_id, date)
-        .await?
-        .ok_or(ApiError::NotFound("brief"))?;
+    let (feed_id, date) = feedback_target(&s, &user, &slug, &date).await?;
     feedback::upsert(&s.pool, user.id, feed_id, date, &b.aspect, b.value).await?;
     Ok(StatusCode::NO_CONTENT)
 }
