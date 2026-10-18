@@ -147,6 +147,30 @@ struct DetailView: View {
         ttsService.state == .loading && ttsService.currentArticleUrl == summary.url
     }
 
+    /// Another article's session is still running on this screen.
+    private var anotherArticleIsActive: Bool {
+        ttsService.state != .stopped && ttsService.currentArticleUrl != summary.url
+    }
+
+    private var playbackChrome: PlaybackChrome? {
+        PlaybackChrome.forArticle(
+            onScreenURL: summary.url,
+            onScreenTitle: summary.title,
+            playingURL: ttsService.currentArticleUrl,
+            playingTitle: ttsService.currentArticleTitle,
+            state: ttsService.state,
+            canStartOnScreenArticle: fullContent != nil
+        )
+    }
+
+    private var listenAccessibilityLabel: String {
+        if isLoadingTTS { return "Generating audio" }
+        if isPlaying { return "Pause audio" }
+        if isPaused { return "Resume audio" }
+        if anotherArticleIsActive { return "Play this article" }
+        return "Listen to summary"
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
@@ -184,17 +208,10 @@ struct DetailView: View {
                         onDismiss: { ttsService.stop() }
                     )
                 }
-                // Show the bar while any article is active, and keep it on this
-                // article's screen after its playback finishes (replay affordance).
-                if ttsService.state != .stopped || ttsService.currentArticleUrl == summary.url {
-                    let isThisArticle = ttsService.currentArticleUrl == summary.url
-                    TTSPlayerBarView(
-                        progress: ttsService.progress,
-                        isPlaying: ttsService.state == .playing,
-                        isLoading: ttsService.state == .loading,
-                        title: isThisArticle ? summary.title : (ttsService.currentArticleTitle ?? "Eng Pulse"),
-                        currentTime: ttsService.currentTimeFormatted,
-                        duration: ttsService.durationFormatted,
+                if let chrome = playbackChrome {
+                    ActivePlaybackBar(
+                        tts: ttsService,
+                        chrome: chrome,
                         onToggle: {
                             if ttsService.state == .stopped {
                                 toggleTTS()
@@ -202,9 +219,7 @@ struct DetailView: View {
                                 ttsService.togglePauseResume()
                             }
                         },
-                        onStop: { ttsService.stop() },
-                        onSkipBack: { ttsService.skipBackward() },
-                        onSkipForward: { ttsService.skipForward() }
+                        onSecondary: { toggleTTS() }
                     )
                 }
             }
@@ -429,11 +444,11 @@ struct DetailView: View {
                         ProgressView()
                             .scaleEffect(0.8)
                     } else {
-                        Image(systemName: isPlaying ? "pause.fill" : (isPaused ? "play.fill" : "speaker.wave.2.fill"))
+                        Image(systemName: isPlaying ? "pause.fill" : ((isPaused || anotherArticleIsActive) ? "play.fill" : "speaker.wave.2.fill"))
                     }
                 }
                 .disabled(fullContent == nil || isLoadingTTS)
-                .accessibilityLabel(isLoadingTTS ? "Generating audio" : (isPlaying ? "Pause audio" : (isPaused ? "Resume audio" : "Listen to summary")))
+                .accessibilityLabel(listenAccessibilityLabel)
 
                 Button { showInfo = true } label: {
                     Image(systemName: "info.circle")

@@ -55,6 +55,7 @@
 		AC100008 /* PilotKeychainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200008 /* PilotKeychainTests.swift */; };
 		AC100009 /* PilotFeedReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200009 /* PilotFeedReader.swift */; };
 		AC100010 /* PilotReaderIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200010 /* PilotReaderIntegrationTests.swift */; };
+		PC100001 /* PlaybackChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = PC200001 /* PlaybackChromeTests.swift */; };
 		AD100001 /* AudioCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD200001 /* AudioCacheTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -121,6 +122,7 @@
 		AC200008 /* PilotKeychainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotKeychainTests.swift; sourceTree = "<group>"; };
 		AC200009 /* PilotFeedReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pilot/PilotFeedReader.swift; sourceTree = "<group>"; };
 		AC200010 /* PilotReaderIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotReaderIntegrationTests.swift; sourceTree = "<group>"; };
+		PC200001 /* PlaybackChromeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackChromeTests.swift; sourceTree = "<group>"; };
 		AD200001 /* AudioCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCacheTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -253,6 +255,7 @@
 				D2000003 /* LocalTTSServiceTests.swift */,
 				CP200007 /* CarPlayContentBuilderTests.swift */,
 				CP200008 /* SpeechTextBuilderTests.swift */,
+				PC200001 /* PlaybackChromeTests.swift */,
 				AD200001 /* AudioCacheTests.swift */,
 			);
 			path = EngPulseTests;
@@ -413,6 +416,7 @@
 				D1000002 /* LocalTTSServiceTests.swift in Sources */,
 				CP100007 /* CarPlayContentBuilderTests.swift in Sources */,
 				CP100008 /* SpeechTextBuilderTests.swift in Sources */,
+				PC100001 /* PlaybackChromeTests.swift in Sources */,
 				AD100001 /* AudioCacheTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
