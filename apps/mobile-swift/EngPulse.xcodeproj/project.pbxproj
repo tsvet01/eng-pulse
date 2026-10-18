@@ -52,8 +52,10 @@
 		AC100005 /* PilotKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200005 /* PilotKeychain.swift */; };
 		AC100006 /* PilotBuild.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200006 /* PilotBuild.swift */; };
 		AC100007 /* PilotSignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200007 /* PilotSignInView.swift */; };
+		AC100012 /* PilotPersonalViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200012 /* PilotPersonalViews.swift */; };
 		AC100008 /* PilotKeychainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200008 /* PilotKeychainTests.swift */; };
 		AC100009 /* PilotFeedReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200009 /* PilotFeedReader.swift */; };
+		AC100011 /* PilotPersonalState.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200011 /* PilotPersonalState.swift */; };
 		AC100010 /* PilotReaderIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200010 /* PilotReaderIntegrationTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -117,8 +119,10 @@
 		AC200005 /* PilotKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pilot/PilotKeychain.swift; sourceTree = "<group>"; };
 		AC200006 /* PilotBuild.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pilot/PilotBuild.swift; sourceTree = "<group>"; };
 		AC200007 /* PilotSignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/PilotSignInView.swift; sourceTree = "<group>"; };
+		AC200012 /* PilotPersonalViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/PilotPersonalViews.swift; sourceTree = "<group>"; };
 		AC200008 /* PilotKeychainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotKeychainTests.swift; sourceTree = "<group>"; };
 		AC200009 /* PilotFeedReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pilot/PilotFeedReader.swift; sourceTree = "<group>"; };
+		AC200011 /* PilotPersonalState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pilot/PilotPersonalState.swift; sourceTree = "<group>"; };
 		AC200010 /* PilotReaderIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotReaderIntegrationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -156,10 +160,12 @@
 			children = (
 				A2000001 /* EngPulseApp.swift */,
 				AC200007 /* PilotSignInView.swift */,
+				AC200012 /* PilotPersonalViews.swift */,
 				AC200006 /* PilotBuild.swift */,
 				AC200005 /* PilotKeychain.swift */,
 				AC200004 /* PilotAccountModel.swift */,
 				AC200009 /* PilotFeedReader.swift */,
+				AC200011 /* PilotPersonalState.swift */,
 				AC200003 /* PilotAPIClient.swift */,
 				AC200002 /* PilotAuthClient.swift */,
 				AC200001 /* PilotHTTP.swift */,
@@ -360,10 +366,12 @@
 			files = (
 				A1000001 /* EngPulseApp.swift in Sources */,
 				AC100007 /* PilotSignInView.swift in Sources */,
+				AC100012 /* PilotPersonalViews.swift in Sources */,
 				AC100006 /* PilotBuild.swift in Sources */,
 				AC100005 /* PilotKeychain.swift in Sources */,
 				AC100004 /* PilotAccountModel.swift in Sources */,
 				AC100009 /* PilotFeedReader.swift in Sources */,
+				AC100011 /* PilotPersonalState.swift in Sources */,
 				AC100003 /* PilotAPIClient.swift in Sources */,
 				AC100002 /* PilotAuthClient.swift in Sources */,
 				AC100001 /* PilotHTTP.swift in Sources */,

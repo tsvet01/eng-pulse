@@ -33,12 +33,15 @@ final class AppServices: ObservableObject {
         guard let account, let api else { return }
         let root = cacheRoot ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("EngPulsePilot", isDirectory: true)
+        let personalRoot = cacheRoot?.appendingPathComponent("PersonalState") ??
+            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("EngPulsePilotPersonal", isDirectory: true)
         accountObservation = account.$phase.removeDuplicates().sink { [weak self] phase in
-            self?.updateReader(phase, api: api, root: root)
+            self?.updateReader(phase, api: api, root: root, personalRoot: personalRoot)
         }
     }
 
-    private func updateReader(_ phase: PilotAccountModel.Phase, api: PilotAPIClient, root: URL) {
+    private func updateReader(_ phase: PilotAccountModel.Phase, api: PilotAPIClient, root: URL, personalRoot: URL) {
         if case .admitted(let session, let user) = phase,
            let current = pilotReader ?? preparingReader,
            current.session == session, current.user.id == user.id, current.reader.isActive {
@@ -51,11 +54,12 @@ final class AppServices: ObservableObject {
         pilotReader?.invalidate()
         pilotReader = nil
         guard case .admitted(let session, let user) = phase else { return }
-        let context = PilotReaderContext(api: api, session: session, user: user, root: root)
+        let context = PilotReaderContext(api: api, session: session, user: user, root: root, personalRoot: personalRoot)
         context.reader.onAccessFailure = { [weak self, weak context] error in
             guard let self, let context, self.pilotReader === context else { return }
             self.pilotAccountModel?.readerFailed(error, session: session)
         }
+        context.personalState.onAccessFailure = context.reader.onAccessFailure
         preparingReader = context
         readerPreparation = Task { [weak self] in
             await context.appState.loadCachedSummaries()
@@ -72,15 +76,18 @@ final class PilotReaderContext {
     let session: PilotSession
     let user: PilotUser
     let reader: PilotFeedReader
+    let personalState: PilotPersonalState
     let appState: AppState
     let ttsService: TTSService
     var id: UUID { session.id }
 
-    init(api: PilotAPIClient, session: PilotSession, user: PilotUser, root: URL) {
+    init(api: PilotAPIClient, session: PilotSession, user: PilotUser, root: URL, personalRoot: URL? = nil) {
         self.session = session; self.user = user
         let store = PilotFeedStore(root: root, identity: session.identity.id, user: user.id)
         let reader = PilotFeedReader(api: api, session: session, store: store)
         self.reader = reader
+        personalState = PilotPersonalState(api: api, session: session, user: user.id,
+            root: personalRoot ?? root.appendingPathComponent("PersonalState"))
         let cache = CacheService(directory: store.directory.appendingPathComponent("media")) { summary in
             try await reader.content(date: summary.date)
         }
@@ -90,6 +97,7 @@ final class PilotReaderContext {
 
     func invalidate() {
         reader.invalidate()
+        personalState.invalidate()
         appState.invalidate()
         ttsService.invalidate()
     }

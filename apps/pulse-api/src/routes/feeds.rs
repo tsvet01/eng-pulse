@@ -13,12 +13,47 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/feeds", get(list).post(read_only))
         .route("/v1/feeds/{id}/membership", post(join).delete(leave))
+        .route(
+            "/v1/feeds/{id}/preferences",
+            get(preferences).put(set_preferences),
+        )
         .route("/v1/feeds/{id}/topics", post(read_only))
         .route(
             "/v1/feeds/{id}/topics/{topic}",
             axum::routing::delete(read_only),
         )
         .route("/v1/feeds/{id}/sources", post(read_only).delete(read_only))
+}
+
+async fn preferences(
+    State(s): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<feeds::NotificationPreferences>, ApiError> {
+    if !feeds::exists(&s.pool, id).await? {
+        return Err(ApiError::NotFound("feed"));
+    }
+    Ok(Json(
+        feeds::preferences(&s.pool, user.id, id)
+            .await?
+            .ok_or(ApiError::Forbidden)?,
+    ))
+}
+
+async fn set_preferences(
+    State(s): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<Uuid>,
+    Json(prefs): Json<feeds::NotificationPreferences>,
+) -> Result<Json<feeds::NotificationPreferences>, ApiError> {
+    if !feeds::exists(&s.pool, id).await? {
+        return Err(ApiError::NotFound("feed"));
+    }
+    Ok(Json(
+        feeds::set_preferences(&s.pool, user.id, id, &prefs)
+            .await?
+            .ok_or(ApiError::Forbidden)?,
+    ))
 }
 
 async fn list(State(s): State<AppState>, user: AuthUser) -> Result<Json<Vec<Value>>, ApiError> {

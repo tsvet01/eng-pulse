@@ -137,6 +137,7 @@ struct SettingsView: View {
                         Button("Sign out", role: .destructive) { Task { await model.signOut() } }
                             .accessibilityIdentifier("pilot.signOut")
                     }
+                    PilotNotificationSettings()
                 }
 
                 // Infrastructure

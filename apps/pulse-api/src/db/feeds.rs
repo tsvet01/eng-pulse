@@ -17,6 +17,36 @@ pub struct SourceRow {
     pub kind: String,
 }
 
+#[derive(Debug, sqlx::FromRow, serde::Serialize, serde::Deserialize)]
+pub struct NotificationPreferences {
+    pub notify_email: bool,
+    pub notify_push: bool,
+}
+
+pub async fn preferences(
+    pool: &PgPool,
+    user: Uuid,
+    feed: Uuid,
+) -> sqlx::Result<Option<NotificationPreferences>> {
+    sqlx::query_as(
+        "select notify_email, notify_push from memberships where user_id = $1 and feed_id = $2",
+    )
+    .bind(user)
+    .bind(feed)
+    .fetch_optional(pool)
+    .await
+}
+
+pub async fn set_preferences(
+    pool: &PgPool,
+    user: Uuid,
+    feed: Uuid,
+    prefs: &NotificationPreferences,
+) -> sqlx::Result<Option<NotificationPreferences>> {
+    sqlx::query_as("update memberships set notify_email = $3, notify_push = $4 where user_id = $1 and feed_id = $2 returning notify_email, notify_push")
+        .bind(user).bind(feed).bind(prefs.notify_email).bind(prefs.notify_push).fetch_optional(pool).await
+}
+
 pub async fn list_for_user(pool: &PgPool, user_id: Uuid) -> sqlx::Result<Vec<FeedRow>> {
     sqlx::query_as("select f.id, f.slug, f.name, f.description, f.is_active, m.role from feeds f left join memberships m on m.feed_id = f.id and m.user_id = $1 where f.is_active and f.slug = 'engineering' order by f.slug")
         .bind(user_id).fetch_all(pool).await

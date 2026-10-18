@@ -165,6 +165,9 @@ struct DetailView: View {
                     if PilotBuild.allowsLegacyServices {
                         FeedbackWidget(summaryUrl: summary.url, promptVersion: summary.promptVersion)
                             .padding(.top, DesignTokens.sectionSpacing)
+                    } else {
+                        PilotFeedbackView(date: summary.date)
+                            .padding(.top, DesignTokens.sectionSpacing)
                     }
 
                     ArticleNavigation(allSummaries: allSummaries, currentIndex: currentIndex)
