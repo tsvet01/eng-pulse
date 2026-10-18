@@ -4,11 +4,13 @@
 **Next outcome:** About five invited iOS users can sign in, read/listen to the shared `engineering` brief, leave their own feedback, and receive notifications according to their preferences. Observe the pilot for 14 days before expanding.
 **Execution plan:** [Hetzner multi-user pilot](../plans/2026-10-13-hetzner-multiuser-pilot.md). The [Phase 1 plan](../plans/2026-09-16-phase1-api-mvp.md) records the existing API implementation; it is not the pilot launch checklist.
 
+**Personal delivery direction, agreed 2026-10-18:** After connecting account feedback, build one shared daily pool of **5–20 articles total across interests**, then assign **one article per account per day** using interests and feedback. Users can share an assigned article; the app keeps its daily-brief experience. This supersedes the later assumption that users primarily consume separate subscribed feeds. See the [personal daily brief design](2026-10-18-personal-daily-brief-design.md) and [staged implementation plan](../plans/2026-10-18-personal-daily-brief.md). Current single-engineering pilot behavior and launch gates remain unchanged until those slices are implemented and activated.
+
 ## 1. Goals and constraints
 
 - **Users:** about five invited iOS users first; 10–50 remains a later capacity goal.
 - **Pilot feed:** one shared `engineering` feed, joined automatically on sign-up. Ordinary members cannot create feeds or edit sources/topics; enforce this in the API as well as the UI. Keep the existing pipeline source configuration authoritative; do not expose API edits that the pipeline does not consume.
-- **Later feeds:** start with a few admin-approved interest feeds. Members subscribe and choose preferences; owners/admins manage configuration. Enable these flows only with working multi-feed generation, delivery, and spending limits. This is a shared community, not private team workspaces.
+- **Later personal delivery:** admin-approved interest coverage supplies one shared daily pool of 5–20 articles. Each account receives one stable daily assignment based on interests and feedback. Interests overlap; personal fit and shared article/brief quality are measured separately. Enable after generation limits, account isolation, stable IDs, assignment history and delivery are verified. This is a shared community, not private team workspaces.
 - **Identity:** Supabase Auth with Apple and email magic link/OTP plus an API invite gate. Google remains planned but does not block the iOS pilot. Keep identity separate from portable application data.
 - **Hosting:** Hetzner for the API, Postgres, and notification worker. Retain Cloud Run, Cloud Scheduler, GCP model secrets, GCS artifacts, and the explorer job throughout the pilot. Full GCP exit is not a launch requirement or an assumed saving.
 - **Backend:** Rust with shared contracts; use the existing Terraform/CI path. Retain Python functions while legacy clients/recipients need them.
@@ -135,7 +137,7 @@ Keep feed creation and source/topic management out of the pilot UI. Add discover
 | P1 API readiness | Phase 1 corrections, identity setup, API-first deploy, seed, history import, reconciliation, successful restore | Daily/explorer jobs and artifact writes retained |
 | P2 Complete pilot experience | Swift account flows and isolation plus durable email/APNs; two accounts on real devices; sender cutover and rollback proven | Legacy clients/recipients still work |
 | P3 Live pilot | Invite about five users after P1/P2; observe 14 days; review usage, delivery, support effort, and actual costs | Retained throughout |
-| Later: feeds | A few curated feeds, owner/admin controls, bounded generation, complete delivery | Jobs can stay on Cloud Run |
+| Later: personal daily brief | Shared pool of 5–20 articles, one stable assignment per account, preferences/feedback, bounded generation and consistent delivery | Jobs stay on Cloud Run; Hetzner serves personal assignments |
 | Later: expansion | Android/self-service feeds/legacy retirement each need a separate plan | No automatic move to Hetzner cron |
 
 Phase 1 API completion alone is not a multi-user launch. Use the [pilot plan](../plans/2026-10-13-hetzner-multiuser-pilot.md) for unchecked implementation tasks, dependencies, and launch evidence. Record build/CI identifiers, real scheduled-run results, and real-device checks at applicable boundaries.
@@ -167,4 +169,4 @@ Use the single path-filtered workflow: Rust formatting/clippy/unit tests; databa
 
 ## 13. Deferred roadmap
 
-After the pilot review: curated multi-feed generation and subscriptions, then self-service feed creation if justified; Android; private team spaces; explicit account linking; self-hosted auth; separate model experiments; explorer proposals to feed owners; GCP consolidation/retirement. OMGifts remains a separate task. Pilot freshness, notification, and backup alerts are required now.
+Next implementation slice: connect authenticated account feedback with read/change/undo and safe offline sync. After the pilot gates and review, expand to the agreed shared pool and one personal daily assignment using the [personal daily brief plan](../plans/2026-10-18-personal-daily-brief.md). Self-service feeds, Android, private team spaces, explicit account linking, self-hosted auth, separate model experiments, and GCP consolidation/retirement remain deferred. OMGifts remains a separate task. Pilot freshness, notification, and backup alerts are required now.

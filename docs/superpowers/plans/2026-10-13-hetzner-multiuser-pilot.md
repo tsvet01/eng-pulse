@@ -5,6 +5,8 @@
 **Design:** [Multi-user design](../specs/2026-09-01-multiuser-cohorts-design.md).
 **Baseline implementation:** [PR #185](https://github.com/tsvet01/eng-pulse/pull/185), branch `plan/phase1-api-mvp`, plus its [historical implementation plan](2026-09-16-phase1-api-mvp.md).
 
+**Product decision, 2026-10-18:** The next content expansion is a shared daily pool of **5–20 articles total**, serving **one personally selected article per account**. Account feedback is the first slice; generation/ranking activation follows the existing readiness gates. See the [agreed design](../specs/2026-10-18-personal-daily-brief-design.md) and [implementation plan](2026-10-18-personal-daily-brief.md). This note changes the future roadmap, not the recorded production evidence below.
+
 ## Scope and decisions
 
 - Keep the GCP daily/explorer jobs, schedules, models/prompts, secrets, GCS artifacts, and manifest behavior. Add/reliably operate the API mirror; do not migrate job execution to Hetzner.
@@ -111,6 +113,7 @@ Swift work and the delivery worker may be developed independently after the API 
 
 - [ ] Add Apple and email/OTP sign-in, invite acceptance, token refresh/expiry handling, and automatic engineering membership. No feed creation or source/topic editing UI in this release.
 - [ ] Read lists/briefs from the API and send feedback under the current account. Preserve reading, offline use, TTS, and CarPlay; use the imported history so switching does not present an empty library.
+- [ ] Complete account feedback using Tasks 1–2 of the [personal daily brief plan](2026-10-18-personal-daily-brief.md): own-state reads, change/undo, 204-aware client mutations, revision conflicts, offline queue, and two-account/device evidence. Keep relevance separate from brief quality; do not treat a personal dislike as a global quality failure.
 - [ ] Scope caches and pending feedback to account/feed. Test A → logout → B with no network, queued writes, expired tokens, and app restart. Never display A's personal state or submit A's queued writes as B. Clear active session state on logout.
 - [ ] Implement safe device logout/account switching, including queued cleanup when offline and server-side ownership checks. Re-evaluate notification targets when the account changes. Remove the new build's Firebase Auth path only after API feedback/device registration works.
 - [ ] Provide email/push preferences and verify opt-out on actual delivery. Document admin revocation and data cleanup for someone leaving the pilot.
@@ -161,7 +164,7 @@ Fill this table during execution; unchecked tasks and blank evidence mean the ga
 
 ## After the pilot
 
-1. Add a few curated feeds only when multi-feed generation, owner/admin permissions, source validation, and end-to-end delivery ship together. Set numeric feed/source/token/retry/daily-cost limits before activation; record every model attempt and reuse compatible artifacts.
+1. Expand to the [shared daily pool and personal assignment model](2026-10-18-personal-daily-brief.md): 5–20 articles total across interests, with one stable daily brief per account. Ship stable content IDs/preferences, bounded pool generation, shadow ranking, and assignment-based app/history/notifications in separate slices. Set numeric source/token/attempt/daily-cost limits before activation; record every model attempt and reuse compatible artifacts. Preserve the GCP engineering path as a controlled fallback.
 2. Consider self-service feeds and Android based on observed demand. Private workspaces and account linking need explicit separate designs.
 3. Revisit job hosting or legacy retirement only if measured cost or operational simplicity justifies it. Retained GCP jobs, backup storage, and Terraform state are acceptable outcomes. OMGifts cleanup remains separate.
 
