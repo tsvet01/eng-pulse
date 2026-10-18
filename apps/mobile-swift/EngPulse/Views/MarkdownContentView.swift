@@ -12,6 +12,43 @@ enum MarkdownBlock {
     case divider
 
     static func parse(_ content: String) -> [MarkdownBlock] {
+        var blocks: [MarkdownBlock] = []
+        var prose: [String] = []
+        var code: [String] = []
+        var fenceLength: Int?
+
+        func flushProse() {
+            blocks.append(contentsOf: parseProse(prose.joined(separator: "\n")))
+            prose.removeAll(keepingCapacity: true)
+        }
+
+        // Fence contents bypass paragraph splitting and Markdown normalization.
+        for line in content.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let backticks = trimmed.prefix { $0 == "`" }.count
+            if let openingLength = fenceLength {
+                if backticks >= openingLength && backticks == trimmed.count {
+                    blocks.append(.codeBlock(text: code.joined(separator: "\n")))
+                    code.removeAll(keepingCapacity: true)
+                    fenceLength = nil
+                } else {
+                    code.append(line)
+                }
+            } else if backticks >= 3 {
+                flushProse()
+                fenceLength = backticks
+            } else {
+                prose.append(line)
+            }
+        }
+        if fenceLength != nil {
+            blocks.append(.codeBlock(text: code.joined(separator: "\n")))
+        }
+        flushProse()
+        return blocks
+    }
+
+    private static func parseProse(_ content: String) -> [MarkdownBlock] {
         let cleaned = content
             .replacingOccurrences(of: "(?m)([^\n])\n(#+ )", with: "$1\n\n$2", options: .regularExpression)
             .replacingOccurrences(of: "(?m)^(#+ [^\n]+)\n([^\n])", with: "$1\n\n$2", options: .regularExpression)
@@ -36,15 +73,25 @@ enum MarkdownBlock {
                 return .numberedList(text: trimmed)
             } else if trimmed.hasPrefix(">") {
                 return .blockquote(text: trimmed)
-            } else if trimmed.contains("|") && trimmed.contains("\n") {
+            } else if isTable(trimmed) {
                 return .table(text: trimmed)
-            } else if trimmed.hasPrefix("```") {
-                return .codeBlock(text: trimmed)
             } else if trimmed == "---" || trimmed == "***" || trimmed == "___" {
                 return .divider
             } else {
                 return .paragraph(text: trimmed)
             }
+        }
+    }
+
+    private static func isTable(_ text: String) -> Bool {
+        let lines = text.components(separatedBy: "\n")
+        guard lines.count >= 2, lines[0].contains("|") else { return false }
+        let separator = lines[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "|"))
+        let cells = separator.components(separatedBy: "|")
+        return cells.allSatisfy {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                .range(of: "^:?-+:?$", options: .regularExpression) != nil
         }
     }
 }
@@ -265,14 +312,10 @@ struct MarkdownContentView: View {
     }
 
     private func codeBlockView(_ text: String) -> some View {
-        let code = text
-            .replacingOccurrences(of: "^```\\w*\\n?", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "\\n?```$", with: "", options: .regularExpression)
-
         let bg = colorScheme == .dark ? Color.Dark.surfaceContainerHigh : Color.Light.surfaceContainerHigh
 
         return ScrollView(.horizontal, showsIndicators: false) {
-            Text(code)
+            Text(text)
                 .font(.system(.caption, design: .monospaced))
                 .foregroundColor(colorScheme == .dark ? Color.Dark.onSurface : Color.Light.onSurface)
                 .padding(12)
