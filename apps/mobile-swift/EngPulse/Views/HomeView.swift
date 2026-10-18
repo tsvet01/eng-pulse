@@ -7,6 +7,7 @@ struct HomeViewContent: View {
     @State private var isSearchActive = false
     @FocusState private var searchFocused: Bool
     @Binding var navigationPath: NavigationPath
+    @EnvironmentObject private var ttsService: TTSService
 
     var filteredSummaries: [Summary] {
         var result = summariesStore.summaries
@@ -85,6 +86,16 @@ struct HomeViewContent: View {
                 }
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            if let chrome = libraryChrome {
+                ActivePlaybackBar(
+                    tts: ttsService,
+                    chrome: chrome,
+                    onToggle: { ttsService.togglePauseResume() },
+                    onSecondary: openNowPlaying
+                )
+            }
+        }
         .safeAreaInset(edge: .top) {
             if isSearchActive {
                 TextField("Search summaries", text: $searchText)
@@ -108,7 +119,11 @@ struct HomeViewContent: View {
     private var summaryList: some View {
         List(filteredSummaries) { summary in
             NavigationLink(value: summary) {
-                SummaryCardView(summary: summary, isRead: isArticleRead(summary.url))
+                SummaryCardView(
+                    summary: summary,
+                    isRead: isArticleRead(summary.url),
+                    playbackBadge: playbackBadge(for: summary.url)
+                )
             }
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
@@ -123,12 +138,41 @@ struct HomeViewContent: View {
         UserDefaults.standard.string(forKey: FeedbackKeys.selection(url)) != nil ||
         UserDefaults.standard.string(forKey: FeedbackKeys.summary(url)) != nil
     }
+
+    private var playingSummary: Summary? {
+        guard let url = ttsService.currentArticleUrl else { return nil }
+        return summariesStore.summaries.first { $0.url == url }
+    }
+
+    private var libraryChrome: PlaybackChrome? {
+        PlaybackChrome.forLibrary(
+            playingURL: ttsService.currentArticleUrl,
+            playingTitle: ttsService.currentArticleTitle,
+            state: ttsService.state,
+            canOpenArticle: playingSummary != nil
+        )
+    }
+
+    private func playbackBadge(for url: String) -> String? {
+        guard ttsService.currentArticleUrl == url else { return nil }
+        switch ttsService.state {
+        case .playing, .loading: return "PLAYING"
+        case .paused: return "PAUSED"
+        case .stopped: return nil
+        }
+    }
+
+    private func openNowPlaying() {
+        guard let summary = playingSummary else { return }
+        navigationPath.append(summary)
+    }
 }
 
 // MARK: - Summary Card
 struct SummaryCardView: View {
     let summary: Summary
     var isRead: Bool = false
+    var playbackBadge: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -144,7 +188,16 @@ struct SummaryCardView: View {
 
                 Spacer()
 
-                if isRead {
+                if let playbackBadge {
+                    HStack(spacing: 3) {
+                        Image(systemName: "speaker.wave.2.fill")
+                            .font(.system(size: 10))
+                        Text(playbackBadge)
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundColor(.accentColor)
+                    .accessibilityLabel(playbackBadge == "PAUSED" ? "Paused" : "Playing")
+                } else if isRead {
                     HStack(spacing: 3) {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 10))
@@ -161,7 +214,7 @@ struct SummaryCardView: View {
                 .font(.headline)
                 .fontDesign(.serif)
                 .lineLimit(2)
-                .opacity(isRead ? 0.6 : 1.0)
+                .opacity(isRead && playbackBadge == nil ? 0.6 : 1.0)
 
             // Snippet
             if let snippet = summary.cleanSnippet {
