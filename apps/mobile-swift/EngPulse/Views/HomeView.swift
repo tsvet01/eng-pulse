@@ -165,7 +165,8 @@ struct HomeViewContent: View {
     private func playbackBadge(for url: String) -> String? {
         guard ttsService.currentArticleUrl == url else { return nil }
         switch ttsService.state {
-        case .playing, .loading: return "PLAYING"
+        case .playing: return "PLAYING"
+        case .loading: return "LOADING"
         case .paused: return "PAUSED"
         case .stopped: return nil
         }
@@ -205,7 +206,7 @@ struct SummaryCardView: View {
                             .font(.system(size: 10, weight: .semibold))
                     }
                     .foregroundColor(.accentColor)
-                    .accessibilityLabel(playbackBadge == "PAUSED" ? "Paused" : "Playing")
+                    .accessibilityLabel(playbackBadge == "LOADING" ? "Preparing audio" : (playbackBadge == "PAUSED" ? "Paused" : "Playing"))
                 } else if isRead {
                     HStack(spacing: 3) {
                         Image(systemName: "checkmark.circle.fill")
