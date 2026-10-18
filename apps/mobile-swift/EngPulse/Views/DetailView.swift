@@ -10,6 +10,7 @@ enum FeedbackKeys {
 // MARK: - FeedbackWidget
 
 struct FeedbackWidget: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let summaryUrl: String
     let promptVersion: String?
     @State private var selectionFeedback: String
@@ -23,7 +24,11 @@ struct FeedbackWidget: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Was this useful?")
+                .font(.headline)
+                .foregroundStyle(Color.onSurface)
+                .padding(.bottom, 4)
             feedbackRow(label: "Article Pick", current: selectionFeedback) { type in rate(aspect: "selection", type: type) }
             feedbackRow(label: "Summary Quality", current: summaryFeedback) { type in rate(aspect: "summary", type: type) }
         }
@@ -34,23 +39,36 @@ struct FeedbackWidget: View {
 
     @ViewBuilder
     private func feedbackRow(label: String, current: String, onRate: @escaping (String) -> Void) -> some View {
-        HStack {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout())
+        layout {
             Text(label)
                 .font(.subheadline)
                 .fontWeight(.medium)
                 .foregroundColor(.onSurface)
-            Spacer()
+            if !dynamicTypeSize.isAccessibilitySize { Spacer() }
             HStack(spacing: 12) {
                 Button { onRate("up") } label: {
                     Image(systemName: current == "up" ? "hand.thumbsup.fill" : "hand.thumbsup")
                         .font(.title3)
-                        .foregroundColor(current == "up" ? .green : .onSurfaceVariant)
+                        .foregroundColor(current == "up" ? .accentColor : .onSurfaceVariant)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .background(current == "up" ? Color.accentColor.opacity(0.1) : Color.clear, in: Circle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Helpful \(label)")
+                .accessibilityAddTraits(current == "up" ? [.isSelected] : [])
                 Button { onRate("down") } label: {
                     Image(systemName: current == "down" ? "hand.thumbsdown.fill" : "hand.thumbsdown")
                         .font(.title3)
-                        .foregroundColor(current == "down" ? .red : .onSurfaceVariant)
+                        .foregroundColor(current == "down" ? .accentColor : .onSurfaceVariant)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .background(current == "down" ? Color.accentColor.opacity(0.1) : Color.clear, in: Circle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Unhelpful \(label)")
+                .accessibilityAddTraits(current == "down" ? [.isSelected] : [])
             }
         }
     }
@@ -176,8 +194,7 @@ struct DetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                // Metadata badges
-                metadataBadges
+                articleHeader
 
                 if isLoadingContent {
                     loadingSection
@@ -187,7 +204,7 @@ struct DetailView: View {
                     fullContentSection(content)
                 }
 
-                if fullContent != nil || loadingError != nil {
+                if fullContent != nil {
                     if fullContent != nil, let feedback {
                         PilotFeedbackView(model: feedback, date: summary.date)
                             .padding(.top, DesignTokens.sectionSpacing)
@@ -201,8 +218,11 @@ struct DetailView: View {
                         .padding(.top, 12)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 24)
+            .frame(maxWidth: 720)
+            .frame(maxWidth: .infinity)
         }
         .background(Color.surface)
         .scrollContentBackground(.hidden)
@@ -244,30 +264,64 @@ struct DetailView: View {
         }
     }
 
-    // MARK: - Metadata Badges
+    // MARK: - Article Header
 
-    private var metadataBadges: some View {
-        HStack(spacing: 8) {
-            if let model = summary.model {
-                Label(model, systemImage: "sparkles")
-                    .font(.caption2).fontWeight(.medium)
-                    .foregroundColor(.accentColor)
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(Color.accentColor.opacity(0.12))
-                    .clipShape(Capsule())
+    private var articleHeader: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    Label(summary.source, systemImage: "doc.text")
+                    Text(summary.displayDate, format: .dateTime.month(.abbreviated).day().year())
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(summary.source, systemImage: "doc.text")
+                    Text(summary.displayDate, format: .dateTime.month(.abbreviated).day().year())
+                }
             }
-            Text(summary.source)
-                .font(.caption2).foregroundColor(.onSurfaceVariant)
-            if let score = summary.evalScore {
-                Label(String(format: "%.0f%%", score * 100), systemImage: "chart.bar.fill")
-                    .font(.caption2).fontWeight(.medium)
-                    .foregroundColor(.tertiaryAccent)
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(Color.tertiaryAccent.opacity(0.12))
-                    .clipShape(Capsule())
+            .font(.subheadline)
+            .foregroundStyle(Color.onSurfaceVariant)
+
+            // Legacy Markdown already supplies its own headline. Structured
+            // briefs contain sections only, so give them an article heading.
+            if summary.isInsightBrief || fullContent == nil {
+                Text(summary.title)
+                    .font(.system(.largeTitle, design: .serif, weight: .bold))
+                    .foregroundStyle(Color.onSurface)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 16) { articleActions }
+                VStack(alignment: .leading, spacing: 8) { articleActions }
+            }
+            .padding(.bottom, 8)
+        }
+    }
+
+    @ViewBuilder
+    private var articleActions: some View {
+        Button(action: toggleTTS) {
+            Label(isLoadingTTS ? "Preparing audio…" : (isPlaying ? "Pause" : (isPaused ? "Resume" : (anotherArticleIsActive ? "Play this article" : "Listen"))),
+                  systemImage: isPlaying ? "pause.fill" : "headphones")
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 16)
+                .frame(minHeight: 44)
+                .background(Color.accentColor.opacity(0.1), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.accentColor)
+        .disabled(fullContent == nil || isLoadingTTS)
+        .opacity(fullContent == nil ? 0.5 : 1)
+        .accessibilityLabel(listenAccessibilityLabel)
+
+        if let originalUrl = summary.originalUrl, let url = URL(string: originalUrl) {
+            Link(destination: url) {
+                Label("Read original", systemImage: "arrow.up.right")
+                    .font(.subheadline)
+                    .frame(minHeight: 44)
             }
         }
-        .padding(.top, 4)
     }
 
     // MARK: - Content Loading
@@ -408,7 +462,7 @@ struct DetailView: View {
             Text("Unable to load summary")
                 .font(.subheadline)
                 .fontWeight(.medium)
-            Text("Check your internet connection and try again.")
+            Text(error)
                 .font(.caption)
                 .foregroundColor(.onSurfaceVariant)
                 .multilineTextAlignment(.center)
@@ -431,7 +485,7 @@ struct DetailView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigationBarTrailing) {
-            HStack(spacing: 12) {
+            HStack(spacing: 0) {
                 if let pos = savedPosition, (ttsService.state == .stopped || ttsService.currentArticleUrl != summary.url) {
                     Button {
                         toggleTTS()
@@ -443,27 +497,16 @@ struct DetailView: View {
                     }
                 }
 
-                Button {
-                    toggleTTS()
-                } label: {
-                    if isLoadingTTS {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                    } else {
-                        Image(systemName: isPlaying ? "pause.fill" : ((isPaused || anotherArticleIsActive) ? "play.fill" : "speaker.wave.2.fill"))
-                    }
-                }
-                .disabled(fullContent == nil || isLoadingTTS)
-                .accessibilityLabel(listenAccessibilityLabel)
-
                 Button { showInfo = true } label: {
                     Image(systemName: "info.circle")
+                        .frame(minWidth: 44, minHeight: 44)
                 }
                 .accessibilityLabel("Article info")
 
                 if let originalUrl = summary.originalUrl, let url = URL(string: originalUrl) {
                     ShareLink(item: url) {
                         Image(systemName: "square.and.arrow.up")
+                            .frame(minWidth: 44, minHeight: 44)
                     }
                     .accessibilityLabel("Share article")
                 }

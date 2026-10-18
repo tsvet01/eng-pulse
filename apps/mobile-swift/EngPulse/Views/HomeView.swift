@@ -3,11 +3,12 @@ import SwiftUI
 // MARK: - HomeViewContent
 struct HomeViewContent: View {
     @EnvironmentObject var summariesStore: AppState
+    @EnvironmentObject private var ttsService: TTSService
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var searchText = ""
     @State private var isSearchActive = false
     @FocusState private var searchFocused: Bool
     @Binding var navigationPath: NavigationPath
-    @EnvironmentObject private var ttsService: TTSService
 
     var filteredSummaries: [Summary] {
         var result = summariesStore.summaries
@@ -33,8 +34,7 @@ struct HomeViewContent: View {
                 }
             } else if summariesStore.summaries.isEmpty {
                 EmptyStateView()
-            } else if filteredSummaries.isEmpty {
-                ContentUnavailableView.search(text: searchText)
+
             } else {
                 summaryList
             }
@@ -43,7 +43,7 @@ struct HomeViewContent: View {
         .navigationDestination(for: Summary.self) { summary in
             DetailView(
                 summary: summary,
-                allSummaries: summariesStore.summaries,
+                allSummaries: filteredSummaries.contains(summary) ? filteredSummaries : [],
                 cacheService: summariesStore.cacheService,
                 feedback: summariesStore.pilotFeedback
             )
@@ -58,19 +58,17 @@ struct HomeViewContent: View {
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
-                Text("Eng Pulse")
-                    .font(.headline)
-                    .fontDesign(.serif)
+                HStack(spacing: 8) {
+                    PulseMark(size: 28)
+                    Text("Eng Pulse")
+                        .font(.system(.headline, design: .serif))
+                }
+                .accessibilityElement(children: .combine)
             }
             ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 14) {
-                    if summariesStore.isOffline {
-                        Image(systemName: "icloud.slash")
-                            .foregroundColor(Color.tertiaryAccent)
-                    }
-
+                HStack(spacing: 0) {
                     Button {
-                        withAnimation {
+                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
                             isSearchActive.toggle()
                             searchFocused = isSearchActive
                         }
@@ -78,12 +76,14 @@ struct HomeViewContent: View {
                     } label: {
                         Image(systemName: isSearchActive ? "xmark" : "magnifyingglass")
                             .foregroundColor(Color.onSurfaceVariant)
+                            .frame(minWidth: 44, minHeight: 44)
                     }
                     .accessibilityLabel(isSearchActive ? "Close search" : "Search")
 
                     NavigationLink(value: "settings") {
                         Image(systemName: "gearshape")
                             .foregroundColor(Color.onSurfaceVariant)
+                            .frame(minWidth: 44, minHeight: 44)
                     }
                     .accessibilityLabel("Settings")
                 }
@@ -120,35 +120,77 @@ struct HomeViewContent: View {
     }
 
     private var summaryList: some View {
-        ScrollView {
-            LazyVStack(spacing: 8) {
-                ForEach(filteredSummaries) { summary in
-                    NavigationLink(value: summary) {
-                        HStack(spacing: 12) {
-                            SummaryCardView(
-                                summary: summary,
-                                isRead: isArticleRead(summary.url),
-                                playbackBadge: playbackBadge(for: summary.url)
-                            )
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(.tertiary)
-                                .accessibilityHidden(true)
+        let summaries = filteredSummaries
+        return ScrollView {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                feedHeader(count: summaries.count)
+
+                if summariesStore.isOffline {
+                    Label("Offline · Showing saved articles", systemImage: "icloud.slash")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.onSurfaceVariant)
+                        .padding(.vertical, 4)
+                }
+
+                if summaries.isEmpty {
+                    ContentUnavailableView {
+                        Label("No matching articles", systemImage: "doc.text.magnifyingglass")
+                    } description: {
+                        Text("Try another title, topic, or publisher.")
+                    } actions: {
+                        Button("Clear search") {
+                            searchText = ""
                         }
-                        .contentShape(Rectangle())
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
                     }
-                    .buttonStyle(.plain)
+                } else {
+                    ForEach(summaries) { summary in
+                        NavigationLink(value: summary) {
+                            SummaryCardView(summary: summary, isRated: hasFeedback(summary.url), playbackBadge: playbackBadge(for: summary.url))
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 24)
+            .frame(maxWidth: 720)
+            .frame(maxWidth: .infinity)
         }
+        .scrollDismissesKeyboard(.interactively)
         .background(Color.surface)
     }
 
-    private func isArticleRead(_ url: String) -> Bool {
-        UserDefaults.standard.string(forKey: FeedbackKeys.selection(url)) != nil ||
-        UserDefaults.standard.string(forKey: FeedbackKeys.summary(url)) != nil
+    private func feedHeader(count: Int) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Your daily brief")
+                    .font(.system(.largeTitle, design: .serif, weight: .bold))
+                    .foregroundStyle(Color.onSurface)
+                    .accessibilityAddTraits(.isHeader)
+                Text("Good ideas for better engineering.")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.onSurfaceVariant)
+            }
+
+            resultCount(count)
+        }
+        .padding(.bottom, 6)
+    }
+
+    private func resultCount(_ count: Int) -> some View {
+        Text("\(count) \(count == 1 ? "article" : "articles")")
+            .font(.subheadline)
+            .foregroundStyle(Color.onSurfaceVariant)
+    }
+
+    private func hasFeedback(_ url: String) -> Bool {
+        guard PilotBuild.allowsLegacyServices else { return false }
+        return [FeedbackKeys.selection(url), FeedbackKeys.summary(url)].contains {
+            !(UserDefaults.standard.string(forKey: $0) ?? "").isEmpty
+        }
     }
 
     private var playingSummary: Summary? {
@@ -184,63 +226,65 @@ struct HomeViewContent: View {
 // MARK: - Summary Card
 struct SummaryCardView: View {
     let summary: Summary
-    var isRead: Bool = false
+    var isRated: Bool = false
     var playbackBadge: String? = nil
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Metadata row
-            HStack(spacing: 6) {
-                Text(summary.displayDate, format: .dateTime.month(.abbreviated).day())
-                    .font(.caption2)
-                    .foregroundColor(Color.onSurfaceVariant)
-
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: summary.isInsightBrief ? "text.alignleft" : "doc.text")
+                    .foregroundStyle(Color.accentColor)
+                    .accessibilityHidden(true)
                 Text(summary.source)
-                    .font(.caption2)
-                    .foregroundColor(Color.onSurfaceVariant)
+                    .fontWeight(.semibold)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
 
-                Spacer()
-
-                if let playbackBadge {
-                    HStack(spacing: 3) {
-                        Image(systemName: "speaker.wave.2.fill")
-                            .font(.system(size: 10))
-                        Text(playbackBadge)
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .foregroundColor(.accentColor)
-                    .accessibilityLabel(playbackBadge == "LOADING" ? "Preparing audio" : (playbackBadge == "PAUSED" ? "Paused" : "Playing"))
-                } else if isRead {
-                    HStack(spacing: 3) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 10))
-                            .foregroundColor(.green)
-                        Text("READ")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(.green)
-                    }
-                }
             }
+            .font(.caption)
+            .foregroundStyle(Color.onSurfaceVariant)
 
-            // Title
             Text(summary.title)
-                .font(.headline)
-                .fontDesign(.serif)
-                .lineLimit(2)
-                .opacity(isRead && playbackBadge == nil ? 0.6 : 1.0)
+                .font(.system(.title3, design: .serif, weight: .semibold))
+                .foregroundStyle(Color.onSurface)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 3)
+                .fixedSize(horizontal: false, vertical: true)
 
-            // Snippet
-            if let snippet = summary.cleanSnippet {
+            if let snippet = summary.cleanSnippet, !snippet.isEmpty {
                 Text(snippet)
                     .font(.subheadline)
-                    .foregroundColor(Color.onSurfaceVariant)
-                    .lineLimit(2)
+                    .foregroundStyle(Color.onSurfaceVariant)
+                    .lineSpacing(3)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
             }
+
+            HStack(spacing: 8) {
+                Text(summary.displayDate, format: .dateTime.month(.abbreviated).day().year())
+                Spacer(minLength: 0)
+                if let playbackBadge {
+                    Label(playbackBadge == "LOADING" ? "Preparing audio" : playbackBadge.capitalized,
+                          systemImage: "speaker.wave.2.fill")
+                        .foregroundStyle(Color.accentColor)
+                } else if isRated {
+                    Label("Rated", systemImage: "checkmark.circle")
+                }
+                Image(systemName: "arrow.right")
+                    .accessibilityHidden(true)
+            }
+            .font(.caption)
+            .foregroundStyle(Color.onSurfaceVariant)
+            .padding(.top, 2)
         }
         .padding(DesignTokens.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isRead ? Color.containerLow.opacity(0.6) : Color.container)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
+        .background(Color.containerLow, in: RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: DesignTokens.cardRadius)
+                .strokeBorder(Color.outlineVariant.opacity(0.3), lineWidth: 0.5)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
+        .accessibilityElement(children: .combine)
     }
 }
 

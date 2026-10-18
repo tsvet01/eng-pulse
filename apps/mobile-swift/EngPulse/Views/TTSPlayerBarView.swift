@@ -137,7 +137,7 @@ struct TTSPlayerBarView: View {
                     .fill(Color.onSurfaceVariant.opacity(0.15))
                 RoundedRectangle(cornerRadius: 2)
                     .fill(Color.accentColor)
-                    .frame(width: geometry.size.width * progress)
+                    .frame(width: geometry.size.width * min(max(progress.isFinite ? progress : 0, 0), 1))
             }
         }
         .frame(height: 3)
@@ -147,11 +147,11 @@ struct TTSPlayerBarView: View {
     private var timestamps: some View {
         HStack {
             Text(currentTime)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(.caption.monospacedDigit())
                 .foregroundColor(.onSurfaceVariant)
             Spacer()
             Text(duration)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(.caption.monospacedDigit())
                 .foregroundColor(.onSurfaceVariant)
         }
     }
@@ -168,6 +168,7 @@ struct TTSPlayerBarView: View {
                     .contentShape(Rectangle())
             }
             .disabled(isLoading || !hasSeek)
+            .opacity(isLoading || !hasSeek ? 0.35 : 1)
             .accessibilityLabel("Skip back 15 seconds")
 
             Button(action: onToggle) {
@@ -192,6 +193,7 @@ struct TTSPlayerBarView: View {
                     .contentShape(Rectangle())
             }
             .disabled(isLoading || !hasSeek)
+            .opacity(isLoading || !hasSeek ? 0.35 : 1)
             .accessibilityLabel("Skip forward 15 seconds")
 
             Spacer()
@@ -222,6 +224,7 @@ struct TTSPlayerBarView: View {
             Image(systemName: "xmark.circle.fill")
                 .font(.body)
                 .foregroundColor(.onSurfaceVariant)
+                .frame(minWidth: 44, minHeight: 44)
         }
         .accessibilityLabel("Stop playback")
     }

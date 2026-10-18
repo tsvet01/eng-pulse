@@ -91,7 +91,7 @@ struct SectionCard<Content: View>: View {
         }
         .padding(DesignTokens.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.container)
+        .background(Color.containerLow)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
     }
 }

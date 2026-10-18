@@ -1,20 +1,26 @@
 import SwiftUI
 
 struct SettingsSection<Content: View>: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let title: String
     let icon: String
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
+            let headerLayout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                : AnyLayout(HStackLayout(spacing: 8))
+            headerLayout {
                 Image(systemName: icon)
-                    .font(.subheadline)
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.accentColor)
+                    .frame(width: 32, height: 32)
+                    .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+                    .accessibilityHidden(true)
                 Text(title)
                     .font(.subheadline)
                     .fontWeight(.semibold)
-                    .fontDesign(.serif)
                     .foregroundColor(.onSurface)
             }
             .padding(.bottom, 4)
@@ -22,16 +28,16 @@ struct SettingsSection<Content: View>: View {
         }
         .padding(DesignTokens.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.container)
+        .background(Color.containerLow)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
     }
 }
 
 struct SettingsView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var ttsService: TTSService
-    @AppStorage("notificationsEnabled") private var notificationsEnabled = true
-    @AppStorage("dailyBriefingTime") private var dailyBriefingTime = "08:00"
+    @Environment(\.openURL) private var openURL
     @AppStorage("ttsSpeechRate") private var speechRate: Double = 0.55
     @AppStorage("ttsPitch") private var pitch: Double = 1.0
     @AppStorage("ttsVoice") private var selectedVoice: String = Neural2Voice.maleJ.rawValue
@@ -47,11 +53,11 @@ struct SettingsView: View {
                 // Listening
                 SettingsSection(title: "Listening", icon: "waveform") {
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack {
+                        adaptiveRow {
                             Text("Speech Rate")
                                 .font(.subheadline)
                                 .foregroundColor(.onSurface)
-                            Spacer()
+                            if !dynamicTypeSize.isAccessibilitySize { Spacer() }
                             Text(rateLabel)
                                 .font(.caption)
                                 .fontDesign(.monospaced)
@@ -59,15 +65,16 @@ struct SettingsView: View {
                         }
                         Slider(value: $speechRate, in: 0.25...0.75, step: 0.05)
                             .tint(.accentColor)
-                            .accessibilityLabel("Speech Rate")
+                            .accessibilityLabel("Speech rate")
+                            .accessibilityValue(rateLabel)
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack {
+                        adaptiveRow {
                             Text("Voice Pitch")
                                 .font(.subheadline)
                                 .foregroundColor(.onSurface)
-                            Spacer()
+                            if !dynamicTypeSize.isAccessibilitySize { Spacer() }
                             Text(pitchLabel)
                                 .font(.caption)
                                 .fontDesign(.monospaced)
@@ -75,45 +82,26 @@ struct SettingsView: View {
                         }
                         Slider(value: $pitch, in: 0.5...1.5, step: 0.1)
                             .tint(.accentColor)
-                            .accessibilityLabel("Voice Pitch")
+                            .accessibilityLabel("Voice pitch")
+                            .accessibilityValue(pitchLabel)
                     }
                 }
 
                 if PilotBuild.allowsLegacyServices {
-                // Notifications
-                SettingsSection(title: "Notifications", icon: "bell.badge") {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Toggle(isOn: $notificationsEnabled) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Daily Briefing")
-                                    .font(.subheadline)
-                                    .foregroundColor(.onSurface)
-                                Text("Receive a daily summary of top engineering articles.")
-                                    .font(.caption)
-                                    .foregroundColor(.onSurfaceVariant)
-                            }
+                // Notification delivery is controlled by iOS; the former local
+                // toggle and delivery-time value did not update a subscription.
+                SettingsSection(title: "Notifications", icon: "bell") {
+                    Text("Manage alerts, sounds, and badges in iOS Settings.")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.onSurfaceVariant)
+                    Button {
+                        if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
+                            openURL(url)
                         }
-                        .tint(.accentColor)
-                        .onChange(of: notificationsEnabled) { _, newValue in
-                            if newValue {
-                                NotificationService.shared.subscribeToTopic("daily_briefings")
-                            } else {
-                                NotificationService.shared.unsubscribeFromTopic("daily_briefings")
-                            }
-                        }
-                    }
-
-                    if notificationsEnabled {
-                        HStack {
-                            Text("Delivery Time")
-                                .font(.subheadline)
-                                .foregroundColor(.onSurface)
-                            Spacer()
-                            Text(dailyBriefingTime)
-                                .font(.caption)
-                                .fontDesign(.monospaced)
-                                .foregroundColor(.accentColor)
-                        }
+                    } label: {
+                        Label("Open notification settings", systemImage: "arrow.up.right.square")
+                            .font(.subheadline.weight(.medium))
+                            .frame(minHeight: 44)
                     }
                 }
 
@@ -121,10 +109,10 @@ struct SettingsView: View {
                 SettingsSection(title: "Archive", icon: "archivebox") {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Reading History")
+                            Text("Your feedback")
                                 .font(.subheadline)
                                 .foregroundColor(.onSurface)
-                            Text("\(readCount) articles read")
+                            Text("\(readCount) articles rated")
                                 .font(.caption)
                                 .foregroundColor(.onSurfaceVariant)
                         }
@@ -142,8 +130,8 @@ struct SettingsView: View {
                 }
 
                 // Infrastructure
-                SettingsSection(title: "Infrastructure", icon: "externaldrive") {
-                    HStack {
+                SettingsSection(title: "Storage", icon: "externaldrive") {
+                    adaptiveRow {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Local Storage")
                                 .font(.subheadline)
@@ -153,17 +141,17 @@ struct SettingsView: View {
                                 .fontDesign(.monospaced)
                                 .foregroundColor(.onSurfaceVariant)
                         }
-                        Spacer()
+                        if !dynamicTypeSize.isAccessibilitySize { Spacer() }
                         Button {
                             showClearCacheAlert = true
                         } label: {
                             Text("Clear Cache")
                                 .font(.subheadline)
                                 .fontWeight(.medium)
-                                .foregroundColor(Color.adaptive(dark: Color.Dark.onPrimary, light: .white))
+                                .foregroundColor(.tertiaryAccent)
                                 .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(Color.tertiaryAccent)
+                                .frame(minHeight: 44)
+                                .background(Color.tertiaryAccent.opacity(0.1))
                                 .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
@@ -173,9 +161,7 @@ struct SettingsView: View {
                 // About
                 SettingsSection(title: "About", icon: "info.circle") {
                     VStack(spacing: 8) {
-                        Image(systemName: "bolt.fill")
-                            .font(.largeTitle)
-                            .foregroundColor(.accentColor)
+                        PulseMark(size: 56)
                         Text("Eng Pulse")
                             .font(.title3)
                             .fontWeight(.semibold)
@@ -192,6 +178,8 @@ struct SettingsView: View {
             }
             .padding(.horizontal, DesignTokens.cardPadding)
             .padding(.vertical, DesignTokens.sectionSpacing)
+            .frame(maxWidth: 720)
+            .frame(maxWidth: .infinity)
         }
         .background(Color.surface)
         .scrollContentBackground(.hidden)
@@ -211,12 +199,22 @@ struct SettingsView: View {
         }
     }
 
+    private var adaptiveRow: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout())
+    }
+
     // MARK: - Computed helpers
 
     private func loadReadCount() {
-        readCount = UserDefaults.standard.dictionaryRepresentation()
-            .keys.filter { $0.hasPrefix("feedback_selection_") }
-            .count
+        let prefixes = ["feedback_selection_", "feedback_summary_"]
+        let urls = UserDefaults.standard.dictionaryRepresentation().compactMap { key, value -> String? in
+            guard let feedback = value as? String, !feedback.isEmpty,
+                  let prefix = prefixes.first(where: { key.hasPrefix($0) }) else { return nil }
+            return String(key.dropFirst(prefix.count))
+        }
+        readCount = Set(urls).count
     }
 
     private var appVersion: String {
