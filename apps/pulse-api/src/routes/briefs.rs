@@ -6,8 +6,8 @@ use crate::{
 };
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
-    routing::{get, put},
+    http::{HeaderMap, HeaderValue, StatusCode},
+    routing::{delete, get},
     Json, Router,
 };
 use chrono::NaiveDate;
@@ -19,7 +19,14 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/feeds/{id}/briefs", get(list))
         .route("/v1/briefs/{slug}/{date}", get(get_one))
-        .route("/v1/briefs/{slug}/{date}/feedback", put(put_feedback))
+        .route(
+            "/v1/briefs/{slug}/{date}/feedback",
+            get(get_feedback).put(put_feedback),
+        )
+        .route(
+            "/v1/briefs/{slug}/{date}/feedback/{aspect}",
+            delete(delete_feedback),
+        )
 }
 
 #[derive(Deserialize)]
@@ -87,25 +94,105 @@ struct FeedbackBody {
     value: i16,
 }
 
+fn expected_revision(headers: &HeaderMap, required: bool) -> Result<Option<i64>, ApiError> {
+    let mut values = headers.get_all("x-expected-revision").iter();
+    let Some(value) = values.next() else {
+        return if required {
+            Err(ApiError::BadRequest(
+                "X-Expected-Revision is required".into(),
+            ))
+        } else {
+            Ok(None)
+        };
+    };
+    let value = value
+        .to_str()
+        .ok()
+        .filter(|v| !v.is_empty() && v.bytes().all(|c| c.is_ascii_digit()));
+    if values.next().is_some() {
+        return Err(ApiError::BadRequest("invalid feedback revision".into()));
+    }
+    value
+        .and_then(|v| v.parse().ok())
+        .map(Some)
+        .ok_or_else(|| ApiError::BadRequest("invalid feedback revision".into()))
+}
+
+async fn feedback_target(
+    s: &AppState,
+    user: &AuthUser,
+    slug: &str,
+    date: &str,
+) -> Result<(Uuid, NaiveDate), ApiError> {
+    let feed_id = briefs::feed_id_by_slug(&s.pool, slug)
+        .await?
+        .ok_or(ApiError::NotFound("feed"))?;
+    member_feed(s, user, feed_id).await?;
+    let date = parse_date(date)?;
+    briefs::get(&s.pool, feed_id, date)
+        .await?
+        .ok_or(ApiError::NotFound("brief"))?;
+    Ok((feed_id, date))
+}
+
+fn mutation_response(revision: Option<i64>) -> Result<(StatusCode, HeaderMap), ApiError> {
+    let revision = revision.ok_or(ApiError::FeedbackConflict)?;
+    let mut headers = HeaderMap::new();
+    headers.insert("x-feedback-revision", HeaderValue::from(revision));
+    Ok((StatusCode::NO_CONTENT, headers))
+}
+
+async fn get_feedback(
+    State(s): State<AppState>,
+    user: AuthUser,
+    Path((slug, date)): Path<(String, String)>,
+) -> Result<Json<feedback::PersonalFeedback>, ApiError> {
+    let (feed_id, date) = feedback_target(&s, &user, &slug, &date).await?;
+    Ok(Json(feedback::get(&s.pool, user.id, feed_id, date).await?))
+}
+
 async fn put_feedback(
     State(s): State<AppState>,
     user: AuthUser,
     Path((slug, date)): Path<(String, String)>,
+    headers: HeaderMap,
     Json(b): Json<FeedbackBody>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<(StatusCode, HeaderMap), ApiError> {
     if !matches!(b.aspect.as_str(), "brief" | "selection") || !matches!(b.value, -1 | 1) {
         return Err(ApiError::BadRequest(
             "aspect must be brief|selection and value -1|1".into(),
         ));
     }
-    let feed_id = briefs::feed_id_by_slug(&s.pool, &slug)
-        .await?
-        .ok_or(ApiError::NotFound("feed"))?;
-    member_feed(&s, &user, feed_id).await?;
-    let date = parse_date(&date)?;
-    briefs::get(&s.pool, feed_id, date)
-        .await?
-        .ok_or(ApiError::NotFound("brief"))?;
-    feedback::upsert(&s.pool, user.id, feed_id, date, &b.aspect, b.value).await?;
-    Ok(StatusCode::NO_CONTENT)
+    let expected = expected_revision(&headers, false)?;
+    let (feed_id, date) = feedback_target(&s, &user, &slug, &date).await?;
+    mutation_response(
+        feedback::write(
+            &s.pool,
+            user.id,
+            feed_id,
+            date,
+            &b.aspect,
+            Some(b.value),
+            expected,
+        )
+        .await?,
+    )
+}
+
+async fn delete_feedback(
+    State(s): State<AppState>,
+    user: AuthUser,
+    Path((slug, date, aspect)): Path<(String, String, String)>,
+    headers: HeaderMap,
+) -> Result<(StatusCode, HeaderMap), ApiError> {
+    if !matches!(aspect.as_str(), "brief" | "selection") {
+        return Err(ApiError::BadRequest(
+            "aspect must be brief|selection".into(),
+        ));
+    }
+    let expected = expected_revision(&headers, true)?;
+    let (feed_id, date) = feedback_target(&s, &user, &slug, &date).await?;
+    mutation_response(
+        feedback::write(&s.pool, user.id, feed_id, date, &aspect, None, expected).await?,
+    )
 }
