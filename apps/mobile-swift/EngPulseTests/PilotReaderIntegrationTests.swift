@@ -4,6 +4,22 @@ import Combine
 
 final class PilotReaderIntegrationTests: XCTestCase {
     @MainActor
+    func testFeedbackIsBoundToReaderLifetimeAndSurvivesMediaCacheClear() async throws {
+        let root = try root()
+        let context = try await context(root: root)
+        let feedback = try XCTUnwrap(context.appState.pilotFeedback)
+        try feedback.set(value: 1, aspect: .selection, date: "2026-10-18")
+        await context.appState.clearCache()
+        let saved = try PilotFeedbackStore(root: root.appendingPathComponent("feedback-state"),
+            identity: context.session.identity.id, user: context.user.id).load(date: "2026-10-18")
+        XCTAssertEqual(saved.pending["selection"]?.value, 1, "Clear cache must preserve durable unsent feedback")
+        context.invalidate()
+        XCTAssertFalse(feedback.isActive)
+        XCTAssertTrue(feedback.records.isEmpty)
+        XCTAssertThrowsError(try feedback.set(value: -1, aspect: .selection, date: "2026-10-18"))
+    }
+
+    @MainActor
     func testReturningReaderPublishesSavedArticlesBeforeAnyNetworkResponse() async throws {
         let root = try root()
         let identity = UUID()

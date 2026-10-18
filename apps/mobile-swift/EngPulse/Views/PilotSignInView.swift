@@ -28,6 +28,7 @@ struct PilotEntryView: View {
                 Task {
                     await model.restore()
                     await services.pilotReader?.appState.refreshSummaries()
+                    await services.pilotReader?.feedback.synchronize()
                 }
             }
         }

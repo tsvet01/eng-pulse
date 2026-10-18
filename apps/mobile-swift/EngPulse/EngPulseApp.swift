@@ -135,15 +135,18 @@ class AppState: ObservableObject {
 
     private let apiService = APIService()
     let cacheService: CacheService
+    let pilotFeedback: PilotFeedbackModel?
     private var activeLoad: Task<Void, Never>?
     private let pilotReader: PilotFeedReader?
     private let scope: String?
     private var isActive = true
     private var didLoadPilotCache = false
 
-    init(cacheService: CacheService = CacheService(), pilotReader: PilotFeedReader? = nil, scope: String? = nil) {
+    init(cacheService: CacheService = CacheService(), pilotReader: PilotFeedReader? = nil,
+         pilotFeedback: PilotFeedbackModel? = nil, scope: String? = nil) {
         self.cacheService = cacheService
         self.pilotReader = pilotReader
+        self.pilotFeedback = pilotFeedback
         self.scope = scope
         isLoading = pilotReader != nil
     }
