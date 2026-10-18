@@ -90,6 +90,7 @@ Output ONLY valid JSON matching this schema:
 }}
 
 Rules:
+- Write all reader-facing text in English, including titles, headings, quotations, and JSON string values, regardless of the source language. Translate non-English prose; use English names or transliterations for proper nouns. Preserve code, URLs, and technical identifiers.
 - key_idea must be one sentence, direct and opinionated
 - why_it_matters must connect to the reader's specific context
 - deep_dive uses markdown formatting (bold, bullets, code) for scannability
@@ -107,6 +108,14 @@ Content: {}"#,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_summary_requires_english_for_russian_source() {
+        let prompt = summary_prompt("Habr", "Оптимизация Rust", "Русский текст статьи");
+        assert!(prompt.contains("Write all reader-facing text in English"));
+        assert!(prompt.contains("including titles, headings, quotations, and JSON string values"));
+        assert!(prompt.contains("Оптимизация Rust"));
+    }
 
     #[test]
     fn test_prompt_version() {
