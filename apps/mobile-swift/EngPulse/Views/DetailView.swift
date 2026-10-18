@@ -205,7 +205,7 @@ struct DetailView: View {
                 }
 
                 if fullContent != nil {
-                    if fullContent != nil, let feedback {
+                    if let feedback {
                         PilotFeedbackView(model: feedback, date: summary.date)
                             .padding(.top, DesignTokens.sectionSpacing)
                     }
@@ -213,7 +213,9 @@ struct DetailView: View {
                         FeedbackWidget(summaryUrl: summary.url, promptVersion: summary.promptVersion)
                             .padding(.top, DesignTokens.sectionSpacing)
                     }
+                }
 
+                if fullContent != nil || loadingError != nil {
                     ArticleNavigation(allSummaries: allSummaries, currentIndex: currentIndex)
                         .padding(.top, 12)
                 }
