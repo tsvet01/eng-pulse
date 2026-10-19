@@ -138,7 +138,9 @@ async fn english_title(
 }
 
 // --- Configuration Constants ---
-const HTTP_TIMEOUT_SECS: u64 = 60;
+// Allow high-reasoning brief generation to finish.
+const HTTP_TIMEOUT_SECS: u64 = 180;
+const BRIEF_MODEL: &str = "gpt-6-astra";
 const MAX_ARTICLE_CHARS: usize = 50_000;
 /// Minimum extracted content length to attempt summarization.
 /// Pages below this threshold are likely JS-rendered SPAs or paywalled.
@@ -178,7 +180,16 @@ fn build_recent_picks_context(manifest: &[ManifestEntry], max_days: usize) -> Op
     Some(context)
 }
 
-/// API keys the pipeline needs: Claude writes the brief, OpenAI judges it.
+fn brief_options() -> LlmOptions {
+    LlmOptions {
+        model: Some(BRIEF_MODEL.to_string()),
+        effort: Some("high".to_string()),
+        max_tokens: Some(16000),
+        ..Default::default()
+    }
+}
+
+/// API keys: Claude selects articles; OpenAI writes and judges the brief.
 /// Gemini is optional and unused by the daily run; when present it is only
 /// exercised by `--smoke`.
 #[derive(Debug, Clone, PartialEq)]
@@ -262,9 +273,13 @@ async fn run_smoke(
             Some(m) => format!("shadow({})", m),
             None => provider.as_str().to_string(),
         };
-        let options = LlmOptions {
-            model: model.map(String::from),
-            ..Default::default()
+        let options = if provider == LlmProvider::OpenAI {
+            brief_options()
+        } else {
+            LlmOptions {
+                model: model.map(String::from),
+                ..Default::default()
+            }
         };
         let prompt = "Reply with the single word: OK".to_string();
         match call_llm(http_client, provider, key, prompt, &options).await {
@@ -674,12 +689,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // transient-error retries) fails the run.
     info!("Generating V3 Insight Brief");
     let v3_prompt = prompts::summary_prompt(&best_article.source, &title, &truncated_text);
-    let v3_options = LlmOptions::default();
+    let v3_options = brief_options();
     let brief = generate_insight_brief(BRIEF_PARSE_ATTEMPTS, || {
         call_llm(
             &http_client,
-            LlmProvider::Claude,
-            &keys.claude,
+            LlmProvider::OpenAI,
+            &keys.openai,
             v3_prompt.clone(),
             &v3_options,
         )
@@ -706,7 +721,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         title: title.clone(),
         summary_snippet: manifest_snippet(&brief.key_idea),
         original_url: Some(best_article.url.clone()),
-        model: Some(LlmProvider::Claude.model_name().to_string()),
+        model: Some(BRIEF_MODEL.to_string()),
         selected_by: Some(LlmProvider::Claude.model_name().to_string()),
         prompt_version: Some(prompts::PROMPT_VERSION.to_string()),
         eval_score: None,
@@ -718,8 +733,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if let Some(shadow) = shadow_model() {
         let shadow_prompt = prompts::summary_prompt(&best_article.source, &title, &truncated_text);
         // Opus 5 adaptive thinking tokens count against max_tokens; raise
-        // the cap so the JSON answer isn't truncated. Prod paths keep the
-        // 4096 default.
+        // the cap so the JSON answer isn't truncated.
         let shadow_options = LlmOptions {
             model: Some(shadow.clone()),
             max_tokens: Some(16000),
@@ -1296,10 +1310,15 @@ mod tests {
     }
 
     async fn mount_openai_ok(server: &wiremock::MockServer) {
-        use wiremock::matchers::{method, path};
+        use wiremock::matchers::{body_partial_json, method, path};
         use wiremock::{Mock, ResponseTemplate};
         Mock::given(method("POST"))
             .and(path("/chat/completions"))
+            .and(body_partial_json(serde_json::json!({
+                "model": "gpt-6-astra",
+                "reasoning_effort": "high",
+                "max_completion_tokens": 16000
+            })))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "choices": [{"message": {"content": "OK"}}]
             })))

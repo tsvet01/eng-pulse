@@ -8,7 +8,7 @@ One engineering article a day, turned into an Insight Brief, delivered to an iOS
 
 ```
 sources.json ─▶ daily-agent (06:00 UTC, Cloud Run Job) ─▶ GCS bucket ─▶ iOS app / email / APNs
-                  select (Claude) · brief (Claude Opus 5) · judge (GPT-6 Astra)
+                  select (Claude) · brief (GPT-6 Astra High) · judge (GPT-6 Astra)
 explorer-agent (weekly) ─▶ sources.json
 ```
 
