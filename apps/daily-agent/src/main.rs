@@ -138,14 +138,20 @@ async fn english_title(
 }
 
 // --- Configuration Constants ---
-// Allow high-reasoning shadow generation to finish.
-const HTTP_TIMEOUT_SECS: u64 = 180;
+const HTTP_TIMEOUT_SECS: u64 = 60;
+const SHADOW_HTTP_TIMEOUT_SECS: u64 = 180;
 const MAX_ARTICLE_CHARS: usize = 50_000;
 /// Minimum extracted content length to attempt summarization.
 /// Pages below this threshold are likely JS-rendered SPAs or paywalled.
 const MIN_ARTICLE_CHARS: usize = 200;
 /// Brief re-requests when the model answer is not a parsable Insight Brief.
 const BRIEF_PARSE_ATTEMPTS: usize = 3;
+
+fn production_http_client() -> Result<reqwest::Client, reqwest::Error> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .build()
+}
 
 /// The entry that represents a day's pick: the V3 brief, or the V1 summary
 /// on days before V3 existed. Excludes beta lanes.
@@ -191,11 +197,14 @@ struct ApiKeys {
 
 /// Use the same candidate settings for shadow generation and the smoke gate.
 async fn call_shadow(
-    client: &reqwest::Client,
     keys: &ApiKeys,
     model: &str,
     prompt: String,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    // Give reasoning more time without slowing production fetches and LLM calls.
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(SHADOW_HTTP_TIMEOUT_SECS))
+        .build()?;
     let (provider, key) = if model.starts_with("gpt-") {
         (LlmProvider::OpenAI, &keys.openai)
     } else {
@@ -207,7 +216,7 @@ async fn call_shadow(
         effort: (provider == LlmProvider::OpenAI).then(|| "high".to_string()),
         ..Default::default()
     };
-    call_llm(client, provider, key, prompt, &options).await
+    call_llm(&client, provider, key, prompt, &options).await
 }
 
 /// Claude and OpenAI keys are required; an empty value counts as missing.
@@ -285,7 +294,7 @@ async fn run_smoke(
 
     if let Some(model) = shadow {
         let prompt = "Reply with the single word: OK".to_string();
-        match call_shadow(http_client, keys, &model, prompt).await {
+        match call_shadow(keys, &model, prompt).await {
             Ok(resp) => info!(model = %model, reply = %resp.trim(), "Shadow smoke check passed"),
             Err(e) => {
                 error!(model = %model, error = %e, "Shadow smoke check FAILED");
@@ -407,9 +416,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!(bucket = %bucket_name, "Starting SE Daily Agent");
 
     // 0. Initialize shared HTTP client (reused for connection pooling)
-    let http_client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
-        .build()?;
+    let http_client = production_http_client()?;
 
     // Resolve operational mode from CLI args. Smoke mode exits before any GCS
     // work so it can run as a lightweight post-deploy gate.
@@ -735,7 +742,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut shadow_v3_json: Option<String> = None;
     if let Some(shadow) = shadow_model() {
         let shadow_prompt = prompts::summary_prompt(&best_article.source, &title, &truncated_text);
-        match call_shadow(&http_client, &keys, &shadow, shadow_prompt).await {
+        match call_shadow(&keys, &shadow, shadow_prompt).await {
             Ok(response) => match parse_insight_brief(&response) {
                 Some(shadow_brief) => {
                     let object_path = format!("summaries/v3-shadow/{}.json", today);
@@ -1279,6 +1286,37 @@ mod tests {
     #[test]
     fn test_recent_picks_empty_manifest() {
         assert!(build_recent_picks_context(&[], 5).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_stalled_article_fetch_stops_after_one_minute() {
+        use tokio::io::AsyncReadExt;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/article", listener.local_addr().unwrap());
+        let (seen_tx, seen_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            socket.read_exact(&mut [0; 1]).await.unwrap();
+            seen_tx.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        let client = production_http_client().unwrap();
+        let request = tokio::spawn(async move { fetch_article_content(&client, &url).await });
+        tokio::time::timeout(Duration::from_secs(5), seen_rx)
+            .await
+            .expect("article request must reach the local server")
+            .unwrap();
+
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(61)).await;
+        let error = tokio::time::timeout(Duration::from_secs(1), request)
+            .await
+            .expect("production article fetch must not wait for the shadow timeout")
+            .unwrap()
+            .unwrap_err();
+        assert!(error.downcast_ref::<reqwest::Error>().unwrap().is_timeout());
+        server.abort();
     }
 
     // --- run_smoke: both providers plus the optional shadow model ---
