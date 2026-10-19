@@ -8,7 +8,7 @@ One engineering article a day, turned into an Insight Brief, delivered to an iOS
 
 ```
 sources.json ─▶ daily-agent (06:00 UTC, Cloud Run Job) ─▶ GCS bucket ─▶ iOS app / email / APNs
-                  select (Claude) · brief (GPT-6 Astra High) · judge (GPT-6 Astra)
+                  select (Claude) · brief (Claude Opus 5) · judge (GPT-6 Astra)
 explorer-agent (weekly) ─▶ sources.json
 ```
 
@@ -56,7 +56,9 @@ Secrets live in GCP Secret Manager (pipeline) and GitHub environments (Hetzner);
 
 - Schedules: daily 06:00 UTC, explorer Sundays 08:00 UTC (Cloud Scheduler).
 - Alerts: job failure, "no summary in 25h", fatal-error log match (`scripts/setup-monitoring.sh`).
-- Model changes are verified with a real run; the shadow lane (`SHADOW_MODEL`) compares a candidate model against production with a pairwise judge (`scripts/shadow-eval-report.sh N`).
+- Model changes are verified with a real run. The shadow lane uses `SHADOW_MODEL=gpt-6-astra` with high reasoning; Claude remains the published brief. Shadow failures warn and do not replace the production brief.
+- After merging and CI deployment, the next 06:00 UTC run generates both briefs from the same article and prompt. Compare `summaries/v3/<date>.json` (Claude) with `summaries/v3-shadow/<date>.json` (Astra) in the public `tsvet01-agent-brain` GCS bucket. Shadow briefs do not appear in the app.
+- Run `scripts/shadow-eval-report.sh 7` for pairwise results. Reports before this deployment refer to the previous shadow model. The Astra judge also scores Astra's candidate, so manually compare faithfulness, useful technical detail, and action quality before promotion.
 - Postgres backups: nightly `pg_dump` from the box to `gs://tsvet01-pulse-backups`.
 
 ## License

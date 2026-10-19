@@ -138,9 +138,8 @@ async fn english_title(
 }
 
 // --- Configuration Constants ---
-// Allow high-reasoning brief generation to finish.
+// Allow high-reasoning shadow generation to finish.
 const HTTP_TIMEOUT_SECS: u64 = 180;
-const BRIEF_MODEL: &str = "gpt-6-astra";
 const MAX_ARTICLE_CHARS: usize = 50_000;
 /// Minimum extracted content length to attempt summarization.
 /// Pages below this threshold are likely JS-rendered SPAs or paywalled.
@@ -180,16 +179,7 @@ fn build_recent_picks_context(manifest: &[ManifestEntry], max_days: usize) -> Op
     Some(context)
 }
 
-fn brief_options() -> LlmOptions {
-    LlmOptions {
-        model: Some(BRIEF_MODEL.to_string()),
-        effort: Some("high".to_string()),
-        max_tokens: Some(16000),
-        ..Default::default()
-    }
-}
-
-/// API keys: Claude selects articles; OpenAI writes and judges the brief.
+/// API keys the pipeline needs: Claude writes the brief, OpenAI judges it.
 /// Gemini is optional and unused by the daily run; when present it is only
 /// exercised by `--smoke`.
 #[derive(Debug, Clone, PartialEq)]
@@ -197,6 +187,27 @@ struct ApiKeys {
     claude: String,
     openai: String,
     gemini: Option<String>,
+}
+
+/// Use the same candidate settings for shadow generation and the smoke gate.
+async fn call_shadow(
+    client: &reqwest::Client,
+    keys: &ApiKeys,
+    model: &str,
+    prompt: String,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let (provider, key) = if model.starts_with("gpt-") {
+        (LlmProvider::OpenAI, &keys.openai)
+    } else {
+        (LlmProvider::Claude, &keys.claude)
+    };
+    let options = LlmOptions {
+        model: Some(model.to_string()),
+        max_tokens: Some(16000),
+        effort: (provider == LlmProvider::OpenAI).then(|| "high".to_string()),
+        ..Default::default()
+    };
+    call_llm(client, provider, key, prompt, &options).await
 }
 
 /// Claude and OpenAI keys are required; an empty value counts as missing.
@@ -252,41 +263,33 @@ async fn run_smoke(
     // fails the deploy gate instead of surfacing as a nightly warn.
     let shadow = shadow_model();
     let checks = [
-        (LlmProvider::Claude, keys.claude.as_str(), None),
-        (LlmProvider::OpenAI, keys.openai.as_str(), None),
+        (LlmProvider::Claude, keys.claude.as_str()),
+        (LlmProvider::OpenAI, keys.openai.as_str()),
     ]
     .into_iter()
-    .chain(
-        shadow
-            .as_deref()
-            .map(|m| (LlmProvider::Claude, keys.claude.as_str(), Some(m))),
-    )
-    .chain(
-        keys.gemini
-            .as_deref()
-            .map(|k| (LlmProvider::Gemini, k, None)),
-    );
+    .chain(keys.gemini.as_deref().map(|k| (LlmProvider::Gemini, k)));
 
     let mut failures = Vec::new();
-    for (provider, key, model) in checks {
-        let label = match model {
-            Some(m) => format!("shadow({})", m),
-            None => provider.as_str().to_string(),
-        };
-        let options = if provider == LlmProvider::OpenAI {
-            brief_options()
-        } else {
-            LlmOptions {
-                model: model.map(String::from),
-                ..Default::default()
-            }
-        };
+    for (provider, key) in checks {
+        let label = provider.as_str();
+        let options = LlmOptions::default();
         let prompt = "Reply with the single word: OK".to_string();
         match call_llm(http_client, provider, key, prompt, &options).await {
             Ok(resp) => info!(check = %label, reply = %resp.trim(), "Smoke check passed"),
             Err(e) => {
                 error!(check = %label, error = %e, "Smoke check FAILED");
                 failures.push(format!("{}: {}", label, e));
+            }
+        }
+    }
+
+    if let Some(model) = shadow {
+        let prompt = "Reply with the single word: OK".to_string();
+        match call_shadow(http_client, keys, &model, prompt).await {
+            Ok(resp) => info!(model = %model, reply = %resp.trim(), "Shadow smoke check passed"),
+            Err(e) => {
+                error!(model = %model, error = %e, "Shadow smoke check FAILED");
+                failures.push(format!("shadow({}): {}", model, e));
             }
         }
     }
@@ -689,12 +692,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // transient-error retries) fails the run.
     info!("Generating V3 Insight Brief");
     let v3_prompt = prompts::summary_prompt(&best_article.source, &title, &truncated_text);
-    let v3_options = brief_options();
+    let v3_options = LlmOptions::default();
     let brief = generate_insight_brief(BRIEF_PARSE_ATTEMPTS, || {
         call_llm(
             &http_client,
-            LlmProvider::OpenAI,
-            &keys.openai,
+            LlmProvider::Claude,
+            &keys.claude,
             v3_prompt.clone(),
             &v3_options,
         )
@@ -721,7 +724,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         title: title.clone(),
         summary_snippet: manifest_snippet(&brief.key_idea),
         original_url: Some(best_article.url.clone()),
-        model: Some(BRIEF_MODEL.to_string()),
+        model: Some(LlmProvider::Claude.model_name().to_string()),
         selected_by: Some(LlmProvider::Claude.model_name().to_string()),
         prompt_version: Some(prompts::PROMPT_VERSION.to_string()),
         eval_score: None,
@@ -732,23 +735,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut shadow_v3_json: Option<String> = None;
     if let Some(shadow) = shadow_model() {
         let shadow_prompt = prompts::summary_prompt(&best_article.source, &title, &truncated_text);
-        // Opus 5 adaptive thinking tokens count against max_tokens; raise
-        // the cap so the JSON answer isn't truncated.
-        let shadow_options = LlmOptions {
-            model: Some(shadow.clone()),
-            max_tokens: Some(16000),
-            ..Default::default()
-        };
-
-        match call_llm(
-            &http_client,
-            LlmProvider::Claude,
-            &keys.claude,
-            shadow_prompt,
-            &shadow_options,
-        )
-        .await
-        {
+        match call_shadow(&http_client, &keys, &shadow, shadow_prompt).await {
             Ok(response) => match parse_insight_brief(&response) {
                 Some(shadow_brief) => {
                     let object_path = format!("summaries/v3-shadow/{}.json", today);
@@ -777,7 +764,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     // --- Eval ---
-    // A non-Claude judge avoids self-preference bias (Claude judging Claude).
+    // The judge may share the shadow model; review pairwise results for self-preference.
     info!(provider = "openai", "Starting eval stage");
     let v3_eval_prompt = String::from(
         "You are evaluating Insight Brief summaries for a senior engineering leader (C++/Rust, hedge fund, low-latency systems).\n\n\
@@ -1310,15 +1297,10 @@ mod tests {
     }
 
     async fn mount_openai_ok(server: &wiremock::MockServer) {
-        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::matchers::{method, path};
         use wiremock::{Mock, ResponseTemplate};
         Mock::given(method("POST"))
             .and(path("/chat/completions"))
-            .and(body_partial_json(serde_json::json!({
-                "model": "gpt-6-astra",
-                "reasoning_effort": "high",
-                "max_completion_tokens": 16000
-            })))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "choices": [{"message": {"content": "OK"}}]
             })))
@@ -1514,5 +1496,54 @@ mod tests {
             result.is_ok(),
             "smoke should pass when both prod and shadow calls succeed: {result:?}"
         );
+    }
+    #[tokio::test]
+    #[serial]
+    async fn test_astra_shadow_uses_openai_high_without_changing_production_smoke() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        mount_openai_ok(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "content": [{"text": "OK"}]
+            })))
+            .mount(&server)
+            .await;
+        std::env::set_var("CLAUDE_BASE_URL", server.uri());
+        std::env::set_var("OPENAI_BASE_URL", server.uri());
+        std::env::set_var("SHADOW_MODEL", "gpt-6-astra");
+        let result = run_smoke(&reqwest::Client::new(), &test_keys()).await;
+        std::env::remove_var("CLAUDE_BASE_URL");
+        std::env::remove_var("OPENAI_BASE_URL");
+        std::env::remove_var("SHADOW_MODEL");
+        assert!(result.is_ok(), "{result:?}");
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 3);
+        let bodies: Vec<serde_json::Value> = requests
+            .iter()
+            .map(|r| serde_json::from_slice(&r.body).unwrap())
+            .collect();
+        assert_eq!(requests[0].url.path(), "/messages");
+        assert_eq!(bodies[0]["model"], llm_client::DEFAULT_CLAUDE_MODEL);
+        assert_eq!(requests[1].url.path(), "/chat/completions");
+        assert!(bodies[1].get("reasoning_effort").is_none());
+        assert_eq!(requests[2].url.path(), "/chat/completions");
+        assert_eq!(
+            requests[2]
+                .headers
+                .get("authorization")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "Bearer test-openai-key"
+        );
+        assert_eq!(bodies[2]["model"], "gpt-6-astra");
+        assert_eq!(bodies[2]["reasoning_effort"], "high");
+        assert_eq!(bodies[2]["max_completion_tokens"], 16000);
+        assert!(bodies[2].get("temperature").is_none());
     }
 }
