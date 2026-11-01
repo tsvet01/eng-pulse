@@ -5,6 +5,13 @@ import Combine
 // MARK: - Audio Player Service
 @MainActor
 class AudioPlayerService: NSObject, ObservableObject {
+    enum PlaybackError: LocalizedError {
+        case unavailable
+
+        var errorDescription: String? {
+            "Audio could not start. Check your audio output and try again."
+        }
+    }
     private var audioPlayer: AVAudioPlayer?
     private var progressTimer: Timer?
     private var sessionConfigured = false
@@ -17,35 +24,37 @@ class AudioPlayerService: NSObject, ObservableObject {
     /// or decode errors), so callers can distinguish completion from
     /// interruption without inferring it from `isPlaying` flips.
     var onPlaybackFinished: (() -> Void)?
+    var onPlaybackFailed: (() -> Void)?
 
-    private func ensureAudioSession() {
-        guard !sessionConfigured else { return }
-        do {
+    private func ensureAudioSession() throws {
+        if !sessionConfigured {
             try AVAudioSession.sharedInstance().setCategory(
                 .playback,
                 mode: .default,
                 options: [.allowBluetoothA2DP]
             )
-            try AVAudioSession.sharedInstance().setActive(true)
             sessionConfigured = true
-        } catch {
-            print("Audio session configuration error: \(error)")
         }
+        // Interruptions can deactivate an already configured session.
+        try AVAudioSession.sharedInstance().setActive(true)
     }
 
     // MARK: - Playback Control
 
     func play(from url: URL) throws {
         stop()
-        ensureAudioSession()
-
-        audioPlayer = try AVAudioPlayer(contentsOf: url)
-        audioPlayer?.delegate = self
-        audioPlayer?.prepareToPlay()
-
-        duration = audioPlayer?.duration ?? 0.0
-
-        audioPlayer?.play()
+        do {
+            try ensureAudioSession()
+        } catch {
+            throw PlaybackError.unavailable
+        }
+        // Keep file/decoder errors distinct from unavailable audio output so a
+        // playlist can skip an invalid article instead of stopping every item.
+        let player = try AVAudioPlayer(contentsOf: url)
+        player.delegate = self
+        guard player.prepareToPlay(), player.play() else { throw PlaybackError.unavailable }
+        audioPlayer = player
+        duration = player.duration
         isPlaying = true
         startProgressTimer()
     }
@@ -56,10 +65,16 @@ class AudioPlayerService: NSObject, ObservableObject {
         stopProgressTimer()
     }
 
-    func resume() {
-        audioPlayer?.play()
-        isPlaying = true
-        startProgressTimer()
+    func resume() throws {
+        do {
+            try ensureAudioSession()
+            guard let audioPlayer, audioPlayer.play() else { throw PlaybackError.unavailable }
+            isPlaying = true
+            startProgressTimer()
+        } catch {
+            stop()
+            throw PlaybackError.unavailable
+        }
     }
 
     func stop() {
@@ -114,6 +129,12 @@ class AudioPlayerService: NSObject, ObservableObject {
 extension AudioPlayerService: AVAudioPlayerDelegate {
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         Task { @MainActor in
+            guard self.audioPlayer === player else { return }
+            guard flag else {
+                self.stop()
+                self.onPlaybackFailed?()
+                return
+            }
             self.isPlaying = false
             self.progress = 1.0  // Show complete
             self.stopProgressTimer()
@@ -123,8 +144,10 @@ extension AudioPlayerService: AVAudioPlayerDelegate {
 
     nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
         Task { @MainActor in
+            guard self.audioPlayer === player else { return }
             print("Audio player decode error: \(error?.localizedDescription ?? "unknown")")
             self.stop()
+            self.onPlaybackFailed?()
         }
     }
 }

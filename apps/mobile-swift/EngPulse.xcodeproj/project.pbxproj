@@ -61,6 +61,8 @@
 		FC100001 /* PilotPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC200001 /* PilotPreferences.swift */; };
 		FB100002 /* PilotFeedbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB200002 /* PilotFeedbackView.swift */; };
 		FC100002 /* PilotPreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC200002 /* PilotPreferencesView.swift */; };
+		CC100001 /* TTSRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC200001 /* TTSRecoveryTests.swift */; };
+		CC100002 /* AudioPlayerRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC200002 /* AudioPlayerRecoveryTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -132,6 +134,8 @@
 		FC200001 /* PilotPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pilot/PilotPreferences.swift; sourceTree = "<group>"; };
 		FB200002 /* PilotFeedbackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/PilotFeedbackView.swift; sourceTree = "<group>"; };
 		FC200002 /* PilotPreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/PilotPreferencesView.swift; sourceTree = "<group>"; };
+		CC200001 /* TTSRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSRecoveryTests.swift; sourceTree = "<group>"; };
+		CC200002 /* AudioPlayerRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayerRecoveryTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -269,6 +273,8 @@
 				CP200008 /* SpeechTextBuilderTests.swift */,
 				PC200001 /* PlaybackChromeTests.swift */,
 				AD200001 /* AudioCacheTests.swift */,
+				CC200001 /* TTSRecoveryTests.swift */,
+				CC200002 /* AudioPlayerRecoveryTests.swift */,
 			);
 			path = EngPulseTests;
 			sourceTree = "<group>";
@@ -434,6 +440,8 @@
 				CP100008 /* SpeechTextBuilderTests.swift in Sources */,
 				PC100001 /* PlaybackChromeTests.swift in Sources */,
 				AD100001 /* AudioCacheTests.swift in Sources */,
+				CC100001 /* TTSRecoveryTests.swift in Sources */,
+				CC100002 /* AudioPlayerRecoveryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
