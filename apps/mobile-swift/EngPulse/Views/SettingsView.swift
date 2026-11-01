@@ -129,6 +129,10 @@ struct SettingsView: View {
                     }
                 }
 
+                if let context = AppServices.shared.pilotReader {
+                    PilotPreferencesView(model: context.preferences).id(context.id)
+                }
+
                 // Infrastructure
                 SettingsSection(title: "Storage", icon: "externaldrive") {
                     adaptiveRow {
