@@ -58,7 +58,9 @@
 		PC100001 /* PlaybackChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = PC200001 /* PlaybackChromeTests.swift */; };
 		AD100001 /* AudioCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD200001 /* AudioCacheTests.swift */; };
 		FB100001 /* PilotFeedback.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB200001 /* PilotFeedback.swift */; };
+		FC100001 /* PilotPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC200001 /* PilotPreferences.swift */; };
 		FB100002 /* PilotFeedbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB200002 /* PilotFeedbackView.swift */; };
+		FC100002 /* PilotPreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC200002 /* PilotPreferencesView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -127,7 +129,9 @@
 		PC200001 /* PlaybackChromeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackChromeTests.swift; sourceTree = "<group>"; };
 		AD200001 /* AudioCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCacheTests.swift; sourceTree = "<group>"; };
 		FB200001 /* PilotFeedback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pilot/PilotFeedback.swift; sourceTree = "<group>"; };
+		FC200001 /* PilotPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pilot/PilotPreferences.swift; sourceTree = "<group>"; };
 		FB200002 /* PilotFeedbackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/PilotFeedbackView.swift; sourceTree = "<group>"; };
+		FC200002 /* PilotPreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/PilotPreferencesView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -168,7 +172,9 @@
 				AC200005 /* PilotKeychain.swift */,
 				AC200004 /* PilotAccountModel.swift */,
 				FB200001 /* PilotFeedback.swift */,
+				FC200001 /* PilotPreferences.swift */,
 				FB200002 /* PilotFeedbackView.swift */,
+				FC200002 /* PilotPreferencesView.swift */,
 				AC200009 /* PilotFeedReader.swift */,
 				AC200003 /* PilotAPIClient.swift */,
 				AC200002 /* PilotAuthClient.swift */,
@@ -376,7 +382,9 @@
 				AC100005 /* PilotKeychain.swift in Sources */,
 				AC100004 /* PilotAccountModel.swift in Sources */,
 				FB100001 /* PilotFeedback.swift in Sources */,
+				FC100001 /* PilotPreferences.swift in Sources */,
 				FB100002 /* PilotFeedbackView.swift in Sources */,
+				FC100002 /* PilotPreferencesView.swift in Sources */,
 				AC100009 /* PilotFeedReader.swift in Sources */,
 				AC100003 /* PilotAPIClient.swift in Sources */,
 				AC100002 /* PilotAuthClient.swift in Sources */,

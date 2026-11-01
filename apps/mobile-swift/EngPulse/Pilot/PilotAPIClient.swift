@@ -1,5 +1,7 @@
 import Foundation
 
+enum PilotAPIVersion: String { case v1, v2 }
+
 struct PilotUser: Codable, Equatable, Sendable {
     let id: UUID
     let email: String
@@ -43,10 +45,11 @@ struct PilotAPIClient: Sendable {
     }
 
     func response(path: String, method: String = "GET", body: Data? = nil,
-                  query: [URLQueryItem] = [], headers: [String: String] = [:], session: PilotSession) async throws -> PilotHTTPResponse {
+                  query: [URLQueryItem] = [], headers: [String: String] = [:], version: PilotAPIVersion = .v1, session: PilotSession) async throws -> PilotHTTPResponse {
         for attempt in 0...1 {
             let token = try await auth.accessToken(for: session, forceRefresh: attempt == 1)
-            var components = URLComponents(url: configuration.apiURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
+            let base = configuration.apiURL.deletingLastPathComponent().appendingPathComponent(version.rawValue)
+            var components = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
             if !query.isEmpty { components.queryItems = query }
             var request = URLRequest(url: components.url!)
             request.httpMethod = method
@@ -71,7 +74,9 @@ struct PilotAPIClient: Sendable {
             let code = (try? JSONDecoder().decode(Failure.self, from: data))?.error
             switch status {
             case 403: throw code == "invite_required" ? PilotError.inviteRequired : .accessDenied
-            case 409: throw code == "feedback_conflict" ? PilotError.feedbackConflict : .accountConflict
+            case 409:
+                if code == "preference_conflict" { throw PilotError.preferenceConflict }
+                throw code == "feedback_conflict" ? PilotError.feedbackConflict : .accountConflict
             case 422: throw method == "POST" ? PilotError.invalidInvite : .invalidResponse
             case 429: throw PilotError.rateLimited
             case 500...599: throw PilotError.unavailable

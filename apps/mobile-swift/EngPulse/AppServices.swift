@@ -60,6 +60,7 @@ final class AppServices: ObservableObject {
             self.pilotAccountModel?.readerFailed(error, session: session)
         }
         context.feedback.onAccessFailure = context.reader.onAccessFailure
+        context.preferences.onAccessFailure = context.reader.onAccessFailure
         preparingReader = context
         readerPreparation = Task { [weak self] in
             await context.appState.loadCachedSummaries()
@@ -78,6 +79,7 @@ final class PilotReaderContext {
     let user: PilotUser
     let reader: PilotFeedReader
     let feedback: PilotFeedbackModel
+    let preferences: PilotPreferencesModel
     let appState: AppState
     let ttsService: TTSService
     var id: UUID { session.id }
@@ -87,6 +89,7 @@ final class PilotReaderContext {
         let store = PilotFeedStore(root: root, identity: session.identity.id, user: user.id)
         let reader = PilotFeedReader(api: api, session: session, store: store)
         self.reader = reader
+        preferences = PilotPreferencesModel(api: api, session: session)
         feedback = PilotFeedbackModel(api: api, session: session, store: PilotFeedbackStore(
             root: feedbackRoot ?? root.appendingPathComponent("feedback-state"), identity: session.identity.id, user: user.id))
         let cache = CacheService(directory: store.directory.appendingPathComponent("media")) { summary in
@@ -99,6 +102,7 @@ final class PilotReaderContext {
     func invalidate() {
         reader.invalidate()
         feedback.invalidate()
+        preferences.invalidate()
         appState.invalidate()
         ttsService.invalidate()
     }
