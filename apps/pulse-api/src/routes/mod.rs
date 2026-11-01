@@ -3,6 +3,7 @@ pub mod briefs;
 pub mod devices;
 pub mod feeds;
 pub mod internal;
+pub mod preferences;
 pub mod users;
 
 use crate::{health, state::AppState};
@@ -17,6 +18,7 @@ pub fn router(state: AppState) -> Router {
         .merge(admin::routes())
         .merge(feeds::routes())
         .merge(briefs::routes())
+        .merge(preferences::routes())
         .merge(devices::routes())
         .merge(internal::routes())
         .layer(TraceLayer::new_for_http())

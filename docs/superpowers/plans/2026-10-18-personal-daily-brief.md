@@ -46,7 +46,7 @@ New Swift files must be registered in `apps/mobile-swift/EngPulse.xcodeproj/proj
 
 ---
 
-**Implementation status (2026-10-18):** API work is prepared in PR #208; the app slice is implemented and locally verified (58 core tests, 75 app tests, and a fixture-backed simulator journey). Production release and real authenticated app verification remain pending. Tasks 3–6 are not started. GCP generation is unchanged.
+**Implementation status (2026-11-01):** Tasks 1–2 shipped in PRs #208/#209. Save/undo and account isolation were verified on two real phones. Task 3 foundation is in progress; Tasks 4–6 have not started. GCP generation is unchanged.
 
 ### Task 1: Complete account feedback read/change/undo on the current brief
 
@@ -70,10 +70,18 @@ New Swift files must be registered in `apps/mobile-swift/EngPulse.xcodeproj/proj
 - [x] Run `swift test --package-path apps/mobile-swift`; confirm the new cases fail for the intended missing behavior.
 - [x] Implement a serial per-account queue with durable pending state and retry after transient failures. On an uncertain result, reload: matching desired state acknowledges the intent; a different server revision becomes a visible conflict, with no automatic overwrite. Bind completion to the active session generation.
 - [x] Add the pilot widget with “Article relevance” and “Summary quality”, thumbs up/down, undo, and pending/failed state. Read server state on another device; keep the legacy widget behind the legacy build gate. Do not interpret a generic down vote as a global quality failure.
-- [ ] Run package tests and relevant iOS tests. Verify two accounts, offline queue/restart, undo, and one real authenticated PUT/GET/DELETE through the normal app path; record build and API revision without credentials. This is the first independently useful release slice.
+- [x] Run package tests and relevant iOS tests. Verify two accounts, offline queue/restart, undo, and one real authenticated PUT/GET/DELETE through the normal app path; record build and API revision without credentials. This is the first independently useful release slice.
 - [x] Commit as `feat(ios): sync personal feedback with account isolation`.
 
 ### Task 3: Add stable content identities and explicit preferences
+
+**Shipping slices (2026-11-01):** Start with 3a (API identities, immutable brief snapshots, legacy mapping and account preferences) and 3b (iOS interest/depth editor), as separate PRs. 3c will migrate feedback and queued legacy writes to stable IDs before pool/ranking activation. Task 3 remains open until 3c ships. Edition/assignment types and article-feature ingestion ship with their first consumers, not unused in 3a. Current choices do not change the shared engineering feed.
+
+- Initial topics: CPU & Performance, Data, Platform, Reliability & Incidents, Security, AI/ML, Engineering Leadership. Topics overlap; per-topic depth is introductory/intermediate/advanced, with no preference allowed.
+- GET preferences includes the topic catalog, nested `preferences` (`interests`, `depth_by_topic`, `excluded_topics`), `revision`, and `learned_reset_at`. PUT requires `X-Expected-Revision`, nested `preferences` and optional `reset_learned`; it returns the saved snapshot. Reset retains explicit choices. No ranking consumes this timestamp yet.
+- GET `/v2/briefs/{slug}/{date}/identity` resolves current entitled content. Immutable snapshots retain the full JSON payload and metadata; an original mapping is preserved for migration review. URL identity initially compares trimmed exact source URLs, deliberately retaining query parameters and fragments to avoid conflating distinct content. Aliases can remain separate until evidence supports explicit canonicalisation.
+- 3a does not migrate historic feedback or rewrite existing v1 feedback. 3c must resolve original versus revised brief attribution and make both feedback routes share canonical records before using votes for assignments.
+- 3b exposes Save/Reload with revision conflict handling; drafts remain in memory, not an offline preference queue. Learned-signal reset UI waits for active learned recommendations; the API reset boundary is available now.
 
 **Files:** New API migrations, `src/db/articles.rs`, `src/db/preferences.rs`, `src/routes/preferences.rs`, module wiring, `tests/personal_content.rs`; `libs/pulse-core/src/lib.rs` and fixture generator. Later stable-feedback routes live in `src/routes/article_feedback.rs` with tests in `tests/feedback.rs`. Swift preferences use the new files in the responsibility map and `Views/SettingsView.swift`.
 
@@ -126,6 +134,6 @@ New Swift files must be registered in `apps/mobile-swift/EngPulse.xcodeproj/proj
 
 ## Verification and handoff
 
-All implementation checkboxes are intentionally open. These documents do not claim account feedback, multi-article generation or personal delivery is live. Keep API/agent/iOS revisions and real checks with each release slice. Start implementation with Tasks 1–2; Tasks 3–6 are subsequent separately reviewed slices and must preserve their explicit interfaces and launch gates.
+Check release evidence before closing each task. Account feedback is live; multi-article generation and personal delivery are not yet live. Keep API/agent/iOS revisions and real checks with each release slice. Tasks 1–2 are complete; Tasks 3–6 are subsequent separately reviewed slices and must preserve their explicit interfaces and launch gates.
 
 For database tests, use the disposable Postgres harness in `apps/pulse-api/tests/common/mod.rs` and the setup used by `.github/workflows/ci.yml`; never point test resets at production. Use the repository's current iOS test destination rather than hard-coding a physical device ID. No new infrastructure or production changes belong to this documentation update.

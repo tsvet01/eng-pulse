@@ -36,7 +36,7 @@ Keep GCP daily/explorer execution, GCS artifacts, legacy engineering publication
 
 ## Account preferences and feedback
 
-Start with explicit, editable interests and preferred technical depth. Recommended initial interest catalog: AI/ML, infrastructure and distributed systems, security, mobile, and engineering leadership. Interests overlap; they are not permanent user segments. New users without preferences receive the general engineering default.
+Start with explicit, editable interests and preferred technical depth. Initial interest catalog: CPU & Performance (including high load/latency), Data, Platform, Reliability & Incidents, Security, AI/ML, and Engineering Leadership. Crashes, outages and postmortems belong to Reliability; vulnerabilities and exploits belong to Security. An incident can belong to both, alongside Platform or Data. Use multiple topic labels, not mutually exclusive cohorts; keep preferred depth per topic. Interests overlap; they are not permanent user segments. New users without preferences receive the general engineering default.
 
 The initial feedback connection ships against today's single engineering brief. Add read, change and undo, durable offline submission, account isolation, and server acknowledgement before claiming feedback is saved. Keep legacy Firebase behavior limited to explicit legacy builds.
 

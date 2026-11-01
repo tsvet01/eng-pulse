@@ -35,12 +35,16 @@ struct ListQuery {
     limit: Option<i64>,
 }
 
-fn parse_date(s: &str) -> Result<NaiveDate, ApiError> {
+pub(super) fn parse_date(s: &str) -> Result<NaiveDate, ApiError> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d")
         .map_err(|_| ApiError::BadRequest(format!("bad date: {s}")))
 }
 
-async fn member_feed(s: &AppState, user: &AuthUser, feed_id: Uuid) -> Result<(), ApiError> {
+pub(super) async fn member_feed(
+    s: &AppState,
+    user: &AuthUser,
+    feed_id: Uuid,
+) -> Result<(), ApiError> {
     if !feeds::exists(&s.pool, feed_id).await? {
         return Err(ApiError::NotFound("feed"));
     }
@@ -94,7 +98,10 @@ struct FeedbackBody {
     value: i16,
 }
 
-fn expected_revision(headers: &HeaderMap, required: bool) -> Result<Option<i64>, ApiError> {
+pub(super) fn expected_revision(
+    headers: &HeaderMap,
+    required: bool,
+) -> Result<Option<i64>, ApiError> {
     let mut values = headers.get_all("x-expected-revision").iter();
     let Some(value) = values.next() else {
         return if required {
