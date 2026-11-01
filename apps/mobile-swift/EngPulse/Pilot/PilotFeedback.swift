@@ -462,7 +462,8 @@ final class PilotFeedbackModel: ObservableObject {
         record.snapshot = remote
         try persist(record)
         guard let intent = record.pending else { return }
-        if remote.value == intent.value && remote.reason == nil {
+        // Initial Undo needs a tombstone to block another device's stale revision-zero vote.
+        if remote.value == intent.value && remote.reason == nil && (intent.value != nil || remote.revision > 0) {
             record.pending = nil
         } else if remote.revision != intent.expectedRevision {
             record.pending = nil

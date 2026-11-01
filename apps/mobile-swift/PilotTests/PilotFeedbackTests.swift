@@ -125,8 +125,45 @@ final class PilotFeedbackTests: XCTestCase {
         XCTAssertNil(model.record(for: shown).snapshot.selection.reason)
     }
 
-    func testNoOpClearDoesNotMutateServer() async throws {
-        let transport = FeedbackTransport([reply(snapshot())])
+    func testOfflineVoteThenUndoCreatesInitialRevisionBarrierAfterRestart() async throws {
+        let (offline, _) = try await make(FeedbackTransport([]))
+        try offline.set(value: 1, aspect: .selection, context: shown)
+        try offline.set(value: nil, aspect: .selection, context: shown)
+        let transport = FeedbackTransport([reply(snapshot()), reply("", status: 204, revision: "1")])
+        let (restarted, _) = try await make(transport)
+        await restarted.synchronize()
+        let requests = await transport.requests
+        XCTAssertEqual(requests.map(\.httpMethod), ["GET", "DELETE"])
+        XCTAssertEqual(requests.last?.url?.path, "/v2/articles/44444444-4444-4444-4444-444444444444/feedback/relevance")
+        XCTAssertEqual(requests.last?.value(forHTTPHeaderField: "X-Expected-Revision"), "0")
+        XCTAssertNil(requests.last?.httpBody)
+        XCTAssertEqual(restarted.record(for: shown).snapshot.selection, PilotFeedbackValue(value: nil, revision: 1))
+        XCTAssertTrue(restarted.record(for: shown).pending.isEmpty)
+        let (again, _) = try await make(FeedbackTransport([]))
+        try again.load(context: shown)
+        XCTAssertEqual(again.record(for: shown).snapshot.selection.revision, 1, "The acknowledged barrier must survive another restart")
+    }
+
+    func testLostInitialUndoAcknowledgementReconcilesExistingBarrierWithoutAnotherDelete() async throws {
+        let first = FeedbackTransport([reply(snapshot()), .failure(URLError(.networkConnectionLost))])
+        let (model, _) = try await make(first)
+        try model.set(value: 1, aspect: .selection, context: shown)
+        try model.set(value: nil, aspect: .selection, context: shown)
+        await model.synchronize()
+        XCTAssertNotNil(model.record(for: shown).pending["selection"])
+        let initialRequests = await first.requests
+        XCTAssertEqual(initialRequests.map(\.httpMethod), ["GET", "DELETE"])
+        let afterRestart = FeedbackTransport([reply(snapshot(nil, 1))])
+        let (restarted, _) = try await make(afterRestart)
+        await restarted.synchronize()
+        XCTAssertTrue(restarted.record(for: shown).pending.isEmpty)
+        XCTAssertEqual(restarted.record(for: shown).snapshot.selection.revision, 1)
+        let requests = await afterRestart.requests
+        XCTAssertEqual(requests.map(\.httpMethod), ["GET"])
+    }
+
+    func testRepeatedClearOfExistingTombstoneDoesNotMutateServer() async throws {
+        let transport = FeedbackTransport([reply(snapshot(nil, 3))])
         let (model, _) = try await make(transport)
         try model.set(value: nil, aspect: .selection, context: shown)
         await model.synchronize()
@@ -475,7 +512,7 @@ final class PilotFeedbackTests: XCTestCase {
     }
 
     func testNewlyDiscoveredLegacyIntentCannotResurrectStableClear() async throws {
-        let transport = FeedbackTransport([reply(snapshot()), reply(mapping)])
+        let transport = FeedbackTransport([reply(snapshot()), reply("", status: 204, revision: "1"), reply(mapping)])
         let (model, _) = try await make(transport)
         try model.set(value: nil, aspect: .selection, context: shown)
         await model.synchronize()
@@ -485,7 +522,7 @@ final class PilotFeedbackTests: XCTestCase {
         XCTAssertTrue(model.record(for: shown).pending.isEmpty)
         XCTAssertNotNil(model.error(for: shown))
         let requests = await transport.requests
-        XCTAssertEqual(requests.map(\.httpMethod), ["GET", "GET"])
+        XCTAssertEqual(requests.map(\.httpMethod), ["GET", "DELETE", "GET"])
     }
 
     func testConcurrentSynchronizationSerializesAccountWrites() async throws {
