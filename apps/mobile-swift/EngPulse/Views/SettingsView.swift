@@ -130,7 +130,7 @@ struct SettingsView: View {
                 }
 
                 if let context = AppServices.shared.pilotReader {
-                    PilotPreferencesView(model: context.preferences).id(context.id)
+                    PilotPreferencesSettingsLink(model: context.preferences).id(context.id)
                 }
 
                 // Infrastructure
