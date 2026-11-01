@@ -2,10 +2,10 @@ import SwiftUI
 
 struct PilotFeedbackView: View {
     @ObservedObject var model: PilotFeedbackModel
-    let date: String
+    let context: PilotFeedbackContext
     @State private var actionError: String?
 
-    private var record: PilotFeedbackRecord { model.record(for: date) }
+    private var record: PilotFeedbackRecord { model.record(for: context) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -20,10 +20,10 @@ struct PilotFeedbackView: View {
                 Text(status).font(.caption).foregroundStyle(Color.onSurfaceVariant)
                     .accessibilityIdentifier("feedback.status")
                 Spacer(minLength: 8)
-                if model.errors[date] != nil || actionError != nil {
+                if model.error(for: context) != nil || actionError != nil {
                     Button("Retry") {
                         actionError = nil
-                        Task { await model.refresh(date: date) }
+                        Task { await model.refresh(context: context) }
                     }
                     .disabled(model.isSyncing || !model.isActive)
                     .accessibilityIdentifier("feedback.retry")
@@ -35,8 +35,8 @@ struct PilotFeedbackView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.container)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
-        .task(id: date) {
-            await model.refresh(date: date)
+        .task(id: context) {
+            await model.refresh(context: context)
             while !Task.isCancelled && model.isActive {
                 do { try await Task.sleep(for: .seconds(30)) } catch { return }
                 if !record.pending.isEmpty { await model.synchronize() }
@@ -47,7 +47,7 @@ struct PilotFeedbackView: View {
     private var status: String {
         if let actionError { return actionError }
         if model.isSyncing { return "Syncing feedback…" }
-        if let error = model.errors[date] { return error }
+        if let error = model.error(for: context) { return error }
         if !record.pending.isEmpty { return "Saved on this device — waiting to sync." }
         if record.snapshot.selection.revision > 0 || record.snapshot.brief.revision > 0 {
             return "Saved to your account."
@@ -99,11 +99,13 @@ struct PilotFeedbackView: View {
 
     private func rate(_ value: Int?, aspect: PilotFeedbackAspect) {
         do {
-            try model.set(value: value, aspect: aspect, date: date)
+            try model.set(value: value, aspect: aspect, context: context)
             actionError = nil
             Task { await model.synchronize() }
         } catch {
-            actionError = "Couldn’t save this rating on your device. Please try your choice again."
+            actionError = (error as? PilotError) == .mappingUnavailable
+                ? "This older summary could not be matched. Retry feedback when available."
+                : "Couldn’t save this rating on your device. Please try your choice again."
         }
     }
 }

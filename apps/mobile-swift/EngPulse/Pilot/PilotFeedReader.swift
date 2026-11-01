@@ -1,5 +1,25 @@
 import Foundation
 
+struct PilotContentIdentity: Codable, Equatable, Hashable, Sendable {
+    let articleID: UUID
+    let briefID: UUID
+    enum CodingKeys: String, CodingKey { case articleID = "article_id", briefID = "brief_id" }
+}
+
+struct PilotBriefContent: Codable, Equatable, Sendable {
+    let content: String
+    var identity: PilotContentIdentity? = nil
+    func feedbackContext(date: String) -> PilotFeedbackContext {
+        PilotFeedbackContext(date: date, identity: identity, legacyContent: identity == nil ? content : nil)
+    }
+}
+
+struct PilotFeedbackContext: Hashable, Sendable {
+    let date: String
+    var identity: PilotContentIdentity? = nil
+    var legacyContent: String? = nil
+}
+
 struct PilotBriefSummary: Codable, Equatable, Sendable {
     let date: String
     let title: String
@@ -46,6 +66,10 @@ extension PilotAPIClient {
     }
 
     func briefContent(date: String, session: PilotSession) async throws -> String {
+        try await briefDocument(date: date, session: session).content
+    }
+
+    func briefDocument(date: String, session: PilotSession) async throws -> PilotBriefContent {
         guard PilotBriefSummary.validDate(date) else { throw PilotError.invalidResponse }
         let data = try await request(path: "briefs/engineering/\(date)", session: session)
         guard let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -54,7 +78,14 @@ extension PilotAPIClient {
               let payload = envelope["payload"] as? [String: Any],
               let json = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
               let content = String(data: json, encoding: .utf8) else { throw PilotError.invalidResponse }
-        return content
+        var identity: PilotContentIdentity?
+        if envelope["article_id"] != nil || envelope["brief_id"] != nil {
+            guard let decoded = try? JSONDecoder().decode(PilotContentIdentity.self, from: data) else {
+                throw PilotError.invalidResponse
+            }
+            identity = decoded
+        }
+        return PilotBriefContent(content: content, identity: identity)
     }
 }
 
@@ -77,11 +108,29 @@ actor PilotFeedStore {
         guard PilotBriefSummary.validDate(date) else { throw PilotError.invalidResponse }
         try write(Data(content.utf8), file: "\(date).json")
     }
-    func content(date: String) throws -> String? {
+    private struct CachedDocument: Codable {
+        let version: Int
+        let document: PilotBriefContent
+        enum CodingKeys: String, CodingKey { case version = "_pilot_cache_version", document }
+    }
+    func save(_ document: PilotBriefContent, date: String) throws {
+        guard PilotBriefSummary.validDate(date) else { throw PilotError.invalidResponse }
+        try write(JSONEncoder().encode(CachedDocument(version: 1, document: document)), file: "\(date).json")
+    }
+    func content(date: String) throws -> String? { try document(date: date)?.content }
+    func document(date: String) throws -> PilotBriefContent? {
         guard PilotBriefSummary.validDate(date) else { throw PilotError.invalidResponse }
         let file = directory.appendingPathComponent("\(date).json")
         guard FileManager.default.fileExists(atPath: file.path) else { return nil }
-        return try String(contentsOf: file, encoding: .utf8)
+        let data = try Data(contentsOf: file)
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            json["_pilot_cache_version"] != nil {
+            let cached = try JSONDecoder().decode(CachedDocument.self, from: data)
+            guard cached.version == 1 else { throw PilotError.invalidResponse }
+            return cached.document
+        }
+        guard let raw = String(data: data, encoding: .utf8) else { throw PilotError.invalidResponse }
+        return PilotBriefContent(content: raw)
     }
     func cacheSize() -> Int64 {
         guard let files = FileManager.default.enumerator(at: directory,
@@ -140,14 +189,15 @@ final class PilotFeedReader {
             throw error
         }
     }
-    func content(date: String) async throws -> String {
+    func content(date: String) async throws -> String { try await document(date: date).content }
+    func document(date: String) async throws -> PilotBriefContent {
         try await requireCurrent()
-        if let cached = try await store.content(date: date) {
+        if let cached = try await store.document(date: date) {
             try await requireCurrent()
             return cached
         }
         do {
-            let content = try await api.briefContent(date: date, session: session)
+            let content = try await api.briefDocument(date: date, session: session)
             try await requireCurrent()
             try? await store.save(content, date: date)
             try await requireCurrent()

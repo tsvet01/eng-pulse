@@ -19,9 +19,13 @@ struct ArticleContentLoader {
     }
 
     static func load(_ summary: Summary, cacheService: CacheService) async throws -> String {
+        try await loadDocument(summary, cacheService: cacheService).content
+    }
+
+    static func loadDocument(_ summary: Summary, cacheService: CacheService) async throws -> PilotBriefContent {
         if let content = try await cacheService.loadScopedContent(summary) { return content }
         if let cached = await cacheService.getCachedContent(for: summary.url) {
-            return cached
+            return PilotBriefContent(content: cached)
         }
 
         guard let url = URL(string: summary.url) else {
@@ -41,6 +45,6 @@ struct ArticleContentLoader {
         }
 
         try? await cacheService.cacheContent(content, for: summary.url)
-        return content
+        return PilotBriefContent(content: content)
     }
 }

@@ -77,7 +77,9 @@ struct PilotAPIClient: Sendable {
             case 409:
                 if code == "preference_conflict" { throw PilotError.preferenceConflict }
                 throw code == "feedback_conflict" ? PilotError.feedbackConflict : .accountConflict
-            case 422: throw method == "POST" ? PilotError.invalidInvite : .invalidResponse
+            case 422:
+                if code == "mapping_unavailable" { throw PilotError.mappingUnavailable }
+                throw method == "POST" ? PilotError.invalidInvite : .invalidResponse
             case 429: throw PilotError.rateLimited
             case 500...599: throw PilotError.unavailable
             default: throw PilotError.invalidResponse

@@ -17,6 +17,7 @@ struct PilotConfiguration: Sendable {
 
 enum PilotError: Error, Equatable, LocalizedError {
     case secureStorage, configuration, signInRequired, sessionChanged, inviteRequired, accessDenied
+    case mappingUnavailable
     case invalidCode, invalidInvite, accountConflict, feedbackConflict, preferenceConflict, rateLimited, unavailable, invalidResponse
 
     var errorDescription: String? {
@@ -30,6 +31,7 @@ enum PilotError: Error, Equatable, LocalizedError {
         case .invalidCode: return "The code is invalid or expired. Request a new code and try again."
         case .invalidInvite: return "That invitation is invalid, expired, or already used."
         case .accountConflict: return "This email already has an account. Use your original sign-in method."
+        case .mappingUnavailable: return "This older article could not be matched. Your rating is kept on this device."
         case .feedbackConflict: return "This rating changed on another device. Review it before choosing again."
         case .preferenceConflict: return "Your interests changed on another device. Reload them before editing again."
         case .rateLimited: return "Please wait a moment before trying again."

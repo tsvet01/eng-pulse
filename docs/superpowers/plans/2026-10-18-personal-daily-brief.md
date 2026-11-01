@@ -46,7 +46,7 @@ New Swift files must be registered in `apps/mobile-swift/EngPulse.xcodeproj/proj
 
 ---
 
-**Implementation status (2026-11-01):** Tasks 1–2 shipped in PRs #208/#209. Save/undo and account isolation were verified on two real phones. Task 3 foundation is in progress; Tasks 4–6 have not started. GCP generation is unchanged.
+**Implementation status (2026-11-01):** Tasks 1–2 shipped in PRs #208/#209. Save/undo and account isolation were verified on two real phones. Task 3a identities/preferences and 3b interests UI shipped in PRs #220/#221/#224. Task 3c stable feedback and durable queue migration are implemented in [API PR #225](https://github.com/tsvet01/eng-pulse/pull/225) and [iOS PR #226](https://github.com/tsvet01/eng-pulse/pull/226); they are not yet released. Deploy the API first, then the app, and record live feedback acceptance before closing Task 3. Tasks 4–6 have not started. GCP generation is unchanged.
 
 ### Task 1: Complete account feedback read/change/undo on the current brief
 

@@ -26,6 +26,55 @@ final class PilotReaderTests: XCTestCase {
         return try XCTUnwrap(value)
     }
 
+    func testNetworkIdentityIsSavedAtomicallyBesideExactPayload() async throws {
+        let envelope = String(briefJSON.dropLast()) + ",\"article_id\":\"44444444-4444-4444-4444-444444444444\",\"brief_id\":\"55555555-5555-5555-5555-555555555555\"}"
+        let (api, _) = try api(RecordingTransport([.ok(envelope)]))
+        let cache = store()
+        let reader = PilotFeedReader(api: api, session: try await session(api), store: cache)
+        let content = try await reader.content(date: "2026-10-17")
+        XCTAssertTrue(content.contains("Complete text"))
+        let file = cache.directory.appendingPathComponent("2026-10-17.json")
+        let saved = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertTrue(saved.contains("44444444-4444-4444-4444-444444444444"), "The identity must survive a restart with the payload")
+        XCTAssertTrue(saved.contains("55555555-5555-5555-5555-555555555555"))
+    }
+
+    func testDocumentIdentitySurvivesOfflineRestartAndLegacyRawCacheStillReads() async throws {
+        let identity = PilotContentIdentity(articleID: UUID(), briefID: UUID())
+        let cache = store()
+        let saved = PilotBriefContent(content: "{\"deep_dive\":\"exact original\"}", identity: identity)
+        try await cache.save(saved, date: "2026-10-17")
+        let raw = "{\"deep_dive\":\"older raw cache\"}"
+        try await cache.save(raw, date: "2026-10-16")
+        let offline = RecordingTransport([])
+        let (api, _) = try api(offline)
+        let root = cache.directory.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let reopened = PilotFeedStore(root: root, identity: userA, user: userA)
+        let reader = PilotFeedReader(api: api, session: try await session(api), store: reopened)
+        let restored = try await reader.document(date: "2026-10-17")
+        XCTAssertEqual(restored, saved)
+        let legacy = try await reader.document(date: "2026-10-16")
+        XCTAssertEqual(legacy.content, raw)
+        XCTAssertNil(legacy.identity)
+        let unchanged = try String(contentsOf: reopened.directory.appendingPathComponent("2026-10-16.json"), encoding: .utf8)
+        XCTAssertEqual(unchanged, raw)
+        let requests = await offline.requests
+        XCTAssertTrue(requests.isEmpty, "Offline cached reads must not request current identities")
+    }
+
+    func testPartialOrMalformedNetworkIdentityNeverPairsWithPayload() async throws {
+        for suffix in [",\"article_id\":\"44444444-4444-4444-4444-444444444444\"}", ",\"article_id\":\"invalid\",\"brief_id\":\"55555555-5555-5555-5555-555555555555\"}"] {
+            let transport = RecordingTransport([.ok(String(briefJSON.dropLast()) + suffix)])
+            let (api, _) = try api(transport)
+            let cache = store()
+            let reader = PilotFeedReader(api: api, session: try await session(api), store: cache)
+            do { _ = try await reader.document(date: "2026-10-17"); XCTFail("Reject mismatched identity") }
+            catch { XCTAssertEqual(error as? PilotError, .invalidResponse) }
+            let saved = try await cache.document(date: "2026-10-17")
+            XCTAssertNil(saved)
+        }
+    }
+
     func testListUsesOnlyActiveEngineeringMembershipAndAuthenticatedBoundedEndpoint() async throws {
         let transport = RecordingTransport([.ok(feedsJSON), .ok(listJSON)])
         let (api, _) = try api(transport)

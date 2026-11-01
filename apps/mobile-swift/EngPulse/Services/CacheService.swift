@@ -14,7 +14,7 @@ actor CacheService {
     }
 
     private let cacheDirectory: URL
-    private let contentLoader: (@Sendable (Summary) async throws -> String)?
+    private let contentLoader: (@Sendable (Summary) async throws -> PilotBriefContent)?
 
     private var summariesFile: URL {
         cacheDirectory.appendingPathComponent("summaries.json")
@@ -22,12 +22,12 @@ actor CacheService {
 
     private var directoryCreated = false
 
-    init(directory: URL? = nil, contentLoader: (@Sendable (Summary) async throws -> String)? = nil) {
+    init(directory: URL? = nil, contentLoader: (@Sendable (Summary) async throws -> PilotBriefContent)? = nil) {
         cacheDirectory = directory ?? Self.baseCacheDirectory
         self.contentLoader = contentLoader
     }
 
-    func loadScopedContent(_ summary: Summary) async throws -> String? {
+    func loadScopedContent(_ summary: Summary) async throws -> PilotBriefContent? {
         try await contentLoader?(summary)
     }
 
