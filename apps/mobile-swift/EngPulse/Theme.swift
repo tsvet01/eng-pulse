@@ -92,20 +92,16 @@ extension TimeInterval {
     }
 }
 
-// A native companion to the existing bolt app icon.
+// Use the app icon artwork consistently inside the app.
 struct PulseMark: View {
     var size: CGFloat = 32
 
     var body: some View {
-        Image(systemName: "bolt.fill")
-            .font(.system(size: size * 0.52, weight: .semibold))
-            .foregroundStyle(.white)
+        Image("AppLogo")
+            .resizable()
+            .scaledToFit()
             .frame(width: size, height: size)
-            .background(
-                LinearGradient(colors: [Color(hex: 0x6861ED), Color(hex: 0x4F46CE)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing),
-                in: RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-            )
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
             .accessibilityHidden(true)
     }
 }

@@ -59,7 +59,8 @@ struct SkeletonCardView: View {
                 .fill(Color.containerHigh)
                 .frame(height: 14)
         }
-        .padding(DesignTokens.cardPadding)
+        .padding(.horizontal, DesignTokens.cardPadding)
+        .padding(.vertical, 16)
         .background(Color.containerLow)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
         .shimmer()
@@ -71,7 +72,7 @@ struct SkeletonCardView: View {
 struct SkeletonFeedView: View {
     var body: some View {
         ScrollView {
-            VStack(spacing: 14) {
+            VStack(spacing: 12) {
                 ForEach(0..<5, id: \.self) { _ in
                     SkeletonCardView()
                 }
