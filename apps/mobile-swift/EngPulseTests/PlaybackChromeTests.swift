@@ -130,6 +130,16 @@ final class PlaybackChromeTests: XCTestCase {
         XCTAssertEqual(chrome?.secondaryActionEnabled, false)
     }
 
+    func testLibraryKeepsRetryableArticleVisibleAfterFailure() {
+        let chrome = PlaybackChrome.forLibrary(
+            playingURL: "a", playingTitle: "Article A", state: .stopped,
+            canOpenArticle: true, canRetry: true
+        )
+        XCTAssertEqual(chrome?.title, "Article A")
+        XCTAssertEqual(chrome?.secondaryActionTitle, "Open article")
+        XCTAssertNotNil(chrome)
+    }
+
     func testLibraryHidesTheBarWhenNothingIsActive() {
         XCTAssertNil(PlaybackChrome.forLibrary(
             playingURL: "a",

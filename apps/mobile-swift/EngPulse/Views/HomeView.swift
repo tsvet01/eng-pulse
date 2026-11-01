@@ -90,13 +90,18 @@ struct HomeViewContent: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            if let chrome = libraryChrome {
-                ActivePlaybackBar(
-                    tts: ttsService,
-                    chrome: chrome,
-                    onToggle: { ttsService.togglePauseResume() },
-                    onSecondary: openNowPlaying
-                )
+            VStack(spacing: 0) {
+                if let error = ttsService.errorMessage {
+                    TTSErrorBanner(message: error, onDismiss: { ttsService.errorMessage = nil })
+                }
+                if let chrome = libraryChrome {
+                    ActivePlaybackBar(
+                        tts: ttsService,
+                        chrome: chrome,
+                        onToggle: { ttsService.togglePauseResume() },
+                        onSecondary: openNowPlaying
+                    )
+                }
             }
         }
         .safeAreaInset(edge: .top) {
@@ -203,7 +208,8 @@ struct HomeViewContent: View {
             playingURL: ttsService.currentArticleUrl,
             playingTitle: ttsService.currentArticleTitle,
             state: ttsService.state,
-            canOpenArticle: playingSummary != nil
+            canOpenArticle: playingSummary != nil,
+            canRetry: ttsService.canRetry
         )
     }
 

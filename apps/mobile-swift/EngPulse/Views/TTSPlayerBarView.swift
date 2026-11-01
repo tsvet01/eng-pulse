@@ -40,17 +40,18 @@ struct PlaybackChrome: Equatable {
     }
 
     /// Feed and other non-article screens. Visible only while a session is
-    /// active, so leaving an article does not hide what is playing.
+    /// active or retryable, so a connection failure leaves a working Play button.
     static func forLibrary(
         playingURL: String?,
         playingTitle: String?,
         state: TTSState,
-        canOpenArticle: Bool
+        canOpenArticle: Bool,
+        canRetry: Bool = false
     ) -> PlaybackChrome? {
-        guard state != .stopped, playingURL != nil else { return nil }
+        guard state != .stopped || canRetry, playingURL != nil else { return nil }
         return PlaybackChrome(
             title: playingTitle ?? "Eng Pulse",
-            nowPlayingLabel: "Now playing",
+            nowPlayingLabel: state == .stopped ? "Ready to replay" : "Now playing",
             secondaryActionTitle: canOpenArticle ? "Open article" : nil,
             secondaryActionHint: canOpenArticle ? "Returns to the article that is playing" : nil,
             secondaryActionEnabled: canOpenArticle
