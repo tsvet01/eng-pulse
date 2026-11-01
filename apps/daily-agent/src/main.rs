@@ -139,7 +139,8 @@ async fn english_title(
 
 // --- Configuration Constants ---
 const HTTP_TIMEOUT_SECS: u64 = 60;
-const SHADOW_HTTP_TIMEOUT_SECS: u64 = 180;
+const BRIEF_HTTP_TIMEOUT_SECS: u64 = 180;
+const BRIEF_MODEL: &str = "gpt-6-astra";
 const MAX_ARTICLE_CHARS: usize = 50_000;
 /// Minimum extracted content length to attempt summarization.
 /// Pages below this threshold are likely JS-rendered SPAs or paywalled.
@@ -195,15 +196,15 @@ struct ApiKeys {
     gemini: Option<String>,
 }
 
-/// Use the same candidate settings for shadow generation and the smoke gate.
-async fn call_shadow(
+/// Share brief settings between production, shadow generation, and the smoke gate.
+async fn call_brief(
     keys: &ApiKeys,
     model: &str,
     prompt: String,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    // Give reasoning more time without slowing production fetches and LLM calls.
+    // Give brief reasoning more time without slowing article fetches and selection.
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(SHADOW_HTTP_TIMEOUT_SECS))
+        .timeout(Duration::from_secs(BRIEF_HTTP_TIMEOUT_SECS))
         .build()?;
     let (provider, key) = if model.starts_with("gpt-") {
         (LlmProvider::OpenAI, &keys.openai)
@@ -292,9 +293,15 @@ async fn run_smoke(
         }
     }
 
+    let prompt = "Reply with the single word: OK".to_string();
+    if let Err(e) = call_brief(keys, BRIEF_MODEL, prompt).await {
+        error!(model = BRIEF_MODEL, error = %e, "Production brief smoke check FAILED");
+        failures.push(format!("brief({}): {}", BRIEF_MODEL, e));
+    }
+
     if let Some(model) = shadow {
         let prompt = "Reply with the single word: OK".to_string();
-        match call_shadow(keys, &model, prompt).await {
+        match call_brief(keys, &model, prompt).await {
             Ok(resp) => info!(model = %model, reply = %resp.trim(), "Shadow smoke check passed"),
             Err(e) => {
                 error!(model = %model, error = %e, "Shadow smoke check FAILED");
@@ -699,15 +706,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // transient-error retries) fails the run.
     info!("Generating V3 Insight Brief");
     let v3_prompt = prompts::summary_prompt(&best_article.source, &title, &truncated_text);
-    let v3_options = LlmOptions::default();
     let brief = generate_insight_brief(BRIEF_PARSE_ATTEMPTS, || {
-        call_llm(
-            &http_client,
-            LlmProvider::Claude,
-            &keys.claude,
-            v3_prompt.clone(),
-            &v3_options,
-        )
+        call_brief(&keys, BRIEF_MODEL, v3_prompt.clone())
     })
     .await?;
 
@@ -731,7 +731,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         title: title.clone(),
         summary_snippet: manifest_snippet(&brief.key_idea),
         original_url: Some(best_article.url.clone()),
-        model: Some(LlmProvider::Claude.model_name().to_string()),
+        model: Some(BRIEF_MODEL.to_string()),
         selected_by: Some(LlmProvider::Claude.model_name().to_string()),
         prompt_version: Some(prompts::PROMPT_VERSION.to_string()),
         eval_score: None,
@@ -742,7 +742,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut shadow_v3_json: Option<String> = None;
     if let Some(shadow) = shadow_model() {
         let shadow_prompt = prompts::summary_prompt(&best_article.source, &title, &truncated_text);
-        match call_shadow(&keys, &shadow, shadow_prompt).await {
+        match call_brief(&keys, &shadow, shadow_prompt).await {
             Ok(response) => match parse_insight_brief(&response) {
                 Some(shadow_brief) => {
                     let object_path = format!("summaries/v3-shadow/{}.json", today);
@@ -771,7 +771,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     // --- Eval ---
-    // The judge may share the shadow model; review pairwise results for self-preference.
+    // The judge shares the production model; review pairwise results for self-preference.
     info!(provider = "openai", "Starting eval stage");
     let v3_eval_prompt = String::from(
         "You are evaluating Insight Brief summaries for a senior engineering leader (C++/Rust, hedge fund, low-latency systems).\n\n\
@@ -1537,7 +1537,7 @@ mod tests {
     }
     #[tokio::test]
     #[serial]
-    async fn test_astra_shadow_uses_openai_high_without_changing_production_smoke() {
+    async fn test_astra_production_uses_high_even_without_shadow() {
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -1552,7 +1552,7 @@ mod tests {
             .await;
         std::env::set_var("CLAUDE_BASE_URL", server.uri());
         std::env::set_var("OPENAI_BASE_URL", server.uri());
-        std::env::set_var("SHADOW_MODEL", "gpt-6-astra");
+        std::env::remove_var("SHADOW_MODEL");
         let result = run_smoke(&reqwest::Client::new(), &test_keys()).await;
         std::env::remove_var("CLAUDE_BASE_URL");
         std::env::remove_var("OPENAI_BASE_URL");
