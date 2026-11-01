@@ -7,6 +7,7 @@
 //! `docs/contracts/*.json` by the `fixtures` binary so drift shows up in CI.
 
 use serde::{Deserialize, Serialize};
+pub mod preferences;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Feed {
@@ -155,6 +156,10 @@ pub fn fixtures() -> Vec<(&'static str, serde_json::Value)> {
         ("brief", serde_json::to_value(brief).unwrap()),
         ("brief_minimal", serde_json::to_value(minimal).unwrap()),
         ("run_report", serde_json::to_value(run).unwrap()),
+        (
+            "preferences",
+            serde_json::to_value(preferences::preference_fixture()).unwrap(),
+        ),
     ]
 }
 
@@ -207,6 +212,9 @@ mod tests {
                 }
                 "run_report" => {
                     let _: RunReport = serde_json::from_value(value).unwrap();
+                }
+                "preferences" => {
+                    let _: preferences::PreferenceSnapshot = serde_json::from_value(value).unwrap();
                 }
                 other => panic!("unexpected fixture {other}"),
             }

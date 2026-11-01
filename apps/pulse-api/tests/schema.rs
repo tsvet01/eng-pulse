@@ -11,6 +11,8 @@ async fn schema_has_all_tables(pool: PgPool) {
     assert_eq!(
         names,
         [
+            "article_briefs",
+            "articles",
             "briefs",
             "device_tokens",
             "feed_sources",
@@ -19,10 +21,12 @@ async fn schema_has_all_tables(pool: PgPool) {
             "feeds",
             "identities",
             "invites",
+            "legacy_brief_identity",
             "memberships",
             "notifications_sent",
             "reconciliation_state",
             "runs",
+            "user_preferences",
             "users"
         ]
     );

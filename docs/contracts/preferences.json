@@ -1,0 +1,53 @@
+{
+  "learned_reset_at": null,
+  "preferences": {
+    "depth_by_topic": {
+      "cpu_performance": "advanced"
+    },
+    "excluded_topics": [
+      "security"
+    ],
+    "interests": [
+      "cpu_performance",
+      "platform"
+    ]
+  },
+  "revision": 1,
+  "topics": [
+    {
+      "description": "CPU, high load, latency and optimisation",
+      "id": "cpu_performance",
+      "name": "CPU & Performance"
+    },
+    {
+      "description": "Databases, storage, streaming and data engineering",
+      "id": "data",
+      "name": "Data"
+    },
+    {
+      "description": "Infrastructure, distributed systems and developer platforms",
+      "id": "platform",
+      "name": "Platform"
+    },
+    {
+      "description": "Crashes, outages, debugging and postmortems",
+      "id": "reliability",
+      "name": "Reliability & Incidents"
+    },
+    {
+      "description": "Vulnerabilities, exploits and defensive engineering",
+      "id": "security",
+      "name": "Security"
+    },
+    {
+      "description": "Models, machine learning systems and applied AI",
+      "id": "ai_ml",
+      "name": "AI & ML"
+    },
+    {
+      "description": "Technical strategy, teams and engineering practice",
+      "id": "engineering_leadership",
+      "name": "Engineering Leadership"
+    }
+  ]
+}
