@@ -11,10 +11,11 @@ import json, sys
 r = json.load(sys.stdin)
 scores = {s['summary_id']: (s['key_idea_clarity'] + s['why_it_matters_relevance'] + s['deep_dive_depth'] + s['action_quality']) / 4
           for s in r.get('scores', [])}
-prod, shadow = scores.get('v3-claude'), scores.get('v3-shadow')
+prod_id = next((key for key in scores if key != 'v3-shadow'), None)
+prod, shadow = scores.get(prod_id), scores.get('v3-shadow')
 pw = r.get('pairwise_winner')
 if pw is not None and prod is not None and shadow is not None:
-    verdict = {'v3-shadow': 'SHADOW', 'v3-claude': 'prod'}.get(pw, pw)  # judge's call wins
+    verdict = {'v3-shadow': 'SHADOW', prod_id: 'prod'}.get(pw, pw)  # judge's call wins
 elif shadow is None or prod is None:
     verdict = '-'
 else:
