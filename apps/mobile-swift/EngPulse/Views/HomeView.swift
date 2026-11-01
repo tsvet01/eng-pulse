@@ -127,7 +127,7 @@ struct HomeViewContent: View {
     private var summaryList: some View {
         let summaries = filteredSummaries
         return ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
+            LazyVStack(alignment: .leading, spacing: 12) {
                 feedHeader(count: summaries.count)
 
                 if summariesStore.isOffline {
@@ -169,20 +169,8 @@ struct HomeViewContent: View {
     }
 
     private func feedHeader(count: Int) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Your daily brief")
-                    .font(.system(.largeTitle, design: .serif, weight: .bold))
-                    .foregroundStyle(Color.onSurface)
-                    .accessibilityAddTraits(.isHeader)
-                Text("Good ideas for better engineering.")
-                    .font(.subheadline)
-                    .foregroundStyle(Color.onSurfaceVariant)
-            }
-
-            resultCount(count)
-        }
-        .padding(.bottom, 6)
+        resultCount(count)
+            .padding(.bottom, 6)
     }
 
     private func resultCount(_ count: Int) -> some View {
@@ -237,16 +225,16 @@ struct SummaryCardView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 8) {
-                Image(systemName: summary.isInsightBrief ? "text.alignleft" : "doc.text")
-                    .foregroundStyle(Color.accentColor)
-                    .accessibilityHidden(true)
-                Text(summary.source)
-                    .fontWeight(.semibold)
+                Text("\(summary.displayDate, format: .dateTime.month(.abbreviated).day().year()) · \(summary.source)")
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 4)
-
+                if isRated && playbackBadge == nil {
+                    Image(systemName: "checkmark.circle")
+                        .accessibilityLabel("Rated")
+                }
             }
             .font(.caption)
             .foregroundStyle(Color.onSurfaceVariant)
@@ -265,24 +253,15 @@ struct SummaryCardView: View {
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
             }
 
-            HStack(spacing: 8) {
-                Text(summary.displayDate, format: .dateTime.month(.abbreviated).day().year())
-                Spacer(minLength: 0)
-                if let playbackBadge {
-                    Label(playbackBadge == "LOADING" ? "Preparing audio" : playbackBadge.capitalized,
-                          systemImage: "speaker.wave.2.fill")
-                        .foregroundStyle(Color.accentColor)
-                } else if isRated {
-                    Label("Rated", systemImage: "checkmark.circle")
-                }
-                Image(systemName: "arrow.right")
-                    .accessibilityHidden(true)
+            if let playbackBadge {
+                Label(playbackBadge == "LOADING" ? "Preparing audio" : playbackBadge.capitalized,
+                      systemImage: "speaker.wave.2.fill")
+                    .font(.caption)
+                    .foregroundStyle(Color.accentColor)
             }
-            .font(.caption)
-            .foregroundStyle(Color.onSurfaceVariant)
-            .padding(.top, 2)
         }
-        .padding(DesignTokens.cardPadding)
+        .padding(.horizontal, DesignTokens.cardPadding)
+        .padding(.vertical, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.containerLow, in: RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
         .overlay {
