@@ -21,7 +21,14 @@ class TTSService: ObservableObject {
     private let cacheService: CacheService
     private let audioPlayer: AudioPlayerService
 
-    @Published var state: TTSState = .stopped
+    @Published var state: TTSState = .stopped {
+        didSet {
+            if state != .loading {
+                startupTask?.cancel()
+                startupTask = nil
+            }
+        }
+    }
     @Published var progress: Double = 0.0
     @Published var currentArticleUrl: String?
     @Published var currentArticleTitle: String?
@@ -38,11 +45,18 @@ class TTSService: ObservableObject {
     @AppStorage("ttsVoice") var selectedVoice: String = Neural2Voice.maleJ.rawValue
 
     private var currentText: String?
+    private var retryText: String?
+    private var speechTask: Task<Void, Never>?
+    private var playbackID = UUID()
+    private let startupTimeout: Duration
+    private var startupTask: Task<Void, Never>?
     private var currentCacheKey: String?
     private var cancellables = Set<AnyCancellable>()
     private var isActive = true
 
-    init(cacheService: CacheService = CacheService(), cloudTTS: CloudTTSService? = nil, audioPlayer: AudioPlayerService? = nil) {
+    init(cacheService: CacheService = CacheService(), cloudTTS: CloudTTSService? = nil,
+         audioPlayer: AudioPlayerService? = nil, startupTimeout: Duration = .seconds(45)) {
+        self.startupTimeout = startupTimeout
         self.cacheService = cacheService
         self.audioPlayer = audioPlayer ?? AudioPlayerService()
 
@@ -116,11 +130,19 @@ class TTSService: ObservableObject {
         audioPlayer.onPlaybackFinished = { [weak self] in
             self?.handleTrackFinished(clearPosition: true)
         }
+        audioPlayer.onPlaybackFailed = { [weak self] in
+            self?.handleQueueItemFailure(AudioPlayerService.PlaybackError.unavailable)
+        }
 
         audioPlayer.$isPlaying
             .removeDuplicates()
+            .map { [weak self] in (self?.playbackID, $0) }
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] in self?.handlePlaybackStateChange($0) }
+            .sink { [weak self] event in
+                guard let self, event.0 == self.playbackID,
+                      event.1 == self.audioPlayer.isPlaying else { return }
+                self.handlePlaybackStateChange(event.1)
+            }
             .store(in: &cancellables)
 
         audioPlayer.$progress
@@ -148,8 +170,13 @@ class TTSService: ObservableObject {
 
         localTTS.$isPlaying
             .removeDuplicates()
+            .map { [weak self] in (self?.playbackID, $0) }
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] in self?.handlePlaybackStateChange($0) }
+            .sink { [weak self] event in
+                guard let self, event.0 == self.playbackID,
+                      event.1 == self.localTTS?.isPlaying else { return }
+                self.handlePlaybackStateChange(event.1)
+            }
             .store(in: &cancellables)
 
         localTTS.$progress
@@ -171,20 +198,28 @@ class TTSService: ObservableObject {
         stopPlayback()
         currentArticleUrl = articleUrl
         currentArticleTitle = articleTitle
+        retryText = text
+        let attempt = playbackID
 
         errorMessage = nil
         NowPlayingService.shared.setTrack(title: articleTitle ?? "Eng Pulse", duration: 0)
+        state = .loading
+        startStartupDeadline(attempt: attempt)
+        beginSpeaking(text, attempt: attempt)
+    }
+
+    private func beginSpeaking(_ text: String, attempt: UUID) {
+        retryText = text
 
         if isUsingLocalTTS, let localTTS = localTTS {
             state = .loading
             let textToClean = text
-            let expectedUrl = articleUrl
-            Task {
+            speechTask = Task {
                 let cleanedText = await Task.detached(priority: .userInitiated) {
                     TextCleaner.cleanForSpeech(textToClean)
                 }.value
                 // A newer article may have started while this text was cleaning
-                guard self.currentArticleUrl == expectedUrl, self.state == .loading else { return }
+                guard self.isCurrentStartup(attempt) else { return }
                 self.currentText = cleanedText
                 localTTS.speak(text: cleanedText, rate: self.speechRate, pitch: self.pitch)
                 // state = .playing is set by the localTTS.$isPlaying observer
@@ -195,13 +230,37 @@ class TTSService: ObservableObject {
                 return
             }
             state = .loading
-            Task {
-                await performSpeak(text)
+            speechTask = Task {
+                await performSpeak(text, attempt: attempt)
             }
         }
     }
 
-    private func performSpeak(_ text: String) async {
+    private func isCurrentStartup(_ attempt: UUID) -> Bool {
+        playbackID == attempt && state == .loading && !Task.isCancelled
+    }
+
+    private func startStartupDeadline(attempt: UUID) {
+        startupTask = Task { [weak self, startupTimeout] in
+            do {
+                try await Task.sleep(for: startupTimeout)
+            } catch { return }
+            guard let self, self.isCurrentStartup(attempt) else { return }
+            self.handleQueueItemFailure(URLError(.timedOut))
+        }
+    }
+
+    private func cancelPendingStartup() {
+        playbackID = UUID()
+        speechTask?.cancel()
+        speechTask = nil
+        queueLoadTask?.cancel()
+        queueLoadTask = nil
+        startupTask?.cancel()
+        startupTask = nil
+    }
+
+    private func performSpeak(_ text: String, attempt: UUID) async {
         guard let cloudTTS = cloudTTS else { return }
 
         let expectedUrl = currentArticleUrl
@@ -211,7 +270,7 @@ class TTSService: ObservableObject {
             TextCleaner.cleanForSpeech(text)
         }.value
 
-        guard currentArticleUrl == expectedUrl, state == .loading else { return }
+        guard isCurrentStartup(attempt) else { return }
         currentText = cleanedText
 
         do {
@@ -222,11 +281,11 @@ class TTSService: ObservableObject {
             )
 
             let cacheKey = await cacheService.generateAudioCacheKey(text: cleanedText, configKey: config.cacheKey)
-            guard currentArticleUrl == expectedUrl, state == .loading else { return }
+            guard isCurrentStartup(attempt) else { return }
             currentCacheKey = cacheKey
 
             if let cachedURL = await cacheService.getCachedAudioURL(for: cacheKey) {
-                guard currentArticleUrl == expectedUrl, state == .loading else { return }
+                guard isCurrentStartup(attempt) else { return }
                 try audioPlayer.play(from: cachedURL)
                 restoreSavedPosition(for: expectedUrl)
                 state = .playing
@@ -235,13 +294,13 @@ class TTSService: ObservableObject {
             }
 
             let audioData = try await cloudTTS.synthesize(text: cleanedText, config: config)
-            guard currentArticleUrl == expectedUrl, state == .loading else { return }
+            guard isCurrentStartup(attempt) else { return }
 
             try await cacheService.cacheAudio(audioData, for: cacheKey)
-            guard currentArticleUrl == expectedUrl, state == .loading else { return }
+            guard isCurrentStartup(attempt) else { return }
 
             if let audioURL = await cacheService.getCachedAudioURL(for: cacheKey) {
-                guard currentArticleUrl == expectedUrl, state == .loading else { return }
+                guard isCurrentStartup(attempt) else { return }
                 try audioPlayer.play(from: audioURL)
                 restoreSavedPosition(for: expectedUrl)
                 state = .playing
@@ -255,10 +314,10 @@ class TTSService: ObservableObject {
             }
 
         } catch {
-            if currentArticleUrl == expectedUrl {
+            if isCurrentStartup(attempt) {
                 handleQueueItemFailure(error)
+                print("TTS error: \(error)")
             }
-            print("TTS error: \(error)")
         }
     }
 
@@ -266,6 +325,7 @@ class TTSService: ObservableObject {
     /// synthesis): skip past one bad article, but stop on errors that would
     /// hit every remaining item too.
     private func handleQueueItemFailure(_ error: Error) {
+        cancelPendingStartup()
         if hasNextInQueue && !Self.isSystemicPlaybackError(error) {
             // Skip unplayable articles instead of stalling the playlist
             playNext()
@@ -280,13 +340,17 @@ class TTSService: ObservableObject {
     /// Errors that will affect every queue item alike (offline, server
     /// outage), where skipping ahead would just cascade failures.
     private static func isSystemicPlaybackError(_ error: Error) -> Bool {
+        if error is AudioPlayerService.PlaybackError { return true }
         if let urlError = error as? URLError {
             return [.notConnectedToInternet, .networkConnectionLost, .dnsLookupFailed,
                     .cannotFindHost, .cannotConnectToHost, .timedOut,
                     .dataNotAllowed, .internationalRoamingOff].contains(urlError.code)
         }
         if case ArticleContentLoader.LoadError.httpError(let statusCode) = error {
-            return statusCode >= 500 || statusCode == 429
+            return statusCode >= 500 || [401, 403, 408, 429].contains(statusCode)
+        }
+        if case CloudTTSError.httpError(let statusCode) = error {
+            return statusCode >= 500 || [401, 403, 408, 429].contains(statusCode)
         }
         return false
     }
@@ -315,23 +379,37 @@ class TTSService: ObservableObject {
         NowPlayingService.shared.updateProgress(currentTime: audioPlayer.currentTime, isPlaying: false)
     }
 
+    var canRetry: Bool {
+        state == .stopped && (!queue.isEmpty || retryText != nil)
+    }
+
     func resume() {
         guard isActive else { return }
         if state == .paused {
             if isUsingLocalTTS {
                 localTTS?.resume()
             } else {
-                audioPlayer.resume()
+                do {
+                    try audioPlayer.resume()
+                } catch {
+                    handleQueueItemFailure(error)
+                    return
+                }
             }
             state = .playing
-        } else if state == .stopped, !queue.isEmpty {
-            // Play pressed after a queue item failed — retry the current item
-            playCurrentQueueItem()
+        } else if state == .stopped {
+            if !queue.isEmpty {
+                playCurrentQueueItem()
+            } else if let text = retryText {
+                startSpeaking(text, articleUrl: currentArticleUrl, articleTitle: currentArticleTitle)
+            }
         }
     }
 
     /// Stop playback without clearing article identity (used by startSpeaking to avoid bar flash)
     private func stopPlayback() {
+        // URL identity is insufficient for retries and A → B → A transitions.
+        cancelPendingStartup()
         savePlaybackPosition()
         if isUsingLocalTTS {
             localTTS?.stop()
@@ -341,6 +419,7 @@ class TTSService: ObservableObject {
         state = .stopped
         progress = 0.0
         currentText = nil
+        retryText = nil
         currentCacheKey = nil
         errorMessage = nil
         NowPlayingService.shared.clearNowPlaying()
@@ -429,6 +508,8 @@ class TTSService: ObservableObject {
         currentArticleUrl = summary.url
         currentArticleTitle = summary.title
         state = .loading
+        let attempt = playbackID
+        startStartupDeadline(attempt: attempt)
         NowPlayingService.shared.setTrack(title: summary.title, duration: 0)
         NowPlayingService.shared.updateProgress(currentTime: 0, isPlaying: false)
 
@@ -436,11 +517,11 @@ class TTSService: ObservableObject {
             guard let self = self else { return }
             do {
                 let content = try await ArticleContentLoader.load(summary, cacheService: self.cacheService)
-                guard !Task.isCancelled, self.currentArticleUrl == summary.url else { return }
+                guard self.isCurrentStartup(attempt) else { return }
                 let text = SpeechTextBuilder.speechText(for: summary, content: content)
-                self.startSpeaking(text, articleUrl: summary.url, articleTitle: summary.title)
+                self.beginSpeaking(text, attempt: attempt)
             } catch {
-                guard !Task.isCancelled, self.currentArticleUrl == summary.url else { return }
+                guard self.isCurrentStartup(attempt) else { return }
                 self.handleQueueItemFailure(error)
             }
         }
@@ -450,8 +531,8 @@ class TTSService: ObservableObject {
     func togglePauseResume() {
         switch state {
         case .playing: pause()
-        case .paused: resume()
-        case .loading, .stopped: break
+        case .paused, .stopped: resume()
+        case .loading: break
         }
     }
 

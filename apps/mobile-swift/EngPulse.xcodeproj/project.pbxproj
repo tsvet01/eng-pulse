@@ -59,6 +59,8 @@
 		AD100001 /* AudioCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD200001 /* AudioCacheTests.swift */; };
 		FB100001 /* PilotFeedback.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB200001 /* PilotFeedback.swift */; };
 		FB100002 /* PilotFeedbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB200002 /* PilotFeedbackView.swift */; };
+		CC100001 /* TTSRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC200001 /* TTSRecoveryTests.swift */; };
+		CC100002 /* AudioPlayerRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC200002 /* AudioPlayerRecoveryTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -128,6 +130,8 @@
 		AD200001 /* AudioCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCacheTests.swift; sourceTree = "<group>"; };
 		FB200001 /* PilotFeedback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pilot/PilotFeedback.swift; sourceTree = "<group>"; };
 		FB200002 /* PilotFeedbackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/PilotFeedbackView.swift; sourceTree = "<group>"; };
+		CC200001 /* TTSRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSRecoveryTests.swift; sourceTree = "<group>"; };
+		CC200002 /* AudioPlayerRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayerRecoveryTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -263,6 +267,8 @@
 				CP200008 /* SpeechTextBuilderTests.swift */,
 				PC200001 /* PlaybackChromeTests.swift */,
 				AD200001 /* AudioCacheTests.swift */,
+				CC200001 /* TTSRecoveryTests.swift */,
+				CC200002 /* AudioPlayerRecoveryTests.swift */,
 			);
 			path = EngPulseTests;
 			sourceTree = "<group>";
@@ -426,6 +432,8 @@
 				CP100008 /* SpeechTextBuilderTests.swift in Sources */,
 				PC100001 /* PlaybackChromeTests.swift in Sources */,
 				AD100001 /* AudioCacheTests.swift in Sources */,
+				CC100001 /* TTSRecoveryTests.swift in Sources */,
+				CC100002 /* AudioPlayerRecoveryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

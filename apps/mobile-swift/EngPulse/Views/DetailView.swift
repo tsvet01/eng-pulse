@@ -233,7 +233,7 @@ struct DetailView: View {
                 if let error = ttsService.errorMessage {
                     TTSErrorBanner(
                         message: error,
-                        onDismiss: { ttsService.stop() }
+                        onDismiss: { ttsService.errorMessage = nil }
                     )
                 }
                 if let chrome = playbackChrome {
@@ -241,11 +241,7 @@ struct DetailView: View {
                         tts: ttsService,
                         chrome: chrome,
                         onToggle: {
-                            if ttsService.state == .stopped {
-                                toggleTTS()
-                            } else {
-                                ttsService.togglePauseResume()
-                            }
+                            ttsService.togglePauseResume()
                         },
                         onSecondary: { toggleTTS() }
                     )

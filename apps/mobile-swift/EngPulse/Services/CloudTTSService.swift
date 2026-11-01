@@ -191,12 +191,8 @@ actor CloudTTSService {
         }
 
         guard httpResponse.statusCode == 200 else {
-            // Try to parse error message
-            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let error = errorJson["error"] as? [String: Any],
-               let message = error["message"] as? String {
-                throw CloudTTSError.apiError(message: message)
-            }
+            // Preserve status even when the provider includes a JSON error body:
+            // playback must distinguish a service outage from a bad article.
             throw CloudTTSError.httpError(statusCode: httpResponse.statusCode)
         }
 

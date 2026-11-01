@@ -8,6 +8,7 @@ struct EngPulseApp: App {
     @StateObject private var appState: AppState
     @StateObject private var ttsService: TTSService
     @Environment(\.scenePhase) private var scenePhase
+    private let isTesting = ProcessInfo.processInfo.environment["ENGPULSE_TESTING"] == "1"
 
     init() {
         // Shared with the CarPlay scene so both surfaces drive the same
@@ -21,7 +22,9 @@ struct EngPulseApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if PilotBuild.allowsLegacyServices {
+                if isTesting {
+                    Color.clear
+                } else if PilotBuild.allowsLegacyServices {
                     ContentView()
                 } else {
                     PilotEntryView()
@@ -30,7 +33,7 @@ struct EngPulseApp: App {
                 .environmentObject(appState)
                 .environmentObject(ttsService)
                 .task {
-                    await setupNotifications()
+                    if !isTesting { await setupNotifications() }
                 }
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -74,7 +77,8 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        guard PilotBuild.allowsLegacyServices else { return true }
+        guard ProcessInfo.processInfo.environment["ENGPULSE_TESTING"] != "1",
+              PilotBuild.allowsLegacyServices else { return true }
         FirebaseApp.configure()
         UNUserNotificationCenter.current().delegate = NotificationService.shared
 
