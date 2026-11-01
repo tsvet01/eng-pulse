@@ -93,7 +93,7 @@ final class PilotReaderContext {
         feedback = PilotFeedbackModel(api: api, session: session, store: PilotFeedbackStore(
             root: feedbackRoot ?? root.appendingPathComponent("feedback-state"), identity: session.identity.id, user: user.id))
         let cache = CacheService(directory: store.directory.appendingPathComponent("media")) { summary in
-            try await reader.content(date: summary.date)
+            try await reader.document(date: summary.date)
         }
         appState = AppState(cacheService: cache, pilotReader: reader, pilotFeedback: feedback, scope: "\(session.identity.id)/\(user.id)")
         ttsService = TTSService(cacheService: cache)

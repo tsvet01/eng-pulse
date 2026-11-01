@@ -8,15 +8,62 @@ final class PilotReaderIntegrationTests: XCTestCase {
         let root = try root()
         let context = try await context(root: root)
         let feedback = try XCTUnwrap(context.appState.pilotFeedback)
-        try feedback.set(value: 1, aspect: .selection, date: "2026-10-18")
+        let identity = PilotContentIdentity(articleID: UUID(), briefID: UUID())
+        let shown = PilotFeedbackContext(date: "2026-10-18", identity: identity)
+        try feedback.set(value: 1, aspect: .selection, context: shown)
         await context.appState.clearCache()
         let saved = try PilotFeedbackStore(root: root.appendingPathComponent("feedback-state"),
-            identity: context.session.identity.id, user: context.user.id).load(date: "2026-10-18")
-        XCTAssertEqual(saved.pending["selection"]?.value, 1, "Clear cache must preserve durable unsent feedback")
+            identity: context.session.identity.id, user: context.user.id).load(target: PilotFeedbackTarget(identity: identity, aspect: .selection))
+        XCTAssertEqual(saved?.pending?.value, 1, "Clear cache must preserve durable unsent feedback")
         context.invalidate()
         XCTAssertFalse(feedback.isActive)
         XCTAssertTrue(feedback.records.isEmpty)
-        XCTAssertThrowsError(try feedback.set(value: -1, aspect: .selection, date: "2026-10-18"))
+        XCTAssertThrowsError(try feedback.set(value: -1, aspect: .selection, context: shown))
+    }
+
+    @MainActor
+    func testDisplayedPayloadKeepsItsTargetAcrossPrefetchCacheClearAndReplacement() async throws {
+        let context = try await context(root: root())
+        let oldID = PilotContentIdentity(articleID: UUID(), briefID: UUID())
+        let newID = PilotContentIdentity(articleID: oldID.articleID, briefID: UUID())
+        let summary = Summary(date: "2026-10-18", url: "pilot-scoped", title: "Pilot")
+        try await context.reader.store.save(PilotBriefContent(content: "old exact summary", identity: oldID), date: summary.date)
+        try await context.appState.cacheService.cacheContent("unrelated generic content", for: summary.url)
+        // Playback/prefetch and a visible reader use the same scoped provider.
+        let prefetched = try await ArticleContentLoader.load(summary, cacheService: context.appState.cacheService)
+        let displayed = try await ArticleContentLoader.loadDocument(summary, cacheService: context.appState.cacheService)
+        XCTAssertEqual(prefetched, "old exact summary")
+        XCTAssertEqual(displayed.identity, oldID)
+        let oldView = PilotFeedbackView(model: context.feedback, context: displayed.feedbackContext(date: summary.date))
+        await context.appState.clearCache()
+        try await context.reader.store.save(PilotBriefContent(content: "new exact summary", identity: newID), date: summary.date)
+        let replacement = try await ArticleContentLoader.loadDocument(summary, cacheService: context.appState.cacheService)
+        XCTAssertEqual(replacement.content, "new exact summary")
+        XCTAssertEqual(replacement.identity, newID)
+        try context.feedback.set(value: 1, aspect: .brief, context: oldView.context)
+        XCTAssertEqual(context.feedback.record(for: oldView.context).displayed(.brief), 1)
+        XCTAssertNil(context.feedback.record(for: replacement.feedbackContext(date: summary.date)).displayed(.brief))
+        XCTAssertEqual(displayed.content, "old exact summary")
+        XCTAssertEqual(oldView.context.identity, oldID)
+        context.invalidate()
+    }
+
+    @MainActor
+    func testOldRawCacheRemainsReadableWhenFeedbackCannotBeVerified() async throws {
+        let context = try await context(root: root())
+        let summary = Summary(date: "2026-10-18", url: "old-raw", title: "Saved pilot")
+        let raw = "{\"deep_dive\":\"old offline content\"}"
+        try await context.reader.store.save(raw, date: summary.date)
+        let loaded = try await ArticleContentLoader.loadDocument(summary, cacheService: context.appState.cacheService)
+        let view = PilotFeedbackView(model: context.feedback, context: loaded.feedbackContext(date: summary.date))
+        await context.feedback.refresh(context: view.context)
+        XCTAssertEqual(loaded.content, raw)
+        XCTAssertNil(loaded.identity)
+        XCTAssertNotNil(context.feedback.error(for: view.context))
+        XCTAssertThrowsError(try context.feedback.set(value: 1, aspect: .brief, context: view.context))
+        let stillReadable = try await ArticleContentLoader.load(summary, cacheService: context.appState.cacheService)
+        XCTAssertEqual(stillReadable, raw)
+        context.invalidate()
     }
 
     @MainActor
@@ -88,7 +135,7 @@ final class PilotReaderIntegrationTests: XCTestCase {
         let summary = Summary(date: "2026-10-17", url: UUID().uuidString, title: "Pilot")
         let cache = CacheService(directory: try root()) { item in
             XCTAssertEqual(item.date, "2026-10-17")
-            return "authenticated payload"
+            return PilotBriefContent(content: "authenticated payload")
         }
         try await cache.cacheContent("legacy public payload", for: summary.url)
         let content = try await ArticleContentLoader.load(summary, cacheService: cache)

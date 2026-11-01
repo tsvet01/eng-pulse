@@ -138,6 +138,7 @@ struct DetailView: View {
     @EnvironmentObject private var ttsService: TTSService
     @Environment(\.openURL) private var openURL
     @State private var fullContent: String?
+    @State private var feedbackContext: PilotFeedbackContext?
     @State private var isLoadingContent = false
     @State private var loadingError: String?
     @State private var showInfo = false
@@ -205,8 +206,8 @@ struct DetailView: View {
                 }
 
                 if fullContent != nil {
-                    if let feedback {
-                        PilotFeedbackView(model: feedback, date: summary.date)
+                    if let feedback, let feedbackContext {
+                        PilotFeedbackView(model: feedback, context: feedbackContext)
                             .padding(.top, DesignTokens.sectionSpacing)
                     }
                     if PilotBuild.allowsLegacyServices {
@@ -339,9 +340,10 @@ struct DetailView: View {
         defer { isLoadingContent = false }
 
         do {
-            let content = try await ArticleContentLoader.load(summary, cacheService: cache)
+            let document = try await ArticleContentLoader.loadDocument(summary, cacheService: cache)
             guard !Task.isCancelled else { return }
-            setContent(content)
+            feedbackContext = document.feedbackContext(date: summary.date)
+            setContent(document.content)
         } catch {
             guard !Task.isCancelled, fullContent == nil else { return }
             if let error = error as? URLError, error.code == .timedOut {
