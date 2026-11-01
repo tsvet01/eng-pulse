@@ -1,6 +1,6 @@
 use crate::{
     auth::extractors::AuthUser,
-    db::{briefs, preferences},
+    db::{articles, briefs, preferences},
     error::ApiError,
     state::AppState,
 };
@@ -19,6 +19,10 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v2/me/preferences", get(load).put(save))
         .route("/v2/briefs/{slug}/{date}/identity", get(identity))
+        .route(
+            "/v2/briefs/{slug}/{date}/feedback-identity",
+            get(feedback_identity),
+        )
 }
 
 async fn admitted(state: &AppState, user: &AuthUser) -> Result<(), ApiError> {
@@ -89,4 +93,24 @@ async fn identity(
     let (article, brief): (Uuid, Uuid) = sqlx::query_as("select b.article_id,b.id from legacy_brief_identity l join article_briefs b on b.id=l.brief_id where l.feed_id=$1 and l.date=$2")
         .bind(feed).bind(date).fetch_optional(&state.pool).await?.ok_or(ApiError::NotFound("brief"))?;
     Ok(Json(json!({"article_id":article,"brief_id":brief})))
+}
+
+async fn feedback_identity(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path((slug, date)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let feed = briefs::feed_id_by_slug(&state.pool, &slug)
+        .await?
+        .ok_or(ApiError::NotFound("feed"))?;
+    super::briefs::member_feed(&state, &user, feed).await?;
+    let identity = articles::legacy_identity(&state.pool, feed, super::briefs::parse_date(&date)?)
+        .await?
+        .ok_or(ApiError::NotFound("brief"))?;
+    if identity.brief_id != identity.original_brief_id {
+        return Err(ApiError::MappingUnavailable);
+    }
+    Ok(Json(
+        json!({"article_id":identity.article_id,"brief_id":identity.brief_id}),
+    ))
 }

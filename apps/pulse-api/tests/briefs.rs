@@ -96,7 +96,7 @@ async fn get_brief_returns_contract_shape(pool: PgPool) {
 async fn feedback_upserts(pool: PgPool) {
     let (_s, url) = jwks_mock().await;
     let (uid, t) = registered_user(&pool, "m@example.com", false).await;
-    let fid = feed_with_briefs(&pool, uid).await;
+    feed_with_briefs(&pool, uid).await;
     let app = app(pool.clone(), &url);
     for v in [1, -1] {
         let (status, _) = send(
@@ -109,14 +109,16 @@ async fn feedback_upserts(pool: PgPool) {
         .await;
         assert_eq!(status, 204);
     }
-    let v: i16 =
-        sqlx::query_scalar("select value from feedback where user_id = $1 and feed_id = $2")
-            .bind(uid)
-            .bind(fid)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(v, -1);
+    let (status, saved) = send(
+        &app,
+        Method::GET,
+        "/v1/briefs/engineering/2026-09-15/feedback",
+        Some(&t),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(saved["brief"], json!({"value":-1,"revision":2}));
     let (status, _) = send(
         &app,
         Method::PUT,

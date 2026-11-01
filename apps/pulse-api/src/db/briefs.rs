@@ -34,6 +34,23 @@ pub async fn get(pool: &PgPool, feed_id: Uuid, date: NaiveDate) -> sqlx::Result<
     sqlx::query_as("select feed_id, date, format, payload, article_url, article_title, model, eval_score from briefs where feed_id = $1 and date = $2").bind(feed_id).bind(date).fetch_optional(pool).await
 }
 
+#[derive(sqlx::FromRow)]
+pub struct IdentifiedBriefRow {
+    #[sqlx(flatten)]
+    pub brief: BriefRow,
+    pub article_id: Uuid,
+    pub brief_id: Uuid,
+}
+
+pub async fn get_identified(
+    pool: &PgPool,
+    feed_id: Uuid,
+    date: NaiveDate,
+) -> sqlx::Result<Option<IdentifiedBriefRow>> {
+    sqlx::query_as("select l.feed_id,l.date,b.format,b.payload,b.article_url,b.article_title,b.model,b.eval_score,b.article_id,b.id as brief_id from legacy_brief_identity l join article_briefs b on b.id=l.brief_id where l.feed_id=$1 and l.date=$2")
+        .bind(feed_id).bind(date).fetch_optional(pool).await
+}
+
 #[derive(Debug, sqlx::FromRow, serde::Serialize)]
 pub struct BriefSummary {
     pub date: NaiveDate,

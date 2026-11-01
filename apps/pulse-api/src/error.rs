@@ -10,6 +10,7 @@ pub enum ApiError {
     Unauthorized(&'static str),
     InviteRequired,
     FeedbackConflict,
+    MappingUnavailable,
     PreferenceConflict,
     Forbidden,
     NotFound(&'static str),
@@ -33,6 +34,11 @@ impl ApiError {
                 StatusCode::CONFLICT,
                 "feedback_conflict",
                 "feedback changed; reload before retrying".into(),
+            ),
+            Self::MappingUnavailable => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "mapping_unavailable",
+                "legacy feedback cannot identify the displayed content".into(),
             ),
             Self::PreferenceConflict => (
                 StatusCode::CONFLICT,

@@ -1,6 +1,6 @@
 use crate::{
     auth::extractors::AuthUser,
-    db::{briefs, feedback, feeds},
+    db::{articles, briefs, feedback, feeds},
     error::ApiError,
     state::AppState,
 };
@@ -72,24 +72,37 @@ async fn get_one(
     State(s): State<AppState>,
     user: AuthUser,
     Path((slug, date)): Path<(String, String)>,
-) -> Result<Json<Brief>, ApiError> {
+) -> Result<Json<IdentifiedBrief>, ApiError> {
     let feed_id = briefs::feed_id_by_slug(&s.pool, &slug)
         .await?
         .ok_or(ApiError::NotFound("feed"))?;
     member_feed(&s, &user, feed_id).await?;
-    let row = briefs::get(&s.pool, feed_id, parse_date(&date)?)
+    let snapshot = briefs::get_identified(&s.pool, feed_id, parse_date(&date)?)
         .await?
         .ok_or(ApiError::NotFound("brief"))?;
-    Ok(Json(Brief {
-        feed_slug: slug,
-        date: row.date.to_string(),
-        format: row.format,
-        payload: row.payload,
-        article_url: row.article_url,
-        article_title: row.article_title,
-        model: row.model,
-        eval_score: row.eval_score,
+    let row = snapshot.brief;
+    Ok(Json(IdentifiedBrief {
+        article_id: snapshot.article_id,
+        brief_id: snapshot.brief_id,
+        brief: Brief {
+            feed_slug: slug,
+            date: row.date.to_string(),
+            format: row.format,
+            payload: row.payload,
+            article_url: row.article_url,
+            article_title: row.article_title,
+            model: row.model,
+            eval_score: row.eval_score,
+        },
     }))
+}
+
+#[derive(serde::Serialize)]
+struct IdentifiedBrief {
+    #[serde(flatten)]
+    brief: Brief,
+    article_id: Uuid,
+    brief_id: Uuid,
 }
 
 #[derive(Deserialize)]
@@ -142,11 +155,44 @@ async fn feedback_target(
     Ok((feed_id, date))
 }
 
-fn mutation_response(revision: Option<i64>) -> Result<(StatusCode, HeaderMap), ApiError> {
+pub(super) fn mutation_response(
+    revision: Option<i64>,
+) -> Result<(StatusCode, HeaderMap), ApiError> {
     let revision = revision.ok_or(ApiError::FeedbackConflict)?;
     let mut headers = HeaderMap::new();
     headers.insert("x-feedback-revision", HeaderValue::from(revision));
     Ok((StatusCode::NO_CONTENT, headers))
+}
+
+async fn legacy_write(
+    s: &AppState,
+    user: &AuthUser,
+    legacy: (Uuid, NaiveDate),
+    aspect: &str,
+    value: Option<i16>,
+    expected: Option<i64>,
+) -> Result<(StatusCode, HeaderMap), ApiError> {
+    let mut tx = s.pool.begin().await?;
+    let identity = articles::legacy_identity(&mut *tx, legacy.0, legacy.1)
+        .await?
+        .ok_or(ApiError::NotFound("brief"))?;
+    if identity.brief_id != identity.original_brief_id {
+        return Err(ApiError::MappingUnavailable);
+    }
+    let target = feedback::Target {
+        article_id: identity.article_id,
+        aspect: if aspect == "selection" {
+            "relevance"
+        } else {
+            "brief_quality"
+        },
+        brief_id: (aspect == "brief").then_some(identity.brief_id),
+    };
+    let response = mutation_response(
+        feedback::write(&mut *tx, user.id, &target, value, None, expected).await?,
+    )?;
+    tx.commit().await?;
+    Ok(response)
 }
 
 async fn get_feedback(
@@ -172,18 +218,15 @@ async fn put_feedback(
     }
     let expected = expected_revision(&headers, false)?;
     let (feed_id, date) = feedback_target(&s, &user, &slug, &date).await?;
-    mutation_response(
-        feedback::write(
-            &s.pool,
-            user.id,
-            feed_id,
-            date,
-            &b.aspect,
-            Some(b.value),
-            expected,
-        )
-        .await?,
+    legacy_write(
+        &s,
+        &user,
+        (feed_id, date),
+        &b.aspect,
+        Some(b.value),
+        expected,
     )
+    .await
 }
 
 async fn delete_feedback(
@@ -199,7 +242,5 @@ async fn delete_feedback(
     }
     let expected = expected_revision(&headers, true)?;
     let (feed_id, date) = feedback_target(&s, &user, &slug, &date).await?;
-    mutation_response(
-        feedback::write(&s.pool, user.id, feed_id, date, &aspect, None, expected).await?,
-    )
+    legacy_write(&s, &user, (feed_id, date), &aspect, None, expected).await
 }

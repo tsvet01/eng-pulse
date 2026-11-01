@@ -12,7 +12,9 @@ async fn schema_has_all_tables(pool: PgPool) {
         names,
         [
             "article_briefs",
+            "article_feedback",
             "articles",
+            "brief_publications",
             "briefs",
             "device_tokens",
             "feed_sources",
