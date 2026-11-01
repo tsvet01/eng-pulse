@@ -100,9 +100,38 @@ async fn brief_upsert_and_unknown_feed(pool: PgPool) {
 async fn runs_and_feedback_roundtrip(pool: PgPool) {
     let (_s, url) = jwks_mock().await;
     let feed_id = seed_feed(&pool).await;
-    let (user_id, _) = registered_user(&pool, "u@example.com", false).await;
-    sqlx::query("insert into feedback (user_id, feed_id, date, aspect, value) values ($1, $2, '2026-09-15', 'brief', 1)").bind(user_id).bind(feed_id).execute(&pool).await.unwrap();
+    let (user_id, token) = registered_user(&pool, "u@example.com", false).await;
+    sqlx::query("insert into memberships(user_id,feed_id) values($1,$2)")
+        .bind(user_id)
+        .bind(feed_id)
+        .execute(&pool)
+        .await
+        .unwrap();
     let app = app(pool, &url);
+    assert_eq!(
+        send(
+            &app,
+            Method::POST,
+            "/internal/briefs",
+            Some(SERVICE_TOKEN),
+            Some(brief("2026-09-15", "Article"))
+        )
+        .await
+        .0,
+        200
+    );
+    assert_eq!(
+        send(
+            &app,
+            Method::PUT,
+            "/v1/briefs/engineering/2026-09-15/feedback",
+            Some(&token),
+            Some(json!({"aspect":"brief","value":1}))
+        )
+        .await
+        .0,
+        204
+    );
     let run = json!({"date": "2026-09-16", "feeds": [
         {"feed_slug": "engineering", "status": "ok", "article_url": "https://example.com/a", "input_tokens": 10, "output_tokens": 5, "est_cost_usd": 0.01, "error": null},
         {"feed_slug": "ghost", "status": "failed", "article_url": null, "input_tokens": 0, "output_tokens": 0, "est_cost_usd": 0.0, "error": "x"}]});
@@ -210,7 +239,7 @@ async fn complete_v3_survives_signup_ingest_database_and_read(pool: PgPool) {
                     .unwrap();
             assert_eq!(stored, sample["payload"]);
             for t in [&a, &b] {
-                let (status, body) = send(
+                let (status, mut body) = send(
                     &app,
                     Method::GET,
                     "/v1/briefs/engineering/2026-09-01",
@@ -219,6 +248,10 @@ async fn complete_v3_survives_signup_ingest_database_and_read(pool: PgPool) {
                 )
                 .await;
                 assert_eq!(status, 200);
+                let article_id = body.as_object_mut().unwrap().remove("article_id").unwrap();
+                let brief_id = body.as_object_mut().unwrap().remove("brief_id").unwrap();
+                assert!(uuid::Uuid::parse_str(article_id.as_str().unwrap()).is_ok());
+                assert!(uuid::Uuid::parse_str(brief_id.as_str().unwrap()).is_ok());
                 assert_eq!(body, sample);
                 assert_eq!(
                     send(
@@ -268,10 +301,11 @@ async fn complete_v3_survives_signup_ingest_database_and_read(pool: PgPool) {
             204
         );
     }
-    let feedback: Vec<i16> = sqlx::query_scalar("select value from feedback order by value")
-        .fetch_all(&pool)
-        .await
-        .unwrap();
+    let feedback: Vec<i16> =
+        sqlx::query_scalar("select value from article_feedback order by value")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
     assert_eq!(feedback, [-1, 1]);
     let notifications: i64 = sqlx::query_scalar("select count(*) from notifications_sent")
         .fetch_one(&pool)

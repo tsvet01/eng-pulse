@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod article_feedback;
 pub mod briefs;
 pub mod devices;
 pub mod feeds;
@@ -18,6 +19,7 @@ pub fn router(state: AppState) -> Router {
         .merge(admin::routes())
         .merge(feeds::routes())
         .merge(briefs::routes())
+        .merge(article_feedback::routes())
         .merge(preferences::routes())
         .merge(devices::routes())
         .merge(internal::routes())
