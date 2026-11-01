@@ -13,9 +13,10 @@ INSERT INTO brief_publications(feed_id, date, brief_id)
 
 CREATE FUNCTION record_brief_publication() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
+    -- The key may have been deleted and reused before this deferred event runs.
     INSERT INTO brief_publications(feed_id, date, brief_id)
-        SELECT NEW.feed_id, NEW.date, NEW.brief_id
-        WHERE EXISTS (SELECT 1 FROM legacy_brief_identity WHERE feed_id=NEW.feed_id AND date=NEW.date)
+        SELECT feed_id, date, brief_id FROM legacy_brief_identity
+        WHERE feed_id=NEW.feed_id AND date=NEW.date
         ON CONFLICT DO NOTHING;
     RETURN NEW;
 END;

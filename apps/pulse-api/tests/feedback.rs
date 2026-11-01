@@ -1189,6 +1189,49 @@ async fn publication_history_follows_date_corrections_and_deletion(pool: PgPool)
 }
 
 #[sqlx::test]
+async fn reused_publication_key_does_not_restore_deleted_entitlement(pool: PgPool) {
+    let (_jwks, url) = jwks_mock().await;
+    let (_, token, _) = setup(&pool).await;
+    sqlx::raw_sql(
+        "begin;
+        insert into briefs(feed_id,date,format,payload,article_url,article_title)
+            select id,'2026-10-19','insight-brief-v3','{}','https://e/deleted','Deleted' from feeds;
+        delete from briefs where date='2026-10-19';
+        insert into briefs(feed_id,date,format,payload,article_url,article_title)
+            select id,'2026-10-19','insight-brief-v3','{}','https://e/replacement','Replacement' from feeds;
+        set constraints all immediate;
+        commit;",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (deleted_article, deleted_brief): (uuid::Uuid, uuid::Uuid) = sqlx::query_as(
+        "select article_id,id from article_briefs where article_url='https://e/deleted'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (current_article, current_brief) = identity(&pool, "2026-10-19").await;
+    let app = app(pool, &url);
+    for (article, brief, status) in [
+        (deleted_article, deleted_brief, 403),
+        (current_article, current_brief, 200),
+    ] {
+        for path in [
+            stable_path(article, "relevance", None),
+            stable_path(article, "brief_quality", Some(brief)),
+        ] {
+            assert_eq!(
+                request(&app, Method::GET, &path, &token, None, None)
+                    .await
+                    .0,
+                status,
+            );
+        }
+    }
+}
+
+#[sqlx::test]
 async fn displayed_payload_and_identity_remain_atomic_during_publication(pool: PgPool) {
     let (_jwks, url) = jwks_mock().await;
     let (_, token, _) = setup(&pool).await;
