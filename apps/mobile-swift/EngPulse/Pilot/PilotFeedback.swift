@@ -85,6 +85,9 @@ struct PilotLegacyFeedback: Codable, Equatable {
     let snapshot: PilotFeedbackValue
     let pending: PilotFeedbackIntent?
     let conflict: Bool
+    var isUntouched: Bool {
+        snapshot == PilotFeedbackValue(value: nil, revision: 0) && pending == nil && !conflict
+    }
     init(_ record: PilotFeedbackRecord, aspect: PilotFeedbackAspect) {
         snapshot = record.snapshot[aspect]
         pending = record.pending[aspect.rawValue]
@@ -101,6 +104,10 @@ struct PilotStableFeedbackRecord: Codable {
     // Source evidence and acknowledgement commit with the vote, never in a separate file.
     var imported: [String: PilotLegacyFeedback] = [:]
     var migrationConflicts: Set<String> = []
+    var isUntouched: Bool {
+        snapshot == PilotFeedbackValue(value: nil, revision: 0) && pending == nil && !conflict
+            && !locallyEdited && migrationConflicts.isEmpty && imported.values.allSatisfy(\.isUntouched)
+    }
 }
 
 extension PilotFeedbackStore {
@@ -250,6 +257,10 @@ final class PilotFeedbackModel: ObservableObject {
         // Surface stranded legacy work even when its date has fallen out of the feed.
         if let date = errors.keys.filter(PilotBriefSummary.validDate).sorted().first {
             return "\(date): \(errors[date]!)"
+        }
+        let conflictDates = Set(records.values.flatMap(\.migrationConflicts)).sorted()
+        if !conflictDates.isEmpty {
+            return "Older ratings for \(conflictDates.joined(separator: ", ")) disagree. They are kept on this device. Choose a rating on the affected article to resolve them."
         }
         return errors["storage"]
     }
@@ -420,17 +431,19 @@ final class PilotFeedbackModel: ObservableObject {
             do {
                 let existing = try records[target.key] ?? store.load(target: target)
                 var record = existing ?? PilotStableFeedbackRecord(target: target)
-                let first = sources.values.first!
-                let compatible = sources.values.allSatisfy { $0 == first }
-                if existing == nil, compatible {
-                    record.snapshot = first.snapshot
-                    record.pending = first.pending
-                    record.conflict = first.conflict
-                } else if !compatible || sources.values.contains(where: { $0.pending != nil || $0.conflict }) {
-                    record.migrationConflicts.formUnion(sources.keys)
-                    if !record.locallyEdited {
-                        record.pending = nil
-                        record.migrationConflicts.formUnion(record.imported.keys)
+                let meaningful = sources.filter { !$0.value.isUntouched }
+                if let first = meaningful.values.first {
+                    let compatible = meaningful.values.allSatisfy { $0 == first }
+                    if record.isUntouched, compatible {
+                        record.snapshot = first.snapshot
+                        record.pending = first.pending
+                        record.conflict = first.conflict
+                    } else if !compatible || meaningful.values.contains(where: { $0.pending != nil || $0.conflict }) {
+                        record.migrationConflicts.formUnion(meaningful.keys)
+                        if !record.locallyEdited {
+                            record.pending = nil
+                            record.migrationConflicts.formUnion(record.imported.filter { !$0.value.isUntouched }.keys)
+                        }
                     }
                 }
                 record.imported.merge(sources) { old, _ in old }

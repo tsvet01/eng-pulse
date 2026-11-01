@@ -192,6 +192,103 @@ final class PilotFeedbackTests: XCTestCase {
         XCTAssertTrue(restarted.record(for: shown).conflicts.isEmpty)
     }
 
+    func testIndependentLegacyAspectsAcrossDatesBothSynchronize() async throws {
+        try legacy(1)
+        let store = PilotFeedbackStore(root: root, identity: userA, user: userA)
+        var summaryOnly = PilotFeedbackRecord()
+        summaryOnly.pending["brief"] = PilotFeedbackIntent(value: -1, expectedRevision: 0)
+        try store.save(summaryOnly, date: otherDate.date)
+        let transport = FeedbackTransport([
+            reply(mapping), reply(mapping), reply(snapshot()), reply("", status: 204, revision: "1"),
+            reply(snapshot()), reply("", status: 204, revision: "1")
+        ])
+        let (model, _) = try await make(transport)
+        await model.synchronize()
+        XCTAssertEqual(model.record(for: shown).snapshot.selection.value, 1)
+        XCTAssertEqual(model.record(for: otherDate).snapshot.brief.value, -1)
+        XCTAssertTrue(model.record(for: shown).conflicts.isEmpty)
+        XCTAssertNil(model.error(for: shown))
+        let writes = await transport.requests.filter { $0.httpMethod == "PUT" }
+        XCTAssertEqual(writes.map { $0.url?.path }, [
+            "/v2/articles/44444444-4444-4444-4444-444444444444/feedback/brief_quality",
+            "/v2/articles/44444444-4444-4444-4444-444444444444/feedback/relevance"
+        ])
+        XCTAssertEqual(try writes.map { try body($0)["value"] as? Int }, [-1, 1])
+        let offline = FeedbackTransport([])
+        let (restarted, _) = try await make(offline)
+        await restarted.synchronize()
+        XCTAssertEqual(restarted.record(for: shown).snapshot.selection.value, 1)
+        XCTAssertEqual(restarted.record(for: shown).snapshot.brief.value, -1)
+        let restartRequests = await offline.requests
+        XCTAssertTrue(restartRequests.isEmpty, "Untouched aspects still need durable import acknowledgements")
+    }
+
+    func testEarlierUntouchedImportDoesNotBlockLaterIndependentLegacyVote() async throws {
+        let store = PilotFeedbackStore(root: root, identity: userA, user: userA)
+        var summaryOnly = PilotFeedbackRecord()
+        summaryOnly.pending["brief"] = PilotFeedbackIntent(value: -1, expectedRevision: 0)
+        try store.save(summaryOnly, date: otherDate.date)
+        let first = FeedbackTransport([reply(mapping), reply(snapshot()), reply("", status: 204, revision: "1")])
+        let (model, _) = try await make(first)
+        await model.synchronize()
+        try legacy(1)
+        let second = FeedbackTransport([reply(mapping), reply(snapshot()), reply("", status: 204, revision: "1")])
+        let (restarted, _) = try await make(second)
+        await restarted.synchronize()
+        XCTAssertEqual(restarted.record(for: shown).snapshot.selection.value, 1)
+        XCTAssertEqual(restarted.record(for: shown).snapshot.brief.value, -1)
+        XCTAssertTrue(restarted.record(for: shown).conflicts.isEmpty)
+        XCTAssertNil(restarted.error(for: shown))
+        let requests = await second.requests
+        XCTAssertEqual(requests.map(\.httpMethod), ["GET", "GET", "PUT"])
+        XCTAssertEqual(requests.last?.url?.path, "/v2/articles/44444444-4444-4444-4444-444444444444/feedback/relevance")
+    }
+
+    func testLegacyPendingClearAndSavedTombstoneAreNotUntouchedAspects() async throws {
+        for savedTombstone in [false, true] {
+            try? FileManager.default.removeItem(at: root)
+            try legacy(1)
+            var olderClear = PilotFeedbackRecord()
+            if savedTombstone {
+                olderClear.snapshot.selection = PilotFeedbackValue(value: nil, revision: 2)
+            } else {
+                olderClear.pending["selection"] = PilotFeedbackIntent(value: nil, expectedRevision: 0)
+            }
+            olderClear.pending["brief"] = PilotFeedbackIntent(value: -1, expectedRevision: 0)
+            try PilotFeedbackStore(root: root, identity: userA, user: userA).save(olderClear, date: otherDate.date)
+            let transport = FeedbackTransport([reply(mapping), reply(mapping), reply(snapshot()), reply("", status: 204, revision: "1")])
+            let (model, _) = try await make(transport)
+            await model.synchronize()
+            XCTAssertTrue(model.record(for: shown).conflicts.contains("selection"))
+            XCTAssertNil(model.record(for: shown).displayed(.selection))
+            XCTAssertEqual(model.record(for: shown).snapshot.brief.value, -1)
+            let writes = await transport.requests.filter { $0.httpMethod == "PUT" }
+            XCTAssertEqual(writes.map { $0.url?.path }, ["/v2/articles/44444444-4444-4444-4444-444444444444/feedback/brief_quality"])
+        }
+    }
+
+    func testStrandedMigrationCollisionRemainsVisibleOnUnrelatedArticle() async throws {
+        try legacy(1)
+        try legacy(-1, date: otherDate.date)
+        let transport = FeedbackTransport([reply(mapping), reply(mapping)])
+        let (model, _) = try await make(transport)
+        await model.synchronize()
+        let current = PilotFeedbackContext(date: "2026-11-01", identity: PilotContentIdentity(articleID: UUID(), briefID: UUID()))
+        let warning = model.error(for: current)
+        XCTAssertNotNil(warning)
+        XCTAssertTrue(warning?.contains("2026-10-18") == true)
+        XCTAssertTrue(warning?.contains("2026-10-19") == true)
+        try model.set(value: 1, aspect: .selection, context: current)
+        XCTAssertEqual(model.error(for: current), warning, "A choice on another article cannot clear old conflicts")
+        let offline = FeedbackTransport([reply(snapshot(1, 1))])
+        let (restarted, _) = try await make(offline)
+        await restarted.synchronize()
+        XCTAssertEqual(restarted.error(for: current), warning, "The warning must survive restart without revisiting either old date")
+        try restarted.set(value: 1, aspect: .selection, context: shown)
+        XCTAssertNil(restarted.error(for: current), "A fresh choice on the affected target resolves that conflict")
+        XCTAssertTrue(restarted.record(for: shown).conflicts.isEmpty)
+    }
+
     func testNewerStableIntentWinsWhileLegacyConflictIsPreserved() async throws {
         let transport = FeedbackTransport([reply(mapping), reply(snapshot()), reply("", status: 204, revision: "1")])
         let (model, _) = try await make(transport)
