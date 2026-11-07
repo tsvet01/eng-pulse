@@ -31,6 +31,32 @@ fn parse_shortlist_indices(response: &str, max_index: usize) -> Vec<usize> {
         .collect()
 }
 
+/// Article index from the final-pick call. A failed call or bad answer uses the
+/// first candidate: a weaker pick beats losing the day's brief.
+fn resolve_final_pick(
+    response: Result<String, Box<dyn std::error::Error + Send + Sync>>,
+    shortlist: &[usize],
+) -> usize {
+    let first = shortlist[0];
+    let response = match response {
+        Ok(response) => response,
+        Err(e) => {
+            warn!(error = %e, "Final pick call failed, using first candidate");
+            return first;
+        }
+    };
+    let picked = parse_selection_index(&response).unwrap_or(first);
+    if shortlist.contains(&picked) {
+        picked
+    } else {
+        warn!(
+            picked = picked,
+            "Final pick not in shortlist, using first candidate"
+        );
+        first
+    }
+}
+
 /// Operational mode selected from CLI arguments.
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum RunMode {
@@ -655,19 +681,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             final_prompt,
             &selection_opts,
         )
-        .await?;
-        let picked = parse_selection_index(&final_response).unwrap_or(shortlist[0]);
-
-        // Validate the pick is in our shortlist
-        if shortlist.contains(&picked) {
-            picked
-        } else {
-            warn!(
-                picked = picked,
-                "Final pick not in shortlist, using first candidate"
-            );
-            shortlist[0]
-        }
+        .await;
+        resolve_final_pick(final_response, &shortlist)
     };
 
     let best_article = &all_articles[safe_index];
@@ -1001,6 +1016,30 @@ mod tests {
     fn test_parse_run_mode_date_invalid() {
         assert!(parse_run_mode(&args(&["--date", "not-a-date"])).is_err());
         assert!(parse_run_mode(&args(&["--date", "2026-13-45"])).is_err());
+    }
+
+    #[test]
+    fn test_final_pick_call_failure_uses_first_candidate() {
+        let failed = Err("No content returned from Claude (stop_reason=refusal)".into());
+        assert_eq!(resolve_final_pick(failed, &[22, 8, 14]), 22);
+    }
+
+    #[test]
+    fn test_final_pick_uses_valid_answer() {
+        assert_eq!(resolve_final_pick(Ok("14".to_string()), &[22, 8, 14]), 14);
+    }
+
+    #[test]
+    fn test_final_pick_unparsable_answer_uses_first_candidate() {
+        assert_eq!(
+            resolve_final_pick(Ok("no number".to_string()), &[22, 8, 14]),
+            22
+        );
+    }
+
+    #[test]
+    fn test_final_pick_outside_shortlist_uses_first_candidate() {
+        assert_eq!(resolve_final_pick(Ok("99".to_string()), &[22, 8, 14]), 22);
     }
 
     #[test]
