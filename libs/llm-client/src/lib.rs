@@ -492,6 +492,13 @@ struct ClaudeResponse {
     content: Option<Vec<ClaudeContentBlock>>,
     error: Option<ClaudeError>,
     usage: Option<ClaudeUsage>,
+    stop_reason: Option<String>,
+    stop_details: Option<ClaudeStopDetails>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ClaudeStopDetails {
+    category: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -524,6 +531,21 @@ fn build_claude_request(model: String, text: String, options: &LlmOptions) -> Cl
 
 fn first_text_block(content: &[ClaudeContentBlock]) -> Option<&str> {
     content.iter().find_map(|b| b.text.as_deref())
+}
+
+/// Says why a reply had no text, so logs and alerts can tell a refusal from an empty answer.
+fn claude_no_content_error(resp: &ClaudeResponse) -> String {
+    let stop_reason = resp.stop_reason.as_deref().unwrap_or("unknown");
+    let category = resp
+        .stop_details
+        .as_ref()
+        .and_then(|d| d.category.as_deref());
+    match category {
+        Some(category) => format!(
+            "No content returned from Claude (stop_reason={stop_reason}, category={category})"
+        ),
+        None => format!("No content returned from Claude (stop_reason={stop_reason})"),
+    }
 }
 
 async fn call_claude(
@@ -579,13 +601,13 @@ async fn call_claude(
         );
     }
 
-    if let Some(content) = resp.content {
-        if let Some(text) = first_text_block(&content) {
+    if let Some(content) = &resp.content {
+        if let Some(text) = first_text_block(content) {
             return Ok(text.to_string());
         }
     }
 
-    Err("No content returned from Claude".into())
+    Err(claude_no_content_error(&resp).into())
 }
 
 // --- Unified API ---
@@ -760,6 +782,40 @@ mod tests {
     fn test_is_transient_error_empty_model_answer() {
         assert!(is_transient_error("No content returned from Claude"));
         assert!(is_transient_error("No content returned from OpenAI"));
+    }
+
+    #[test]
+    fn test_claude_no_content_error_reports_refusal() {
+        let resp: ClaudeResponse = serde_json::from_str(
+            r#"{"content":[],"stop_reason":"refusal","stop_details":{"type":"refusal","category":"cyber","explanation":"x"},"usage":{"input_tokens":1941,"output_tokens":0}}"#,
+        )
+        .unwrap();
+        let err = claude_no_content_error(&resp);
+        assert_eq!(
+            err,
+            "No content returned from Claude (stop_reason=refusal, category=cyber)"
+        );
+        assert!(is_transient_error(&err));
+    }
+
+    #[test]
+    fn test_claude_no_content_error_without_category() {
+        let resp: ClaudeResponse =
+            serde_json::from_str(r#"{"content":[],"stop_reason":"end_turn","stop_details":null}"#)
+                .unwrap();
+        assert_eq!(
+            claude_no_content_error(&resp),
+            "No content returned from Claude (stop_reason=end_turn)"
+        );
+    }
+
+    #[test]
+    fn test_claude_no_content_error_without_stop_reason() {
+        let resp: ClaudeResponse = serde_json::from_str(r#"{"content":[]}"#).unwrap();
+        assert_eq!(
+            claude_no_content_error(&resp),
+            "No content returned from Claude (stop_reason=unknown)"
+        );
     }
 
     #[test]
