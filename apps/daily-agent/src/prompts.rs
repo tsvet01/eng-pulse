@@ -1,5 +1,6 @@
 //! Production prompts for the daily run: two-phase article selection and the
 //! V3 Insight Brief. Prompt wording is a tuned artifact; change only on request.
+//! Reply shapes are enforced by the schemas passed to `call_llm_typed`.
 
 /// Prompt version tag written to the manifest for the Insight Brief.
 pub const PROMPT_VERSION: &str = "v3";
@@ -23,7 +24,7 @@ fn inject_context(
 /// Headline-only single pick; fallback when the shortlist cannot be parsed.
 pub fn selection_prompt(articles_text: &str) -> String {
     format!(
-        "You are an expert Software Engineering Editor. Review the following list of article headlines collected today. Select the SINGLE most valuable, educational, and impactful article for a senior software engineer to read. Consider technical depth, novelty, and broad relevance.\n\n{}\n\nReply ONLY with the integer index number of the chosen article (e.g., '3'). Do not add any explanation.",
+        "You are an expert Software Engineering Editor. Review the following list of article headlines collected today. Select the SINGLE most valuable, educational, and impactful article for a senior software engineer to read. Consider technical depth, novelty, and broad relevance.\n\n{}\n\nReturn the index number of the chosen article. Do not add any explanation.",
         articles_text
     )
 }
@@ -31,7 +32,7 @@ pub fn selection_prompt(articles_text: &str) -> String {
 /// Phase 1: shortlist the top 5 candidates from headlines.
 pub fn shortlist_prompt(articles_text: &str) -> String {
     format!(
-        "You are an expert Software Engineering Editor. From the following headlines, shortlist the 5 most promising articles for a senior software engineer. Consider technical depth, novelty, and educational value.\n\n{}\n\nReply ONLY with 5 comma-separated index numbers (e.g., '3,7,12,25,41'). No explanation.",
+        "You are an expert Software Engineering Editor. From the following headlines, shortlist the 5 most promising articles for a senior software engineer. Consider technical depth, novelty, and educational value.\n\n{}\n\nReturn the index numbers of the 5 chosen articles, best first. No explanation.",
         articles_text
     )
 }
@@ -39,7 +40,7 @@ pub fn shortlist_prompt(articles_text: &str) -> String {
 /// Phase 2: pick one from the shortlist using content snippets.
 pub fn final_selection_prompt(candidates_text: &str) -> String {
     format!(
-        "You are an expert Software Engineering Editor. Below are 5 candidate articles with content previews. Select the SINGLE best article — the one with the most substantive, technically deep content (not just an appealing headline).\n\n{}\n\nReply ONLY with the index number of the chosen article (e.g., '3'). No explanation.",
+        "You are an expert Software Engineering Editor. Below are 5 candidate articles with content previews. Select the SINGLE best article — the one with the most substantive, technically deep content (not just an appealing headline).\n\n{}\n\nReturn the index number of the chosen article. No explanation.",
         candidates_text
     )
 }
@@ -145,14 +146,14 @@ mod tests {
     fn test_shortlist_prompt_asks_for_five() {
         let prompt = shortlist_prompt("0. [HN] Test Article");
         assert!(prompt.contains("0. [HN] Test Article"));
-        assert!(prompt.contains("5 comma-separated index numbers"));
+        assert!(prompt.contains("index numbers of the 5 chosen articles"));
     }
 
     #[test]
     fn test_final_selection_prompt_contains_candidates() {
         let prompt = final_selection_prompt("--- Article 3 ---\n[HN] Test");
         assert!(prompt.contains("--- Article 3 ---"));
-        assert!(prompt.contains("Reply ONLY with the index number"));
+        assert!(prompt.contains("Return the index number of the chosen article"));
     }
 
     #[test]

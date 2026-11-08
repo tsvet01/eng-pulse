@@ -5,47 +5,48 @@ mod fetcher;
 mod manifest;
 mod prompts;
 
-/// Parse an index from LLM response, extracting the first contiguous digit sequence.
-fn parse_selection_index(response: &str) -> Option<usize> {
-    let digits: String = response
-        .trim()
-        .chars()
-        .skip_while(|c| !c.is_ascii_digit())
-        .take_while(|c| c.is_ascii_digit())
-        .collect();
+use schemars::JsonSchema;
+use serde::Deserialize;
 
-    if digits.is_empty() {
-        None
-    } else {
-        digits.parse().ok()
+/// Shortlist reply from the headline pass.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct Shortlist {
+    /// Indices of the shortlisted articles, best first.
+    indices: Vec<usize>,
+}
+
+/// Single-article reply from a selection pass.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct Selection {
+    /// Index of the chosen article.
+    index: usize,
+}
+
+/// Keep shortlist indices that exist, in order, without repeats.
+fn valid_shortlist(indices: &[usize], max_index: usize) -> Vec<usize> {
+    let mut kept: Vec<usize> = Vec::new();
+    for &i in indices {
+        if i < max_index && !kept.contains(&i) {
+            kept.push(i);
+        }
     }
+    kept
 }
 
-/// Parse comma-separated indices from LLM shortlist response (e.g., "3,7,12,25,41").
-fn parse_shortlist_indices(response: &str, max_index: usize) -> Vec<usize> {
-    response
-        .trim()
-        .split(',')
-        .filter_map(|s| parse_selection_index(s.trim()))
-        .filter(|&i| i < max_index)
-        .collect()
-}
-
-/// Article index from the final-pick call. A failed call or bad answer uses the
-/// first candidate: a weaker pick beats losing the day's brief.
+/// Article index from the final-pick call. A failed call or an answer outside
+/// the shortlist uses the first candidate: a weaker pick beats losing the day's brief.
 fn resolve_final_pick(
-    response: Result<String, Box<dyn std::error::Error + Send + Sync>>,
+    response: Result<Typed<Selection>, Box<dyn std::error::Error + Send + Sync>>,
     shortlist: &[usize],
 ) -> usize {
     let first = shortlist[0];
-    let response = match response {
-        Ok(response) => response,
+    let picked = match response {
+        Ok(typed) => typed.value.index,
         Err(e) => {
             warn!(error = %e, "Final pick call failed, using first candidate");
             return first;
         }
     };
-    let picked = parse_selection_index(&response).unwrap_or(first);
     if shortlist.contains(&picked) {
         picked
     } else {
@@ -118,9 +119,10 @@ use gcloud_storage::http::objects::download::Range;
 use gcloud_storage::http::objects::get::GetObjectRequest;
 use gcloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
 use llm_client::{
-    call_llm, can_fall_back, extract_domain, get_api_key_env_var, init_logging, LlmOptions,
-    LlmProvider, DEFAULT_BUCKET,
+    call_llm, call_llm_typed, can_fall_back, extract_domain, get_api_key_env_var, init_logging,
+    is_schema_mismatch, LlmOptions, LlmProvider, Typed, DEFAULT_BUCKET,
 };
+use pulse_core::InsightBrief;
 use readability::extractor;
 use std::io::Cursor;
 use std::time::Duration;
@@ -130,39 +132,48 @@ use crate::eval::{apply_eval_scores, run_eval_pass};
 use crate::feedback::{build_selection_context, load_recent_feedback};
 use crate::manifest::{gcs_public_url, ManifestEntry, SUMMARY_SNIPPET_CHARS};
 
-/// Selection and title calls: Claude answers, and OpenAI takes the same prompt
+/// Selection and title calls: Claude answers, and OpenAI takes the same call
 /// when Claude refuses or stays unavailable. Returns the reply and who gave it.
 /// Config errors (auth, bad request) are not masked.
+async fn with_openai_fallback<T>(
+    keys: &ApiKeys,
+    call: impl AsyncFn(LlmProvider, &str) -> Result<T, Box<dyn std::error::Error + Send + Sync>>,
+) -> Result<(T, LlmProvider), Box<dyn std::error::Error + Send + Sync>> {
+    match call(LlmProvider::Claude, &keys.claude).await {
+        Ok(reply) => Ok((reply, LlmProvider::Claude)),
+        Err(e) if can_fall_back(e.as_ref()) => {
+            warn!(error = %e, "Claude editorial call failed, asking OpenAI");
+            let reply = call(LlmProvider::OpenAI, &keys.openai).await?;
+            Ok((reply, LlmProvider::OpenAI))
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Plain-text editorial call (the title).
 async fn call_editor(
     http_client: &reqwest::Client,
     keys: &ApiKeys,
     prompt: String,
 ) -> Result<(String, LlmProvider), Box<dyn std::error::Error + Send + Sync>> {
     let options = LlmOptions::default();
-    let claude = call_llm(
-        http_client,
-        LlmProvider::Claude,
-        &keys.claude,
-        prompt.clone(),
-        &options,
-    )
-    .await;
-    match claude {
-        Ok(response) => Ok((response, LlmProvider::Claude)),
-        Err(e) if can_fall_back(e.as_ref()) => {
-            warn!(error = %e, "Claude editorial call failed, asking OpenAI");
-            let response = call_llm(
-                http_client,
-                LlmProvider::OpenAI,
-                &keys.openai,
-                prompt,
-                &options,
-            )
-            .await?;
-            Ok((response, LlmProvider::OpenAI))
-        }
-        Err(e) => Err(e),
-    }
+    with_openai_fallback(keys, async |provider, key| {
+        call_llm(http_client, provider, key, prompt.clone(), &options).await
+    })
+    .await
+}
+
+/// Schema-constrained editorial call (shortlist and picks).
+async fn call_editor_typed<T: serde::de::DeserializeOwned + JsonSchema>(
+    http_client: &reqwest::Client,
+    keys: &ApiKeys,
+    prompt: String,
+) -> Result<(Typed<T>, LlmProvider), Box<dyn std::error::Error + Send + Sync>> {
+    let options = LlmOptions::default();
+    with_openai_fallback(keys, async |provider, key| {
+        call_llm_typed::<T>(http_client, provider, key, prompt.clone(), &options).await
+    })
+    .await
 }
 
 /// Letters outside Latin script: the headline may need translating.
@@ -219,8 +230,11 @@ const MAX_ARTICLE_CHARS: usize = 50_000;
 /// Minimum extracted content length to attempt summarization.
 /// Pages below this threshold are likely JS-rendered SPAs or paywalled.
 const MIN_ARTICLE_CHARS: usize = 200;
-/// Brief re-requests when the model answer is not a parsable Insight Brief.
+/// Brief re-requests when the model answer does not match the Insight Brief schema.
 const BRIEF_PARSE_ATTEMPTS: usize = 3;
+/// Smoke-test brief: exercises the schema path without a real article.
+const SMOKE_BRIEF_PROMPT: &str =
+    "Smoke test. Fill every field with the word OK; set confidence to 1 and category to general.";
 
 fn production_http_client() -> Result<reqwest::Client, reqwest::Error> {
     reqwest::Client::builder()
@@ -271,11 +285,12 @@ struct ApiKeys {
 }
 
 /// Share brief settings between production, shadow generation, and the smoke gate.
+/// One Insight Brief call, constrained to the `InsightBrief` schema.
 async fn call_brief(
     keys: &ApiKeys,
     model: &str,
     prompt: String,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<Typed<InsightBrief>, Box<dyn std::error::Error + Send + Sync>> {
     // Give brief reasoning more time without slowing article fetches and selection.
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(BRIEF_HTTP_TIMEOUT_SECS))
@@ -291,7 +306,7 @@ async fn call_brief(
         effort: (provider == LlmProvider::OpenAI).then(|| "high".to_string()),
         ..Default::default()
     };
-    call_llm(&client, provider, key, prompt, &options).await
+    call_llm_typed::<InsightBrief>(&client, provider, key, prompt, &options).await
 }
 
 /// Claude and OpenAI keys are required; an empty value counts as missing.
@@ -367,16 +382,22 @@ async fn run_smoke(
         }
     }
 
-    let prompt = "Reply with the single word: OK".to_string();
-    if let Err(e) = call_brief(keys, BRIEF_MODEL, prompt).await {
-        error!(model = BRIEF_MODEL, error = %e, "Production brief smoke check FAILED");
-        failures.push(format!("brief({}): {}", BRIEF_MODEL, e));
+    // Brief checks go through the schema-constrained path the nightly run uses.
+    match call_brief(keys, BRIEF_MODEL, SMOKE_BRIEF_PROMPT.to_string()).await {
+        Ok(brief) => {
+            info!(model = BRIEF_MODEL, key_idea = %brief.value.key_idea, "Production brief smoke check passed")
+        }
+        Err(e) => {
+            error!(model = BRIEF_MODEL, error = %e, "Production brief smoke check FAILED");
+            failures.push(format!("brief({}): {}", BRIEF_MODEL, e));
+        }
     }
 
     if let Some(model) = shadow {
-        let prompt = "Reply with the single word: OK".to_string();
-        match call_brief(keys, &model, prompt).await {
-            Ok(resp) => info!(model = %model, reply = %resp.trim(), "Shadow smoke check passed"),
+        match call_brief(keys, &model, SMOKE_BRIEF_PROMPT.to_string()).await {
+            Ok(brief) => {
+                info!(model = %model, key_idea = %brief.value.key_idea, "Shadow smoke check passed")
+            }
             Err(e) => {
                 error!(model = %model, error = %e, "Shadow smoke check FAILED");
                 failures.push(format!("shadow({}): {}", model, e));
@@ -412,56 +433,30 @@ async fn run_smoke(
     }
 }
 
-/// A validated Insight Brief: the JSON object as uploaded plus its key idea.
-#[derive(Debug)]
-struct InsightBrief {
-    json: String,
-    key_idea: String,
-}
-
-/// Extract the JSON object from an LLM response (tolerating preamble or code
-/// fences) and require the brief's mandatory fields.
-fn parse_insight_brief(response: &str) -> Option<InsightBrief> {
-    let start = response.find('{')?;
-    let end = response.rfind('}')?;
-    let json = response.get(start..=end)?;
-    let parsed: serde_json::Value = serde_json::from_str(json).ok()?;
-    parsed.get("deep_dive")?;
-    let key_idea = parsed.get("key_idea")?.as_str().unwrap_or("").to_string();
-    Some(InsightBrief {
-        json: json.to_string(),
-        key_idea,
-    })
-}
-
-/// Re-request the brief when the model returns something unparsable (empty
-/// text, prose, truncated JSON). Transport errors are already retried inside
-/// `call_llm`, so an `Err` from `call` fails immediately.
+/// Re-request the brief when the reply does not match the schema (truncated
+/// or malformed output). Transport errors are already retried inside
+/// `call_llm_typed`, so any other `Err` fails immediately.
 async fn generate_insight_brief<F, Fut>(
     attempts: usize,
     mut call: F,
-) -> Result<InsightBrief, String>
+) -> Result<Typed<InsightBrief>, String>
 where
     F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>>,
+    Fut: std::future::Future<
+        Output = Result<Typed<InsightBrief>, Box<dyn std::error::Error + Send + Sync>>,
+    >,
 {
     for attempt in 1..=attempts {
-        let response = call()
-            .await
-            .map_err(|e| format!("V3 Insight Brief generation failed: {}", e))?;
-        if let Some(brief) = parse_insight_brief(&response) {
-            return Ok(brief);
+        match call().await {
+            Ok(brief) => return Ok(brief),
+            Err(e) if is_schema_mismatch(e.as_ref()) => {
+                warn!(attempt, attempts, error = %e, "V3 response is not a valid Insight Brief")
+            }
+            Err(e) => return Err(format!("V3 Insight Brief generation failed: {}", e)),
         }
-        warn!(
-            attempt,
-            attempts,
-            response_len = response.len(),
-            response = %response.chars().take(500).collect::<String>(),
-            "V3 response is not a valid Insight Brief"
-        );
     }
     Err(format!(
-        "V3 response is not a valid Insight Brief after {} attempts (invalid JSON or missing fields)",
+        "V3 response is not a valid Insight Brief after {} attempts (reply did not match schema)",
         attempts
     ))
 }
@@ -658,18 +653,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         selection_context.as_deref(),
         recent_picks.as_deref(),
     );
-    let (shortlist_response, mut selector) =
-        call_editor(&http_client, &keys, shortlist_prompt).await?;
-    let mut shortlist = parse_shortlist_indices(&shortlist_response, all_articles.len());
+    let mut selector = LlmProvider::Claude;
+    let mut shortlist =
+        match call_editor_typed::<Shortlist>(&http_client, &keys, shortlist_prompt).await {
+            Ok((typed, provider)) => {
+                selector = provider;
+                valid_shortlist(&typed.value.indices, all_articles.len())
+            }
+            Err(e) if is_schema_mismatch(e.as_ref()) => {
+                warn!(error = %e, "Shortlist reply did not match schema");
+                Vec::new()
+            }
+            Err(e) => return Err(e),
+        };
 
-    // Fallback: if shortlist parsing fails, use single-shot selection
+    // Fallback: no usable shortlist, use single-shot selection
     if shortlist.is_empty() {
-        warn!(response = %shortlist_response.trim(), "Failed to parse shortlist, falling back to single-shot");
+        warn!("Empty shortlist, falling back to single-shot selection");
         let fallback_prompt = prompts::selection_prompt(&articles_text);
-        let (fallback, provider) = call_editor(&http_client, &keys, fallback_prompt).await?;
+        let (fallback, provider) =
+            call_editor_typed::<Selection>(&http_client, &keys, fallback_prompt).await?;
         selector = provider;
-        let idx = parse_selection_index(&fallback)
-            .unwrap_or(0)
+        let idx = fallback
+            .value
+            .index
             .min(all_articles.len().saturating_sub(1));
         shortlist = vec![idx];
     }
@@ -708,11 +715,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             selection_context.as_deref(),
             recent_picks.as_deref(),
         );
-        let final_response = call_editor(&http_client, &keys, final_prompt).await;
+        let final_response =
+            call_editor_typed::<Selection>(&http_client, &keys, final_prompt).await;
         if let Ok((_, provider)) = &final_response {
             selector = *provider;
         }
-        resolve_final_pick(final_response.map(|(text, _)| text), &shortlist)
+        resolve_final_pick(final_response.map(|(typed, _)| typed), &shortlist)
     };
 
     let best_article = &all_articles[safe_index];
@@ -768,7 +776,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         date: today.clone(),
         url: gcs_public_url(&bucket_name, &object_path),
         title: title.clone(),
-        summary_snippet: manifest_snippet(&brief.key_idea),
+        summary_snippet: manifest_snippet(&brief.value.key_idea),
         original_url: Some(best_article.url.clone()),
         model: Some(BRIEF_MODEL.to_string()),
         selected_by: Some(selector.model_name().to_string()),
@@ -782,29 +790,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if let Some(shadow) = shadow_model() {
         let shadow_prompt = prompts::summary_prompt(&best_article.source, &title, &truncated_text);
         match call_brief(&keys, &shadow, shadow_prompt).await {
-            Ok(response) => match parse_insight_brief(&response) {
-                Some(shadow_brief) => {
-                    let object_path = format!("summaries/v3-shadow/{}.json", today);
-                    match gcs_client
-                        .upload_object(
-                            &UploadObjectRequest {
-                                bucket: bucket_name.clone(),
-                                ..Default::default()
-                            },
-                            shadow_brief.json.as_bytes().to_vec(),
-                            &UploadType::Simple(Media::new(object_path.clone())),
-                        )
-                        .await
-                    {
-                        Ok(_) => {
-                            info!(model = %shadow, "Shadow V3 brief uploaded to {}", object_path);
-                            shadow_v3_json = Some(shadow_brief.json);
-                        }
-                        Err(e) => warn!(error = %e, "Failed to upload shadow V3 brief"),
+            Ok(shadow_brief) => {
+                let object_path = format!("summaries/v3-shadow/{}.json", today);
+                match gcs_client
+                    .upload_object(
+                        &UploadObjectRequest {
+                            bucket: bucket_name.clone(),
+                            ..Default::default()
+                        },
+                        shadow_brief.json.as_bytes().to_vec(),
+                        &UploadType::Simple(Media::new(object_path.clone())),
+                    )
+                    .await
+                {
+                    Ok(_) => {
+                        info!(model = %shadow, "Shadow V3 brief uploaded to {}", object_path);
+                        shadow_v3_json = Some(shadow_brief.json);
                     }
+                    Err(e) => warn!(error = %e, "Failed to upload shadow V3 brief"),
                 }
-                None => warn!(model = %shadow, "Shadow V3 response invalid, skipping"),
-            },
+            }
             Err(e) => warn!(model = %shadow, error = %e, "Shadow V3 generation failed"),
         }
     }
@@ -833,7 +838,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             SHADOW_SUMMARY_ID, json
         ));
     }
-    if let Some(json) = run_eval_pass(
+    if let Some(verdict) = run_eval_pass(
         &http_client,
         LlmProvider::OpenAI,
         &keys.openai,
@@ -850,7 +855,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     )
     .await
     {
-        apply_eval_scores(&json, std::slice::from_mut(&mut entry));
+        apply_eval_scores(&verdict, std::slice::from_mut(&mut entry));
     }
 
     // --- Dual-write: mirror the brief to pulse-api ---
@@ -1005,6 +1010,22 @@ mod tests {
         let answer = call_editor(&reqwest::Client::new(), &test_keys(), "pick".into()).await;
 
         assert_eq!(answer.unwrap(), ("3".to_string(), LlmProvider::OpenAI));
+        assert_eq!(llms.requests_to("/messages").await, 1, "refusal retried");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_typed_editor_call_uses_openai_when_claude_refuses() {
+        let llms = MockLlms::start().await;
+        llms.claude(claude_refusal()).await;
+        llms.openai(openai_text(r#"{"index":3}"#)).await;
+
+        let answer =
+            call_editor_typed::<Selection>(&reqwest::Client::new(), &test_keys(), "pick".into())
+                .await;
+
+        let (typed, provider) = answer.unwrap();
+        assert_eq!((typed.value.index, provider), (3, LlmProvider::OpenAI));
         assert_eq!(llms.requests_to("/messages").await, 1, "refusal retried");
     }
 
@@ -1168,91 +1189,38 @@ mod tests {
         assert_eq!(resolve_final_pick(failed, &[22, 8, 14]), 22);
     }
 
-    #[test]
-    fn test_final_pick_uses_valid_answer() {
-        assert_eq!(resolve_final_pick(Ok("14".to_string()), &[22, 8, 14]), 14);
+    fn picked(index: usize) -> Typed<Selection> {
+        Typed {
+            value: Selection { index },
+            json: format!("{{\"index\":{index}}}"),
+        }
     }
 
     #[test]
-    fn test_final_pick_unparsable_answer_uses_first_candidate() {
-        assert_eq!(
-            resolve_final_pick(Ok("no number".to_string()), &[22, 8, 14]),
-            22
-        );
+    fn test_final_pick_uses_valid_answer() {
+        assert_eq!(resolve_final_pick(Ok(picked(14)), &[22, 8, 14]), 14);
+    }
+
+    #[test]
+    fn test_final_pick_schema_mismatch_uses_first_candidate() {
+        let mismatch: Box<dyn std::error::Error + Send + Sync> =
+            Box::new(llm_client::SchemaMismatch {
+                detail: "invalid type".into(),
+                body: "{\"index\":\"no number\"}".into(),
+            });
+        assert_eq!(resolve_final_pick(Err(mismatch), &[22, 8, 14]), 22);
     }
 
     #[test]
     fn test_final_pick_outside_shortlist_uses_first_candidate() {
-        assert_eq!(resolve_final_pick(Ok("99".to_string()), &[22, 8, 14]), 22);
+        assert_eq!(resolve_final_pick(Ok(picked(99)), &[22, 8, 14]), 22);
     }
 
     #[test]
-    fn test_parse_selection_index_simple() {
-        assert_eq!(parse_selection_index("5"), Some(5));
-        assert_eq!(parse_selection_index("0"), Some(0));
-        assert_eq!(parse_selection_index("42"), Some(42));
-    }
-
-    #[test]
-    fn test_parse_selection_index_with_whitespace() {
-        assert_eq!(parse_selection_index("  3  "), Some(3));
-        assert_eq!(parse_selection_index("\n7\n"), Some(7));
-        assert_eq!(parse_selection_index("\t12"), Some(12));
-    }
-
-    #[test]
-    fn test_parse_selection_index_with_text() {
-        // The judge sometimes returns text before/after the number
-        assert_eq!(parse_selection_index("I choose 5"), Some(5));
-        assert_eq!(parse_selection_index("Article 3 is best"), Some(3));
-        assert_eq!(parse_selection_index("The answer is: 7."), Some(7));
-    }
-
-    #[test]
-    fn test_parse_selection_index_invalid() {
-        assert_eq!(parse_selection_index("no number here"), None);
-        assert_eq!(parse_selection_index(""), None);
-        assert_eq!(parse_selection_index("   "), None);
-    }
-
-    #[test]
-    fn test_parse_selection_index_first_number_only() {
-        // Should only get the first contiguous digit sequence
-        assert_eq!(parse_selection_index("3 and 5"), Some(3));
-        assert_eq!(parse_selection_index("article 2, not 7"), Some(2));
-    }
-
-    #[test]
-    fn test_parse_selection_index_large_number() {
-        assert_eq!(parse_selection_index("99999"), Some(99999));
-        assert_eq!(parse_selection_index("1000000"), Some(1000000));
-    }
-
-    #[test]
-    fn test_parse_selection_index_zero() {
-        assert_eq!(parse_selection_index("0"), Some(0));
-        assert_eq!(parse_selection_index("The index is 0."), Some(0));
-    }
-
-    #[test]
-    fn test_parse_selection_index_decimal_takes_integer_part() {
-        // "3.5" — should parse "3" as the first contiguous digit sequence
-        // since "." breaks the digit run
-        let result = parse_selection_index("3.5");
-        assert_eq!(result, Some(3));
-    }
-
-    #[test]
-    fn test_parse_selection_index_negative_ignored() {
-        // "-5" — the minus sign is not a digit, so it should find "5"
-        let result = parse_selection_index("-5");
-        assert_eq!(result, Some(5));
-    }
-
-    #[test]
-    fn test_parse_selection_index_only_special_chars() {
-        assert_eq!(parse_selection_index("!@#$%^&*()"), None);
-        assert_eq!(parse_selection_index("..."), None);
+    fn test_valid_shortlist_filters_range_and_repeats_keeping_order() {
+        assert_eq!(valid_shortlist(&[7, 3, 7, 41, 0], 10), vec![7, 3, 0]);
+        assert!(valid_shortlist(&[10, 11], 10).is_empty());
+        assert!(valid_shortlist(&[], 10).is_empty());
     }
 
     #[test]
@@ -1333,69 +1301,73 @@ mod tests {
 
     // --- Insight Brief parsing ---
 
-    #[test]
-    fn test_parse_insight_brief_strips_fences_and_preamble() {
-        let response =
-            "Here you go:\n```json\n{\"key_idea\": \"Idea\", \"deep_dive\": \"Body\"}\n```";
-        let brief = parse_insight_brief(response).unwrap();
-        assert_eq!(
-            brief.json,
-            "{\"key_idea\": \"Idea\", \"deep_dive\": \"Body\"}"
-        );
-        assert_eq!(brief.key_idea, "Idea");
-    }
-
-    #[test]
-    fn test_parse_insight_brief_requires_fields() {
-        assert!(parse_insight_brief("{\"key_idea\": \"Idea\"}").is_none());
-        assert!(parse_insight_brief("{\"deep_dive\": \"Body\"}").is_none());
-    }
-
-    #[test]
-    fn test_parse_insight_brief_rejects_invalid_json() {
-        assert!(parse_insight_brief("not json").is_none());
-        assert!(parse_insight_brief("{\"key_idea\": ").is_none());
-        assert!(parse_insight_brief("} then {").is_none());
-    }
-
     // --- Insight Brief generation retry ---
 
-    type LlmResult = Result<String, Box<dyn std::error::Error + Send + Sync>>;
-    type LlmFuture = std::pin::Pin<Box<dyn std::future::Future<Output = LlmResult>>>;
+    type BriefResult = Result<Typed<InsightBrief>, Box<dyn std::error::Error + Send + Sync>>;
+    type BriefFuture = std::pin::Pin<Box<dyn std::future::Future<Output = BriefResult>>>;
 
-    /// Scripted LLM: hands out `responses` in order and counts calls.
+    /// Scripted replies for the brief call, in order.
+    #[derive(Clone)]
+    enum Scripted {
+        Brief(&'static str),
+        Mismatch,
+        Transport(&'static str),
+    }
+
+    fn scripted_brief(reply: Scripted) -> BriefResult {
+        match reply {
+            Scripted::Brief(key_idea) => Ok(Typed {
+                value: InsightBrief {
+                    key_idea: key_idea.to_string(),
+                    why_it_matters: String::new(),
+                    what_to_change: None,
+                    deep_dive: "Body".to_string(),
+                    meta: None,
+                },
+                json: format!("{{\"key_idea\":\"{key_idea}\",\"deep_dive\":\"Body\"}}"),
+            }),
+            Scripted::Mismatch => Err(Box::new(llm_client::SchemaMismatch {
+                detail: "missing field `deep_dive`".into(),
+                body: "{}".into(),
+            })),
+            Scripted::Transport(msg) => Err(msg.into()),
+        }
+    }
+
+    /// Scripted LLM: hands out `replies` in order and counts calls.
     fn scripted_llm(
-        responses: Vec<Result<&'static str, &'static str>>,
+        replies: Vec<Scripted>,
     ) -> (
-        impl FnMut() -> LlmFuture,
+        impl FnMut() -> BriefFuture,
         std::rc::Rc<std::cell::Cell<usize>>,
     ) {
         let calls = std::rc::Rc::new(std::cell::Cell::new(0));
-        let mut queue: std::collections::VecDeque<_> = responses.into_iter().collect();
+        let mut queue: std::collections::VecDeque<_> = replies.into_iter().collect();
         let counter = calls.clone();
-        let call = move || -> LlmFuture {
+        let call = move || -> BriefFuture {
             counter.set(counter.get() + 1);
-            let next = queue
-                .pop_front()
-                .expect("more calls than scripted responses");
-            Box::pin(async move { next.map(str::to_string).map_err(Into::into) })
+            let next = queue.pop_front().expect("more calls than scripted replies");
+            Box::pin(async move { scripted_brief(next) })
         };
         (call, calls)
     }
 
-    const VALID_BRIEF: &str = "{\"key_idea\": \"Idea\", \"deep_dive\": \"Body\"}";
-
     #[tokio::test]
-    async fn test_generate_insight_brief_retries_unparsable_response() {
-        let (call, calls) = scripted_llm(vec![Ok("I can't help with that."), Ok(VALID_BRIEF)]);
+    async fn test_generate_insight_brief_retries_schema_mismatch() {
+        let (call, calls) = scripted_llm(vec![Scripted::Mismatch, Scripted::Brief("Idea")]);
         let brief = generate_insight_brief(3, call).await.unwrap();
-        assert_eq!(brief.key_idea, "Idea");
+        assert_eq!(brief.value.key_idea, "Idea");
+        assert!(brief.json.contains("\"key_idea\":\"Idea\""));
         assert_eq!(calls.get(), 2);
     }
 
     #[tokio::test]
     async fn test_generate_insight_brief_gives_up_after_attempts() {
-        let (call, calls) = scripted_llm(vec![Ok("nope"), Ok(""), Ok("{}")]);
+        let (call, calls) = scripted_llm(vec![
+            Scripted::Mismatch,
+            Scripted::Mismatch,
+            Scripted::Mismatch,
+        ]);
         let err = generate_insight_brief(3, call).await.unwrap_err();
         assert!(err.contains("not a valid Insight Brief"), "{err}");
         assert!(err.contains("3 attempts"), "{err}");
@@ -1404,7 +1376,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_insight_brief_fails_fast_on_llm_error() {
-        let (call, calls) = scripted_llm(vec![Err("Claude API returned 401"), Ok(VALID_BRIEF)]);
+        let (call, calls) = scripted_llm(vec![
+            Scripted::Transport("Claude API returned 401"),
+            Scripted::Brief("Idea"),
+        ]);
         let err = generate_insight_brief(3, call).await.unwrap_err();
         assert!(err.contains("generation failed"), "{err}");
         assert!(err.contains("401"), "{err}");
@@ -1517,13 +1492,33 @@ mod tests {
         }
     }
 
+    /// A minimal brief, valid for the schema-constrained smoke calls.
+    fn smoke_brief_json() -> String {
+        serde_json::json!({
+            "key_idea": "OK", "why_it_matters": "OK", "what_to_change": null,
+            "deep_dive": "OK", "meta": {"confidence": 1.0, "category": "general"}
+        })
+        .to_string()
+    }
+
+    /// Serves both the plain text check and the schema-constrained brief check.
+    fn claude_smoke_body() -> serde_json::Value {
+        serde_json::json!({
+            "content": [
+                {"type": "text", "text": "OK"},
+                {"type": "tool_use", "id": "t1", "name": "InsightBrief",
+                 "input": serde_json::from_str::<serde_json::Value>(&smoke_brief_json()).unwrap()}
+            ]
+        })
+    }
+
     async fn mount_openai_ok(server: &wiremock::MockServer) {
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, ResponseTemplate};
         Mock::given(method("POST"))
             .and(path("/chat/completions"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "choices": [{"message": {"content": "OK"}}]
+                "choices": [{"message": {"content": smoke_brief_json()}}]
             })))
             .mount(server)
             .await;
@@ -1544,9 +1539,7 @@ mod tests {
             .and(body_partial_json(
                 serde_json::json!({"model": llm_client::DEFAULT_CLAUDE_MODEL}),
             ))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "content": [{"text": "OK"}]
-            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(claude_smoke_body()))
             .with_priority(1)
             .mount(&mock_server)
             .await;
@@ -1599,9 +1592,7 @@ mod tests {
         let mock_server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/messages"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "content": [{"text": "OK"}]
-            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(claude_smoke_body()))
             .mount(&mock_server)
             .await;
         Mock::given(method("POST"))
@@ -1639,9 +1630,7 @@ mod tests {
         mount_openai_ok(&mock_server).await;
         Mock::given(method("POST"))
             .and(path("/messages"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "content": [{"text": "OK"}]
-            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(claude_smoke_body()))
             .mount(&mock_server)
             .await;
         Mock::given(method("POST"))
@@ -1693,9 +1682,7 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/messages"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "content": [{"text": "OK"}]
-            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(claude_smoke_body()))
             .mount(&mock_server)
             .await;
 
@@ -1728,9 +1715,7 @@ mod tests {
         mount_openai_ok(&server).await;
         Mock::given(method("POST"))
             .and(path("/messages"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "content": [{"text": "OK"}]
-            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(claude_smoke_body()))
             .mount(&server)
             .await;
         std::env::set_var("CLAUDE_BASE_URL", server.uri());
@@ -1766,5 +1751,11 @@ mod tests {
         assert_eq!(bodies[2]["reasoning_effort"], "high");
         assert_eq!(bodies[2]["max_completion_tokens"], 16000);
         assert!(bodies[2].get("temperature").is_none());
+        // The brief check uses the production schema path.
+        let schema = &bodies[2]["response_format"]["json_schema"];
+        assert_eq!(schema["name"], "InsightBrief");
+        assert_eq!(schema["strict"], true);
+        assert_eq!(schema["schema"]["additionalProperties"], false);
+        assert!(bodies[1].get("response_format").is_none());
     }
 }
