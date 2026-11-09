@@ -219,8 +219,15 @@ fn is_transient_error(err: &str) -> bool {
 
     let err_lower = err.to_lowercase();
     // A refusal answers the prompt itself: retrying repeats it (12 of 12 on 2026-11-09).
-    !err_lower.contains("stop_reason=refusal")
-        && transient_patterns.iter().any(|p| err_lower.contains(p))
+    !err_lower.contains(REFUSAL_MARKER) && transient_patterns.iter().any(|p| err_lower.contains(p))
+}
+
+const REFUSAL_MARKER: &str = "stop_reason=refusal";
+
+/// True when another provider should take the prompt: the model refused, or a
+/// transient failure outlasted the retries. Auth and bad-request errors are false.
+pub fn can_fall_back(err: &(dyn std::error::Error + Send + Sync + 'static)) -> bool {
+    err.to_string().contains(REFUSAL_MARKER) || is_transient_boxed(err)
 }
 
 /// Decide whether a boxed error is transient (worth retrying).
@@ -784,6 +791,24 @@ mod tests {
     fn test_is_transient_error_empty_model_answer() {
         assert!(is_transient_error("No content returned from Claude"));
         assert!(is_transient_error("No content returned from OpenAI"));
+    }
+
+    #[test]
+    fn test_fallback_is_for_refusals_and_outages_not_config_errors() {
+        let boxed = |message: &str| -> Box<dyn std::error::Error + Send + Sync> { message.into() };
+        for message in [
+            "No content returned from Claude (stop_reason=refusal, category=cyber)",
+            "Claude API returned 529 Overloaded: temporarily overloaded",
+            "Claude API returned 503 Service Unavailable: ",
+        ] {
+            assert!(can_fall_back(boxed(message).as_ref()), "{message}");
+        }
+        for message in [
+            "Claude API returned 401 Unauthorized: invalid x-api-key",
+            "Claude API returned 400 Bad Request: model: unknown",
+        ] {
+            assert!(!can_fall_back(boxed(message).as_ref()), "{message}");
+        }
     }
 
     #[test]
