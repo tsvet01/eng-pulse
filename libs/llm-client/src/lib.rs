@@ -218,7 +218,16 @@ fn is_transient_error(err: &str) -> bool {
     ];
 
     let err_lower = err.to_lowercase();
-    transient_patterns.iter().any(|p| err_lower.contains(p))
+    // A refusal answers the prompt itself: retrying repeats it (12 of 12 on 2026-11-09).
+    !err_lower.contains(REFUSAL_MARKER) && transient_patterns.iter().any(|p| err_lower.contains(p))
+}
+
+const REFUSAL_MARKER: &str = "stop_reason=refusal";
+
+/// True when another provider should take the prompt: the model refused, or a
+/// transient failure outlasted the retries. Auth and bad-request errors are false.
+pub fn can_fall_back(err: &(dyn std::error::Error + Send + Sync + 'static)) -> bool {
+    err.to_string().contains(REFUSAL_MARKER) || is_transient_boxed(err)
 }
 
 /// Decide whether a boxed error is transient (worth retrying).
@@ -785,6 +794,24 @@ mod tests {
     }
 
     #[test]
+    fn test_fallback_is_for_refusals_and_outages_not_config_errors() {
+        let boxed = |message: &str| -> Box<dyn std::error::Error + Send + Sync> { message.into() };
+        for message in [
+            "No content returned from Claude (stop_reason=refusal, category=cyber)",
+            "Claude API returned 529 Overloaded: temporarily overloaded",
+            "Claude API returned 503 Service Unavailable: ",
+        ] {
+            assert!(can_fall_back(boxed(message).as_ref()), "{message}");
+        }
+        for message in [
+            "Claude API returned 401 Unauthorized: invalid x-api-key",
+            "Claude API returned 400 Bad Request: model: unknown",
+        ] {
+            assert!(!can_fall_back(boxed(message).as_ref()), "{message}");
+        }
+    }
+
+    #[test]
     fn test_claude_no_content_error_reports_refusal() {
         let resp: ClaudeResponse = serde_json::from_str(
             r#"{"content":[],"stop_reason":"refusal","stop_details":{"type":"refusal","category":"cyber","explanation":"x"},"usage":{"input_tokens":1941,"output_tokens":0}}"#,
@@ -795,7 +822,7 @@ mod tests {
             err,
             "No content returned from Claude (stop_reason=refusal, category=cyber)"
         );
-        assert!(is_transient_error(&err));
+        assert!(!is_transient_error(&err), "a refusal repeats on retry");
     }
 
     #[test]
