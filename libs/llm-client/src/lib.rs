@@ -218,7 +218,9 @@ fn is_transient_error(err: &str) -> bool {
     ];
 
     let err_lower = err.to_lowercase();
-    transient_patterns.iter().any(|p| err_lower.contains(p))
+    // A refusal answers the prompt itself: retrying repeats it (12 of 12 on 2026-11-09).
+    !err_lower.contains("stop_reason=refusal")
+        && transient_patterns.iter().any(|p| err_lower.contains(p))
 }
 
 /// Decide whether a boxed error is transient (worth retrying).
@@ -795,7 +797,7 @@ mod tests {
             err,
             "No content returned from Claude (stop_reason=refusal, category=cyber)"
         );
-        assert!(is_transient_error(&err));
+        assert!(!is_transient_error(&err), "a refusal repeats on retry");
     }
 
     #[test]
