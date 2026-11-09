@@ -789,10 +789,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // The judge shares the production model; review pairwise results for self-preference.
     info!(provider = "openai", "Starting eval stage");
     let v3_eval_prompt = String::from(
-        "You are evaluating Insight Brief summaries for a senior engineering leader (C++/Rust, hedge fund, low-latency systems).\n\n\
+        "You are evaluating Insight Brief summaries for experienced software engineers (systems programming, Python, AI and agentic engineering, data, platforms).\n\n\
         Score each summary on these criteria (1-5 scale):\n\
         1. key_idea_clarity: Is the key insight distilled into one clear, non-hedging sentence?\n\
-        2. why_it_matters_relevance: Does it connect to the reader's specific context?\n\
+        2. why_it_matters_relevance: Does it state a concrete consequence in the article's own domain, without naming the audience or forcing an unrelated language, industry, or role?\n\
         3. deep_dive_depth: Is the technical analysis substantive, with evidence and nuance?\n\
         4. action_quality: If present, is the action concrete and genuinely useful? (Score 3 if no action item.)\n\n\
         For each summary below, return ONLY a JSON object (no markdown fences):\n\

@@ -127,7 +127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let json_example =
             r#"[{"name": "Netflix TechBlog", "url": "https://netflixtechblog.com/feed"}]"#;
         let prompt = format!(
-            r#"You are discovering technical blogs for a senior engineering leader at a hedge fund who works on developer platforms, low-latency systems (C++/Rust), and AI tooling.
+            r#"You are discovering technical blogs for experienced software engineers who work on developer platforms, low-latency systems (C++/Rust), Python, and AI and agentic engineering.
 
 Current sources: {:?}
 
@@ -515,7 +515,7 @@ fn build_relevance_prompt(name: &str, url: &str, content_sample: &str) -> String
         )
     };
     format!(
-        "Blog: '{}' at {}\n\n{}\n\nIs this a technical engineering blog that publishes substantive, deep content relevant to a senior systems engineer (C++/Rust, infrastructure, AI tooling)? Not a news site, not marketing, not beginner tutorials.\n\nRespond ONLY with 'yes' or 'no'.",
+        "Blog: '{}' at {}\n\n{}\n\nIs this a technical engineering blog that publishes substantive, deep content relevant to a senior software engineer (C++/Rust, Python, infrastructure, AI and agentic engineering)? Not a news site, not marketing, not beginner tutorials.\n\nRespond ONLY with 'yes' or 'no'.",
         name, url, content_context
     )
 }
