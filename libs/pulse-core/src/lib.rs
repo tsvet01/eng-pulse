@@ -6,6 +6,7 @@
 //! of truth for what that shape looks like, written out as
 //! `docs/contracts/*.json` by the `fixtures` binary so drift shows up in CI.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 pub mod preferences;
 
@@ -34,20 +35,28 @@ pub enum SourceKind {
     HackerNews,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// The V3 Insight Brief as the model emits it; also the schema sent to the
+/// model, so field docs double as output instructions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct InsightBrief {
+    /// One sentence: the distilled insight, no hedging.
     #[serde(default)]
     pub key_idea: String,
+    /// Two or three sentences on why this matters to the reader.
     #[serde(default)]
     pub why_it_matters: String,
+    /// One concrete action to try this week, or null when the article supports none.
     pub what_to_change: Option<String>,
+    /// Full technical analysis in markdown.
     pub deep_dive: String,
     pub meta: Option<BriefMeta>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BriefMeta {
+    /// Confidence in the brief, 0 to 1.
     pub confidence: Option<f64>,
+    /// Category named in the prompt.
     pub category: Option<String>,
 }
 

@@ -1,6 +1,11 @@
 use backoff::{future::retry, ExponentialBackoff};
+use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+
+mod schema;
+pub use schema::strict_schema;
 use tracing::{debug, error, info, instrument, warn};
 use tracing_subscriber::{fmt, EnvFilter};
 use url::Url;
@@ -104,6 +109,80 @@ pub struct LlmOptions {
     pub effort: Option<String>,
 }
 
+/// A schema-constrained reply: the decoded value and the JSON the model sent.
+#[derive(Debug, Clone)]
+pub struct Typed<T> {
+    pub value: T,
+    pub json: String,
+}
+
+/// The model answered, but not with a value matching the requested schema.
+/// Not retried by `call_llm_typed`; the caller decides whether to re-request.
+#[derive(Debug)]
+pub struct SchemaMismatch {
+    pub detail: String,
+    pub body: String,
+}
+
+impl std::fmt::Display for SchemaMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Reply does not match the requested schema: {}",
+            self.detail
+        )
+    }
+}
+
+impl std::error::Error for SchemaMismatch {}
+
+/// True when a `call_llm_typed` error is a schema mismatch rather than a transport failure.
+pub fn is_schema_mismatch(err: &(dyn std::error::Error + Send + Sync + 'static)) -> bool {
+    err.downcast_ref::<SchemaMismatch>().is_some()
+}
+
+/// Schema handed to a provider: derived from `T`, tightened for strict modes.
+#[derive(Debug, Clone)]
+struct OutputSchema {
+    name: String,
+    schema: serde_json::Value,
+}
+
+fn output_schema_for<T: JsonSchema>() -> OutputSchema {
+    let schema = serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes");
+    let name: String = schema
+        .get("title")
+        .and_then(|t| t.as_str())
+        .unwrap_or("output")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .collect();
+    let name = if name.is_empty() {
+        "output".to_string()
+    } else {
+        name
+    };
+    OutputSchema {
+        name,
+        schema: strict_schema(schema),
+    }
+}
+
+/// What a provider returned: free text, or the JSON text of a structured reply.
+#[derive(Debug)]
+enum Reply {
+    Text(String),
+    Structured(String),
+}
+
+impl Reply {
+    fn into_string(self) -> String {
+        match self {
+            Reply::Text(s) | Reply::Structured(s) => s,
+        }
+    }
+}
+
 /// Model precedence: per-call override > env var > provider default.
 fn resolve_model_from(
     options_model: Option<&str>,
@@ -155,6 +234,8 @@ pub struct GeminiContent {
 pub struct GeminiGenerationConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_mime_type: Option<String>,
 }
 
 #[derive(Serialize, Debug)]
@@ -227,7 +308,8 @@ const REFUSAL_MARKER: &str = "stop_reason=refusal";
 /// True when another provider should take the prompt: the model refused, or a
 /// transient failure outlasted the retries. Auth and bad-request errors are false.
 pub fn can_fall_back(err: &(dyn std::error::Error + Send + Sync + 'static)) -> bool {
-    err.to_string().contains(REFUSAL_MARKER) || is_transient_boxed(err)
+    !is_schema_mismatch(err)
+        && (err.to_string().contains(REFUSAL_MARKER) || is_transient_boxed(err))
 }
 
 /// Decide whether a boxed error is transient (worth retrying).
@@ -254,12 +336,14 @@ fn is_transient_boxed(err: &(dyn std::error::Error + Send + Sync + 'static)) -> 
     is_transient_error(&message)
 }
 
+/// Gemini gets JSON mode only; the schema is enforced when the reply is decoded.
 async fn call_gemini(
     client: &reqwest::Client,
     api_key: &str,
     text: String,
     options: &LlmOptions,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    schema: Option<&OutputSchema>,
+) -> Result<Reply, Box<dyn std::error::Error + Send + Sync>> {
     let model = resolve_model_from(
         options.model.as_deref(),
         std::env::var("GEMINI_MODEL").ok(),
@@ -272,9 +356,11 @@ async fn call_gemini(
 
     let url = format!("{}/v1beta/models/{}:generateContent", base_url, model);
 
-    let generation_config = options.temperature.map(|t| GeminiGenerationConfig {
-        temperature: Some(t),
-    });
+    let generation_config =
+        (options.temperature.is_some() || schema.is_some()).then(|| GeminiGenerationConfig {
+            temperature: options.temperature,
+            response_mime_type: schema.map(|_| "application/json".to_string()),
+        });
 
     let request = GeminiRequest {
         contents: vec![GeminiContent {
@@ -319,7 +405,10 @@ async fn call_gemini(
     if let Some(candidates) = resp.candidates {
         if let Some(first) = candidates.first() {
             if let Some(part) = first.content.parts.first() {
-                return Ok(part.text.clone());
+                return Ok(match schema {
+                    Some(_) => Reply::Structured(part.text.clone()),
+                    None => Reply::Text(part.text.clone()),
+                });
             }
         }
     }
@@ -345,6 +434,8 @@ struct OpenAIRequest {
     reasoning_effort: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_completion_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -354,7 +445,8 @@ struct OpenAIChoice {
 
 #[derive(Deserialize, Debug)]
 struct OpenAIMessageResponse {
-    content: String,
+    content: Option<String>,
+    refusal: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -386,7 +478,13 @@ pub async fn call_openai_with_retry(
     call_llm_with_retry(client, LlmProvider::OpenAI, api_key, prompt).await
 }
 
-fn build_openai_request(model: String, text: String, options: &LlmOptions) -> OpenAIRequest {
+/// With a schema, strict Structured Outputs: the reply is JSON matching it.
+fn build_openai_request(
+    model: String,
+    text: String,
+    options: &LlmOptions,
+    schema: Option<&OutputSchema>,
+) -> OpenAIRequest {
     let mut messages = Vec::new();
     if let Some(ref system) = options.system {
         messages.push(OpenAIMessage {
@@ -403,6 +501,12 @@ fn build_openai_request(model: String, text: String, options: &LlmOptions) -> Op
         messages,
         reasoning_effort: options.effort.clone(),
         max_completion_tokens: options.max_tokens,
+        response_format: schema.map(|s| {
+            serde_json::json!({
+                "type": "json_schema",
+                "json_schema": {"name": s.name, "strict": true, "schema": s.schema}
+            })
+        }),
     }
 }
 
@@ -411,7 +515,8 @@ async fn call_openai(
     api_key: &str,
     text: String,
     options: &LlmOptions,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    schema: Option<&OutputSchema>,
+) -> Result<Reply, Box<dyn std::error::Error + Send + Sync>> {
     let model = resolve_model_from(
         options.model.as_deref(),
         std::env::var("OPENAI_MODEL").ok(),
@@ -422,7 +527,7 @@ async fn call_openai(
     let base_url = std::env::var("OPENAI_BASE_URL")
         .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
 
-    let request = build_openai_request(model, text, options);
+    let request = build_openai_request(model, text, options, schema);
 
     debug!("Sending request to OpenAI API");
 
@@ -459,7 +564,15 @@ async fn call_openai(
 
     if let Some(choices) = resp.choices {
         if let Some(first) = choices.first() {
-            return Ok(first.message.content.clone());
+            if let Some(refusal) = &first.message.refusal {
+                return Err(format!("OpenAI refusal: {}", refusal).into());
+            }
+            if let Some(content) = &first.message.content {
+                return Ok(match schema {
+                    Some(_) => Reply::Structured(content.clone()),
+                    None => Reply::Text(content.clone()),
+                });
+            }
         }
     }
 
@@ -475,17 +588,30 @@ struct ClaudeMessage {
 }
 
 #[derive(Serialize, Debug)]
+struct ClaudeTool {
+    name: String,
+    description: String,
+    input_schema: serde_json::Value,
+}
+
+#[derive(Serialize, Debug)]
 struct ClaudeRequest {
     model: String,
     max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<String>,
     messages: Vec<ClaudeMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<ClaudeTool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_choice: Option<serde_json::Value>,
 }
 
+/// Text block or tool_use block; `input` keeps the model's JSON byte-for-byte.
 #[derive(Deserialize, Debug)]
 struct ClaudeContentBlock {
     text: Option<String>,
+    input: Option<Box<serde_json::value::RawValue>>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -525,8 +651,14 @@ pub async fn call_claude_with_retry(
 }
 
 /// Build a Claude API request body. `temperature` is never sent: Opus 4.7+
-/// rejects it with a 400 invalid_request_error.
-fn build_claude_request(model: String, text: String, options: &LlmOptions) -> ClaudeRequest {
+/// rejects it with a 400 invalid_request_error. With a schema, the reply is
+/// forced through a single tool whose input is the schema.
+fn build_claude_request(
+    model: String,
+    text: String,
+    options: &LlmOptions,
+    schema: Option<&OutputSchema>,
+) -> ClaudeRequest {
     ClaudeRequest {
         model,
         max_tokens: options.max_tokens.unwrap_or(4096),
@@ -535,11 +667,25 @@ fn build_claude_request(model: String, text: String, options: &LlmOptions) -> Cl
             role: "user".to_string(),
             content: text,
         }],
+        tools: schema.map(|s| {
+            vec![ClaudeTool {
+                name: s.name.clone(),
+                description: "Record the answer as structured data.".to_string(),
+                input_schema: s.schema.clone(),
+            }]
+        }),
+        tool_choice: schema.map(|s| serde_json::json!({"type": "tool", "name": s.name})),
     }
 }
 
 fn first_text_block(content: &[ClaudeContentBlock]) -> Option<&str> {
     content.iter().find_map(|b| b.text.as_deref())
+}
+
+fn first_tool_input(content: &[ClaudeContentBlock]) -> Option<&str> {
+    content
+        .iter()
+        .find_map(|b| b.input.as_deref().map(|v| v.get()))
 }
 
 /// Says why a reply had no text, so logs and alerts can tell a refusal from an empty answer.
@@ -562,7 +708,8 @@ async fn call_claude(
     api_key: &str,
     text: String,
     options: &LlmOptions,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    schema: Option<&OutputSchema>,
+) -> Result<Reply, Box<dyn std::error::Error + Send + Sync>> {
     let model = resolve_model_from(
         options.model.as_deref(),
         std::env::var("CLAUDE_MODEL").ok(),
@@ -573,7 +720,7 @@ async fn call_claude(
     let base_url = std::env::var("CLAUDE_BASE_URL")
         .unwrap_or_else(|_| "https://api.anthropic.com/v1".to_string());
 
-    let request = build_claude_request(model, text, options);
+    let request = build_claude_request(model, text, options, schema);
 
     debug!("Sending request to Claude API");
 
@@ -611,8 +758,12 @@ async fn call_claude(
     }
 
     if let Some(content) = &resp.content {
-        if let Some(text) = first_text_block(content) {
-            return Ok(text.to_string());
+        let reply = match schema {
+            Some(_) => first_tool_input(content).map(|s| Reply::Structured(s.to_string())),
+            None => first_text_block(content).map(|s| Reply::Text(s.to_string())),
+        };
+        if let Some(reply) = reply {
+            return Ok(reply);
         }
     }
 
@@ -643,6 +794,47 @@ pub async fn call_llm(
     prompt: String,
     options: &LlmOptions,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    call_llm_reply(client, provider, api_key, prompt, options, None)
+        .await
+        .map(Reply::into_string)
+}
+
+/// Call any provider for a reply shaped like `T`, using its structured-output
+/// mode (OpenAI strict JSON schema, Claude forced tool use, Gemini JSON mode).
+/// Transport failures retry as in `call_llm`; a reply that does not decode as
+/// `T` returns a `SchemaMismatch` so the caller can re-request or give up.
+#[instrument(skip(client, api_key, prompt, options), fields(provider = %provider.as_str(), prompt_len = prompt.len()))]
+pub async fn call_llm_typed<T: DeserializeOwned + JsonSchema>(
+    client: &reqwest::Client,
+    provider: LlmProvider,
+    api_key: &str,
+    prompt: String,
+    options: &LlmOptions,
+) -> Result<Typed<T>, Box<dyn std::error::Error + Send + Sync>> {
+    let schema = output_schema_for::<T>();
+    let json = call_llm_reply(client, provider, api_key, prompt, options, Some(&schema))
+        .await?
+        .into_string();
+    match serde_json::from_str::<T>(&json) {
+        Ok(value) => Ok(Typed { value, json }),
+        Err(e) => {
+            warn!(schema = %schema.name, error = %e, body_len = json.len(), "Reply does not match schema");
+            Err(Box::new(SchemaMismatch {
+                detail: e.to_string(),
+                body: json,
+            }))
+        }
+    }
+}
+
+async fn call_llm_reply(
+    client: &reqwest::Client,
+    provider: LlmProvider,
+    api_key: &str,
+    prompt: String,
+    options: &LlmOptions,
+    schema: Option<&OutputSchema>,
+) -> Result<Reply, Box<dyn std::error::Error + Send + Sync>> {
     let backoff = ExponentialBackoff {
         max_elapsed_time: Some(Duration::from_secs(MAX_RETRY_ELAPSED_SECS)),
         ..Default::default()
@@ -652,18 +844,27 @@ pub async fn call_llm(
     let api_key = api_key.to_string();
     let provider_name = provider.as_str();
     let options = options.clone();
+    let schema = schema.cloned();
 
     retry(backoff, || {
         let client = client.clone();
         let api_key = api_key.clone();
         let prompt = prompt.clone();
         let options = options.clone();
+        let schema = schema.clone();
 
         async move {
+            let schema = schema.as_ref();
             let result = match provider {
-                LlmProvider::Gemini => call_gemini(&client, &api_key, prompt, &options).await,
-                LlmProvider::OpenAI => call_openai(&client, &api_key, prompt, &options).await,
-                LlmProvider::Claude => call_claude(&client, &api_key, prompt, &options).await,
+                LlmProvider::Gemini => {
+                    call_gemini(&client, &api_key, prompt, &options, schema).await
+                }
+                LlmProvider::OpenAI => {
+                    call_openai(&client, &api_key, prompt, &options, schema).await
+                }
+                LlmProvider::Claude => {
+                    call_claude(&client, &api_key, prompt, &options, schema).await
+                }
             };
             match result {
                 Ok(response) => Ok(response),
@@ -803,6 +1004,12 @@ mod tests {
         ] {
             assert!(can_fall_back(boxed(message).as_ref()), "{message}");
         }
+        // The serde detail can carry digits that look like a status code.
+        let mismatch: Box<dyn std::error::Error + Send + Sync> = Box::new(SchemaMismatch {
+            detail: "invalid type at line 1 column 500".into(),
+            body: String::new(),
+        });
+        assert!(!can_fall_back(mismatch.as_ref()));
         for message in [
             "Claude API returned 401 Unauthorized: invalid x-api-key",
             "Claude API returned 400 Bad Request: model: unknown",
@@ -1091,6 +1298,7 @@ mod tests {
             "gpt-6-astra".to_string(),
             "Hello, OpenAI!".to_string(),
             &LlmOptions::default(),
+            None,
         );
 
         let json: serde_json::Value = serde_json::to_value(&request).unwrap();
@@ -1113,7 +1321,8 @@ mod tests {
             max_tokens: Some(8000),
             ..Default::default()
         };
-        let request = build_openai_request("gpt-6-astra".to_string(), "Hi".to_string(), &options);
+        let request =
+            build_openai_request("gpt-6-astra".to_string(), "Hi".to_string(), &options, None);
 
         let json: serde_json::Value = serde_json::to_value(&request).unwrap();
         assert_eq!(json["messages"][0]["role"], "system");
@@ -1139,7 +1348,10 @@ mod tests {
 
         let choices = response.choices.unwrap();
         assert_eq!(choices.len(), 1);
-        assert_eq!(choices[0].message.content, "Hello from OpenAI!");
+        assert_eq!(
+            choices[0].message.content.as_deref(),
+            Some("Hello from OpenAI!")
+        );
     }
 
     #[test]
@@ -1166,10 +1378,14 @@ mod tests {
                 role: "user".to_string(),
                 content: "Hello, Claude!".to_string(),
             }],
+            tools: None,
+            tool_choice: None,
         };
 
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("claude-opus-4-8"));
+        assert!(!json.contains("tools"));
+        assert!(!json.contains("tool_choice"));
         assert!(json.contains("Hello, Claude!"));
         assert!(json.contains("4096"));
         assert!(json.contains("max_tokens"));
@@ -1186,8 +1402,12 @@ mod tests {
             temperature: Some(0.3),
             ..Default::default()
         };
-        let request =
-            build_claude_request("claude-opus-4-8".to_string(), "Hi".to_string(), &options);
+        let request = build_claude_request(
+            "claude-opus-4-8".to_string(),
+            "Hi".to_string(),
+            &options,
+            None,
+        );
         let json = serde_json::to_string(&request).unwrap();
         assert!(!json.contains("temperature"), "{json}");
     }
@@ -1199,8 +1419,12 @@ mod tests {
             effort: Some("high".to_string()),
             ..Default::default()
         };
-        let request =
-            build_claude_request("claude-opus-4-8".to_string(), "Hi".to_string(), &options);
+        let request = build_claude_request(
+            "claude-opus-4-8".to_string(),
+            "Hi".to_string(),
+            &options,
+            None,
+        );
         let json = serde_json::to_string(&request).unwrap();
         assert!(!json.contains("effort"), "{json}");
         assert!(!json.contains("temperature"), "{json}");
@@ -1214,15 +1438,24 @@ mod tests {
             max_tokens: Some(16000),
             ..Default::default()
         };
-        let request = build_claude_request("claude-opus-5".to_string(), "Hi".to_string(), &options);
+        let request = build_claude_request(
+            "claude-opus-5".to_string(),
+            "Hi".to_string(),
+            &options,
+            None,
+        );
         assert_eq!(request.max_tokens, 16000);
     }
 
     #[test]
     fn test_build_claude_request_default_max_tokens_when_none() {
         let options = LlmOptions::default();
-        let request =
-            build_claude_request("claude-opus-4-8".to_string(), "Hi".to_string(), &options);
+        let request = build_claude_request(
+            "claude-opus-4-8".to_string(),
+            "Hi".to_string(),
+            &options,
+            None,
+        );
         assert_eq!(request.max_tokens, 4096);
     }
 
@@ -1268,9 +1501,13 @@ mod tests {
     fn test_first_text_block_skips_leading_thinking_block() {
         // Opus 5 adaptive thinking: first block can be a thinking block with no text.
         let blocks = vec![
-            ClaudeContentBlock { text: None },
+            ClaudeContentBlock {
+                text: None,
+                input: None,
+            },
             ClaudeContentBlock {
                 text: Some("answer".to_string()),
+                input: None,
             },
         ];
         assert_eq!(first_text_block(&blocks), Some("answer"));
@@ -1278,8 +1515,294 @@ mod tests {
 
     #[test]
     fn test_first_text_block_none_when_no_text() {
-        let blocks = vec![ClaudeContentBlock { text: None }];
+        let blocks = vec![ClaudeContentBlock {
+            text: None,
+            input: None,
+        }];
         assert_eq!(first_text_block(&blocks), None);
+    }
+
+    // --- Structured output request/response shapes ---
+
+    #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
+    struct Pick {
+        index: usize,
+        reason: Option<String>,
+    }
+
+    #[test]
+    fn test_output_schema_name_and_strictness() {
+        let schema = output_schema_for::<Pick>();
+        assert_eq!(schema.name, "Pick");
+        assert_eq!(schema.schema["additionalProperties"], false);
+        assert_eq!(
+            schema.schema["required"],
+            serde_json::json!(["index", "reason"])
+        );
+        assert!(schema.schema.get("$schema").is_none());
+        assert!(schema.schema.get("title").is_none());
+    }
+
+    #[test]
+    fn test_openai_request_with_schema_sets_strict_response_format() {
+        let schema = output_schema_for::<Pick>();
+        let request = build_openai_request(
+            "gpt-6-astra".to_string(),
+            "Hi".to_string(),
+            &LlmOptions::default(),
+            Some(&schema),
+        );
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["response_format"]["type"], "json_schema");
+        assert_eq!(json["response_format"]["json_schema"]["name"], "Pick");
+        assert_eq!(json["response_format"]["json_schema"]["strict"], true);
+        assert_eq!(
+            json["response_format"]["json_schema"]["schema"]["properties"]["index"]["type"],
+            "integer"
+        );
+    }
+
+    #[test]
+    fn test_claude_request_with_schema_forces_single_tool() {
+        let schema = output_schema_for::<Pick>();
+        let request = build_claude_request(
+            "claude-opus-5".to_string(),
+            "Hi".to_string(),
+            &LlmOptions::default(),
+            Some(&schema),
+        );
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["tools"].as_array().unwrap().len(), 1);
+        assert_eq!(json["tools"][0]["name"], "Pick");
+        assert_eq!(json["tools"][0]["input_schema"]["type"], "object");
+        assert_eq!(
+            json["tool_choice"],
+            serde_json::json!({"type": "tool", "name": "Pick"})
+        );
+    }
+
+    #[test]
+    fn test_claude_tool_use_block_keeps_raw_input() {
+        let resp: ClaudeResponse = serde_json::from_str(
+            r#"{"content":[{"type":"text","text":"Choosing."},{"type":"tool_use","id":"t1","name":"Pick","input":{"index": 3, "reason": null}}],"stop_reason":"tool_use"}"#,
+        )
+        .unwrap();
+        let content = resp.content.unwrap();
+        assert_eq!(first_text_block(&content), Some("Choosing."));
+        assert_eq!(
+            first_tool_input(&content),
+            Some(r#"{"index": 3, "reason": null}"#)
+        );
+    }
+
+    #[test]
+    fn test_openai_response_with_refusal_and_null_content_parses() {
+        let resp: OpenAIResponse =
+            serde_json::from_str(r#"{"choices":[{"message":{"content":null,"refusal":"No."}}]}"#)
+                .unwrap();
+        let msg = &resp.choices.unwrap()[0].message;
+        assert_eq!(msg.content, None);
+        assert_eq!(msg.refusal.as_deref(), Some("No."));
+    }
+
+    #[test]
+    fn test_schema_mismatch_is_recognised_through_box() {
+        let err: Box<dyn std::error::Error + Send + Sync> = Box::new(SchemaMismatch {
+            detail: "missing field".into(),
+            body: "{}".into(),
+        });
+        assert!(is_schema_mismatch(err.as_ref()));
+        assert!(err.to_string().contains("missing field"));
+        let other: Box<dyn std::error::Error + Send + Sync> = "timeout".into();
+        assert!(!is_schema_mismatch(other.as_ref()));
+    }
+
+    // --- call_llm_typed behaviour (wiremock) ---
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_call_llm_typed_openai_decodes_strict_reply() {
+        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(body_partial_json(serde_json::json!({
+                "response_format": {"type": "json_schema", "json_schema": {"name": "Pick", "strict": true}}
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{"message": {"content": "{\"index\":2,\"reason\":\"deep\"}"}}]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        unsafe { std::env::set_var("OPENAI_BASE_URL", server.uri()) };
+        let result = call_llm_typed::<Pick>(
+            &reqwest::Client::new(),
+            LlmProvider::OpenAI,
+            "key",
+            "hi".to_string(),
+            &opts_with_model("gpt-test"),
+        )
+        .await;
+        unsafe { std::env::remove_var("OPENAI_BASE_URL") };
+
+        let typed = result.unwrap();
+        assert_eq!(
+            typed.value,
+            Pick {
+                index: 2,
+                reason: Some("deep".into())
+            }
+        );
+        assert_eq!(typed.json, "{\"index\":2,\"reason\":\"deep\"}");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_call_llm_typed_claude_decodes_tool_input() {
+        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/messages"))
+            .and(body_partial_json(
+                serde_json::json!({"tool_choice": {"type": "tool", "name": "Pick"}}),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "content": [{"type": "tool_use", "id": "t1", "name": "Pick",
+                             "input": {"index": 4, "reason": null}}],
+                "stop_reason": "tool_use"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        unsafe { std::env::set_var("CLAUDE_BASE_URL", server.uri()) };
+        let result = call_llm_typed::<Pick>(
+            &reqwest::Client::new(),
+            LlmProvider::Claude,
+            "key",
+            "hi".to_string(),
+            &opts_with_model("claude-test-model"),
+        )
+        .await;
+        unsafe { std::env::remove_var("CLAUDE_BASE_URL") };
+
+        let typed = result.unwrap();
+        assert_eq!(
+            typed.value,
+            Pick {
+                index: 4,
+                reason: None
+            }
+        );
+        let body: serde_json::Value = serde_json::from_str(&typed.json).unwrap();
+        assert_eq!(body["index"], 4);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_call_llm_typed_schema_mismatch_is_not_retried() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{"message": {"content": "{\"index\":\"two\"}"}}]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        unsafe { std::env::set_var("OPENAI_BASE_URL", server.uri()) };
+        let result = call_llm_typed::<Pick>(
+            &reqwest::Client::new(),
+            LlmProvider::OpenAI,
+            "key",
+            "hi".to_string(),
+            &opts_with_model("gpt-test"),
+        )
+        .await;
+        unsafe { std::env::remove_var("OPENAI_BASE_URL") };
+
+        let err = result.unwrap_err();
+        assert!(is_schema_mismatch(err.as_ref()), "{err}");
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_call_llm_typed_openai_refusal_is_permanent() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{"message": {"content": null, "refusal": "Not this."}}]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        unsafe { std::env::set_var("OPENAI_BASE_URL", server.uri()) };
+        let result = call_llm_typed::<Pick>(
+            &reqwest::Client::new(),
+            LlmProvider::OpenAI,
+            "key",
+            "hi".to_string(),
+            &opts_with_model("gpt-test"),
+        )
+        .await;
+        unsafe { std::env::remove_var("OPENAI_BASE_URL") };
+
+        let err = result.unwrap_err();
+        assert!(!is_schema_mismatch(err.as_ref()));
+        assert!(err.to_string().contains("refusal"), "{err}");
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_call_llm_typed_gemini_requests_json_mode() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "candidates": [{"content": {"parts": [{"text": "{\"index\":1,\"reason\":null}"}]}}]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        unsafe { std::env::set_var("GEMINI_BASE_URL", server.uri()) };
+        let result = call_llm_typed::<Pick>(
+            &reqwest::Client::new(),
+            LlmProvider::Gemini,
+            "key",
+            "hi".to_string(),
+            &opts_with_model("gemini-test-model"),
+        )
+        .await;
+        unsafe { std::env::remove_var("GEMINI_BASE_URL") };
+
+        assert_eq!(result.unwrap().value.index, 1);
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(
+            body["generationConfig"]["responseMimeType"],
+            "application/json"
+        );
+        assert!(body["generationConfig"].get("temperature").is_none());
     }
 
     // --- call_llm retry behaviour (wiremock) ---
