@@ -73,14 +73,14 @@ pub fn final_selection_prompt_with_context(
 /// The V3 Insight Brief: structured JSON summary of the selected article.
 pub fn summary_prompt(source: &str, title: &str, content: &str) -> String {
     format!(
-        r#"You are writing an insight brief for a senior engineering leader who builds developer platforms at a hedge fund (C++/Rust, low-latency, AI tooling). They'll read this on their phone in 2-3 minutes.
+        r#"You are writing an insight brief for experienced software engineers. Readers span systems programming (C++, Rust), Python, AI and agentic engineering, data, and platforms, and each follows different interests. They'll read this on their phone in 2-3 minutes.
 
 Extract the single most important insight from this article and structure it as JSON.
 
 Output ONLY valid JSON matching this schema:
 {{
   "key_idea": "One sentence. The distilled insight — the 'so what'. No hedging.",
-  "why_it_matters": "2-3 sentences. Why this matters to someone building low-latency systems and developer platforms.",
+  "why_it_matters": "2-3 sentences. The practical consequence for engineers working in the article's own domain.",
   "what_to_change": "One concrete action to try this week, or null if the article doesn't support one. Never invent advice.",
   "deep_dive": "Full technical analysis in markdown. 3-5 paragraphs. Include specific numbers, techniques, trade-offs. Be dense — every sentence should teach something.",
   "meta": {{
@@ -92,7 +92,9 @@ Output ONLY valid JSON matching this schema:
 Rules:
 - Write all reader-facing text in English, including titles, headings, quotations, and JSON string values, regardless of the source language. Translate non-English prose; use English names or transliterations for proper nouns. Preserve code, URLs, and technical identifiers.
 - key_idea must be one sentence, direct and opinionated
-- why_it_matters must connect to the reader's specific context
+- why_it_matters states the consequence directly, in the article's own domain
+- Never name or describe the audience: no "For a ... team" or "For ... engineers" openers, no employer, industry, or role
+- Do not tie the article to a language, industry, or domain it does not discuss
 - deep_dive uses markdown formatting (bold, bullets, code) for scannability
 - Be compact — say it in fewer words, not more
 - No fluff, no filler transitions, no "in conclusion"
@@ -115,6 +117,16 @@ mod tests {
         assert!(prompt.contains("Write all reader-facing text in English"));
         assert!(prompt.contains("including titles, headings, quotations, and JSON string values"));
         assert!(prompt.contains("Оптимизация Rust"));
+    }
+
+    #[test]
+    fn test_summary_prompt_names_no_reader_persona() {
+        let prompt = summary_prompt("HN", "Title", "Content");
+        for phrase in ["hedge fund", "low-latency", "engineering leader"] {
+            assert!(!prompt.contains(phrase), "persona phrase: {phrase}");
+        }
+        assert!(prompt.contains("Python") && prompt.contains("agentic"));
+        assert!(prompt.contains("Never name or describe the audience"));
     }
 
     #[test]
