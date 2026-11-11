@@ -1239,8 +1239,8 @@ mod tests {
     fn test_shadow_model_reads_env() {
         // Pure precedence check via the helper's inner fn.
         assert_eq!(
-            shadow_model_from(Some("claude-opus-5".to_string())),
-            Some("claude-opus-5".to_string())
+            shadow_model_from(Some("claude-opus-5-5".to_string())),
+            Some("claude-opus-5-5".to_string())
         );
         assert_eq!(shadow_model_from(Some(String::new())), None); // empty = off
         assert_eq!(shadow_model_from(None), None);
@@ -1505,9 +1505,8 @@ mod tests {
     fn claude_smoke_body() -> serde_json::Value {
         serde_json::json!({
             "content": [
-                {"type": "text", "text": "OK"},
-                {"type": "tool_use", "id": "t1", "name": "InsightBrief",
-                 "input": serde_json::from_str::<serde_json::Value>(&smoke_brief_json()).unwrap()}
+                {"type": "thinking", "thinking": ""},
+                {"type": "text", "text": smoke_brief_json()}
             ]
         })
     }
@@ -1689,7 +1688,7 @@ mod tests {
         unsafe {
             std::env::set_var("CLAUDE_BASE_URL", mock_server.uri());
             std::env::set_var("OPENAI_BASE_URL", mock_server.uri());
-            std::env::set_var("SHADOW_MODEL", "claude-opus-5");
+            std::env::set_var("SHADOW_MODEL", "claude-opus-5-5");
         }
 
         let result = run_smoke(&reqwest::Client::new(), &test_keys()).await;

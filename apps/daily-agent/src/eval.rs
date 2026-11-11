@@ -144,7 +144,7 @@ mod tests {
         };
         let mut entries = vec![make_entry(
             "summaries/v3/2026-03-20.json",
-            Some("claude-opus-5"),
+            Some("claude-opus-5-5"),
             Some("v3"),
         )];
 
@@ -160,7 +160,7 @@ mod tests {
         };
         let mut entries = vec![make_entry(
             "summaries/v3/2026-03-20.json",
-            Some("claude-opus-5"),
+            Some("claude-opus-5-5"),
             Some("v3"),
         )];
         apply_eval_scores(&verdict, &mut entries);
