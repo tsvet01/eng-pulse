@@ -107,7 +107,7 @@ elif args[:2] == ['builds', 'submit'] and os.environ['TEST_BUILD_FAILURE'] == 't
                 deploys = [e for e in events if e[:4] == ["gcloud", "run", "jobs", "deploy"]]
                 self.assertEqual(len(deploys), 1)
                 args = deploys[0]
-                self.assertTrue(any("SHADOW_MODEL=claude-opus-5" in arg for arg in args))
+                self.assertTrue(any("SHADOW_MODEL=claude-opus-5-5" in arg for arg in args))
                 self.assertIn("ANTHROPIC_API_KEY=anthropic-api-key:latest,OPENAI_API_KEY=openai-api-key:latest", args)
                 self.assertFalse(any("pipeline-service-token" in arg for arg in args))
                 self.assertTrue(any("PULSE_API_URL" in arg for arg in args

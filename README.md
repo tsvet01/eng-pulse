@@ -57,7 +57,7 @@ Secrets live in GCP Secret Manager (pipeline) and GitHub environments (Hetzner);
 - Schedules: daily 06:00 UTC, explorer Sundays 08:00 UTC (Cloud Scheduler).
 - Alerts: job failure, "no summary in 25h", fatal-error log match (`scripts/setup-monitoring.sh`).
 - Model changes are verified with a real run. Published briefs use pinned `gpt-6-astra` with high reasoning, a 16,000-token completion budget, and a 180-second timeout. Article selection and title translation stay on Claude; other requests retain their 60-second timeout.
-- `SHADOW_MODEL=claude-opus-5` keeps Claude as the comparison baseline. After merging and CI deployment, the next 06:00 UTC run generates both briefs from the same article and prompt. Compare `summaries/v3/<date>.json` (Astra) with `summaries/v3-shadow/<date>.json` (Claude) in the public `tsvet01-agent-brain` GCS bucket. Shadow failures only warn; shadow briefs do not appear in the app.
+- `SHADOW_MODEL=claude-opus-5-5` keeps Claude as the comparison baseline. After merging and CI deployment, the next 06:00 UTC run generates both briefs from the same article and prompt. Compare `summaries/v3/<date>.json` (Astra) with `summaries/v3-shadow/<date>.json` (Claude) in the public `tsvet01-agent-brain` GCS bucket. Shadow failures only warn; shadow briefs do not appear in the app.
 - Run `scripts/shadow-eval-report.sh 7` for pairwise results. Before this promotion, production was Claude and shadow was Astra. The Astra judge also scores Astra's production brief, so manually compare faithfulness, useful technical detail, and action quality alongside its scores.
 - Postgres backups: nightly `pg_dump` from the box to `gs://tsvet01-pulse-backups`.
 

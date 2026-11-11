@@ -153,7 +153,7 @@ mod tests {
             V3,
             "https://x",
             "T",
-            Some("claude-opus-5"),
+            Some("claude-opus-5-5"),
             Some(0.9),
         )
         .unwrap();

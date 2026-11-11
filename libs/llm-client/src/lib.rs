@@ -22,7 +22,7 @@ pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.1-pro-preview";
 pub const DEFAULT_OPENAI_MODEL: &str = "gpt-6-astra";
 
 /// Default Claude model to use
-pub const DEFAULT_CLAUDE_MODEL: &str = "claude-opus-5";
+pub const DEFAULT_CLAUDE_MODEL: &str = "claude-opus-5-5";
 
 /// Supported LLM providers
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -105,7 +105,7 @@ pub struct LlmOptions {
     /// `max_completion_tokens` (omitted when None). Thinking/reasoning tokens
     /// count against it on both, so callers expecting reasoning should raise it.
     pub max_tokens: Option<u32>,
-    /// OpenAI `reasoning_effort` (`low|medium|high|xhigh|max`). Ignored by Claude.
+    /// OpenAI `reasoning_effort` (`low|medium|high|xhigh|max`). Claude is pinned to `high`.
     pub effort: Option<String>,
 }
 
@@ -588,30 +588,19 @@ struct ClaudeMessage {
 }
 
 #[derive(Serialize, Debug)]
-struct ClaudeTool {
-    name: String,
-    description: String,
-    input_schema: serde_json::Value,
-}
-
-#[derive(Serialize, Debug)]
 struct ClaudeRequest {
     model: String,
     max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<String>,
     messages: Vec<ClaudeMessage>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tools: Option<Vec<ClaudeTool>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tool_choice: Option<serde_json::Value>,
+    output_config: serde_json::Value,
 }
 
-/// Text block or tool_use block; `input` keeps the model's JSON byte-for-byte.
+/// Only text blocks carry `text`; thinking blocks are skipped.
 #[derive(Deserialize, Debug)]
 struct ClaudeContentBlock {
     text: Option<String>,
-    input: Option<Box<serde_json::value::RawValue>>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -651,14 +640,19 @@ pub async fn call_claude_with_retry(
 }
 
 /// Build a Claude API request body. `temperature` is never sent: Opus 4.7+
-/// rejects it with a 400 invalid_request_error. With a schema, the reply is
-/// forced through a single tool whose input is the schema.
+/// rejects it with a 400 invalid_request_error. Effort is pinned to `high`
+/// (Opus 5.5 defaults to `medium`). With a schema, the reply is JSON text
+/// constrained by `output_config.format`; Opus 5.5 rejects forced tool use.
 fn build_claude_request(
     model: String,
     text: String,
     options: &LlmOptions,
     schema: Option<&OutputSchema>,
 ) -> ClaudeRequest {
+    let mut output_config = serde_json::json!({"effort": "high"});
+    if let Some(s) = schema {
+        output_config["format"] = serde_json::json!({"type": "json_schema", "schema": s.schema});
+    }
     ClaudeRequest {
         model,
         max_tokens: options.max_tokens.unwrap_or(4096),
@@ -667,25 +661,12 @@ fn build_claude_request(
             role: "user".to_string(),
             content: text,
         }],
-        tools: schema.map(|s| {
-            vec![ClaudeTool {
-                name: s.name.clone(),
-                description: "Record the answer as structured data.".to_string(),
-                input_schema: s.schema.clone(),
-            }]
-        }),
-        tool_choice: schema.map(|s| serde_json::json!({"type": "tool", "name": s.name})),
+        output_config,
     }
 }
 
 fn first_text_block(content: &[ClaudeContentBlock]) -> Option<&str> {
     content.iter().find_map(|b| b.text.as_deref())
-}
-
-fn first_tool_input(content: &[ClaudeContentBlock]) -> Option<&str> {
-    content
-        .iter()
-        .find_map(|b| b.input.as_deref().map(|v| v.get()))
 }
 
 /// Says why a reply had no text, so logs and alerts can tell a refusal from an empty answer.
@@ -757,13 +738,14 @@ async fn call_claude(
         );
     }
 
-    if let Some(content) = &resp.content {
-        let reply = match schema {
-            Some(_) => first_tool_input(content).map(|s| Reply::Structured(s.to_string())),
-            None => first_text_block(content).map(|s| Reply::Text(s.to_string())),
-        };
-        if let Some(reply) = reply {
-            return Ok(reply);
+    // A refusal may carry partial text that does not match the schema.
+    let refused = resp.stop_reason.as_deref() == Some("refusal");
+    if let Some(text) = resp.content.as_deref().and_then(first_text_block) {
+        if !refused {
+            return Ok(match schema {
+                Some(_) => Reply::Structured(text.to_string()),
+                None => Reply::Text(text.to_string()),
+            });
         }
     }
 
@@ -800,7 +782,7 @@ pub async fn call_llm(
 }
 
 /// Call any provider for a reply shaped like `T`, using its structured-output
-/// mode (OpenAI strict JSON schema, Claude forced tool use, Gemini JSON mode).
+/// mode (OpenAI strict JSON schema, Claude JSON outputs, Gemini JSON mode).
 /// Transport failures retry as in `call_llm`; a reply that does not decode as
 /// `T` returns a `SchemaMismatch` so the caller can re-request or give up.
 #[instrument(skip(client, api_key, prompt, options), fields(provider = %provider.as_str(), prompt_len = prompt.len()))]
@@ -1378,14 +1360,12 @@ mod tests {
                 role: "user".to_string(),
                 content: "Hello, Claude!".to_string(),
             }],
-            tools: None,
-            tool_choice: None,
+            output_config: serde_json::json!({"effort": "high"}),
         };
 
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("claude-opus-4-8"));
-        assert!(!json.contains("tools"));
-        assert!(!json.contains("tool_choice"));
+        assert!(!json.contains("tool"));
         assert!(json.contains("Hello, Claude!"));
         assert!(json.contains("4096"));
         assert!(json.contains("max_tokens"));
@@ -1413,10 +1393,10 @@ mod tests {
     }
 
     #[test]
-    fn test_claude_request_ignores_effort() {
-        // `effort` is an OpenAI knob; Claude must not see it or any temperature.
+    fn test_claude_request_pins_effort() {
+        // `options.effort` is an OpenAI knob; Claude stays at `high` and sees no temperature.
         let options = LlmOptions {
-            effort: Some("high".to_string()),
+            effort: Some("low".to_string()),
             ..Default::default()
         };
         let request = build_claude_request(
@@ -1426,7 +1406,10 @@ mod tests {
             None,
         );
         let json = serde_json::to_string(&request).unwrap();
-        assert!(!json.contains("effort"), "{json}");
+        assert!(
+            json.contains(r#""output_config":{"effort":"high"}"#),
+            "{json}"
+        );
         assert!(!json.contains("temperature"), "{json}");
     }
 
@@ -1439,7 +1422,7 @@ mod tests {
             ..Default::default()
         };
         let request = build_claude_request(
-            "claude-opus-5".to_string(),
+            "claude-opus-5-5".to_string(),
             "Hi".to_string(),
             &options,
             None,
@@ -1501,13 +1484,9 @@ mod tests {
     fn test_first_text_block_skips_leading_thinking_block() {
         // Opus 5 adaptive thinking: first block can be a thinking block with no text.
         let blocks = vec![
-            ClaudeContentBlock {
-                text: None,
-                input: None,
-            },
+            ClaudeContentBlock { text: None },
             ClaudeContentBlock {
                 text: Some("answer".to_string()),
-                input: None,
             },
         ];
         assert_eq!(first_text_block(&blocks), Some("answer"));
@@ -1515,10 +1494,7 @@ mod tests {
 
     #[test]
     fn test_first_text_block_none_when_no_text() {
-        let blocks = vec![ClaudeContentBlock {
-            text: None,
-            input: None,
-        }];
+        let blocks = vec![ClaudeContentBlock { text: None }];
         assert_eq!(first_text_block(&blocks), None);
     }
 
@@ -1563,36 +1539,29 @@ mod tests {
     }
 
     #[test]
-    fn test_claude_request_with_schema_forces_single_tool() {
+    fn test_claude_request_with_schema_uses_json_outputs() {
         let schema = output_schema_for::<Pick>();
         let request = build_claude_request(
-            "claude-opus-5".to_string(),
+            "claude-opus-5-5".to_string(),
             "Hi".to_string(),
             &LlmOptions::default(),
             Some(&schema),
         );
         let json = serde_json::to_value(&request).unwrap();
-        assert_eq!(json["tools"].as_array().unwrap().len(), 1);
-        assert_eq!(json["tools"][0]["name"], "Pick");
-        assert_eq!(json["tools"][0]["input_schema"]["type"], "object");
-        assert_eq!(
-            json["tool_choice"],
-            serde_json::json!({"type": "tool", "name": "Pick"})
-        );
+        // Opus 5.5 rejects forced tool_choice with a 400.
+        assert!(json.get("tools").is_none() && json.get("tool_choice").is_none());
+        assert_eq!(json["output_config"]["effort"], "high");
+        assert_eq!(json["output_config"]["format"]["type"], "json_schema");
+        assert_eq!(json["output_config"]["format"]["schema"]["type"], "object");
     }
 
     #[test]
-    fn test_claude_tool_use_block_keeps_raw_input() {
+    fn test_claude_refusal_with_partial_text_is_not_a_reply() {
         let resp: ClaudeResponse = serde_json::from_str(
-            r#"{"content":[{"type":"text","text":"Choosing."},{"type":"tool_use","id":"t1","name":"Pick","input":{"index": 3, "reason": null}}],"stop_reason":"tool_use"}"#,
+            r#"{"content":[{"type":"text","text":"{\"index\":"}],"stop_reason":"refusal","stop_details":{"category":"cyber"}}"#,
         )
         .unwrap();
-        let content = resp.content.unwrap();
-        assert_eq!(first_text_block(&content), Some("Choosing."));
-        assert_eq!(
-            first_tool_input(&content),
-            Some(r#"{"index": 3, "reason": null}"#)
-        );
+        assert!(claude_no_content_error(&resp).contains(REFUSAL_MARKER));
     }
 
     #[test]
@@ -1670,12 +1639,12 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/messages"))
             .and(body_partial_json(
-                serde_json::json!({"tool_choice": {"type": "tool", "name": "Pick"}}),
+                serde_json::json!({"output_config": {"format": {"type": "json_schema"}}}),
             ))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "content": [{"type": "tool_use", "id": "t1", "name": "Pick",
-                             "input": {"index": 4, "reason": null}}],
-                "stop_reason": "tool_use"
+                "content": [{"type": "thinking", "thinking": ""},
+                            {"type": "text", "text": "{\"index\": 4, \"reason\": null}"}],
+                "stop_reason": "end_turn"
             })))
             .expect(1)
             .mount(&server)

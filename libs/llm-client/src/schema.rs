@@ -4,7 +4,7 @@ use serde_json::Value;
 
 /// Make a schemars schema acceptable to strict structured-output modes:
 /// every object lists all properties as required and forbids extras, and
-/// annotations providers reject (`$schema`, `title`, `format`) are dropped.
+/// keywords providers reject (`$schema`, `title`, `format`, bounds) are dropped.
 pub fn strict_schema(mut schema: Value) -> Value {
     tighten(&mut schema);
     schema
@@ -14,7 +14,16 @@ fn tighten(node: &mut Value) {
     let Value::Object(map) = node else {
         return;
     };
-    for key in ["$schema", "title", "format"] {
+    // Claude JSON outputs reject numeric and length bounds; serde enforces the types.
+    for key in [
+        "$schema",
+        "title",
+        "format",
+        "minimum",
+        "maximum",
+        "minLength",
+        "maxLength",
+    ] {
         map.remove(key);
     }
     if let Some(Value::Object(props)) = map.get_mut("properties") {
@@ -77,6 +86,10 @@ mod tests {
         assert_eq!(required, ["idea", "indices", "inner", "note"]);
         assert_eq!(schema["additionalProperties"], false);
         assert_eq!(schema["type"], "object");
+        assert_eq!(
+            schema["properties"]["indices"]["items"],
+            serde_json::json!({"type": "integer"})
+        );
         assert_eq!(
             schema["properties"]["idea"]["description"],
             "Field docs survive as descriptions."

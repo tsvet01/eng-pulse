@@ -5,7 +5,7 @@ umask 077
 
 : "${PROJECT_ID:?}" "${REGION:?}" "${REPO_NAME:?}" "${IMAGE_TAG:?}"
 secrets='ANTHROPIC_API_KEY=anthropic-api-key:latest,OPENAI_API_KEY=openai-api-key:latest'
-env_updates='SHADOW_MODEL=claude-opus-5'
+env_updates='SHADOW_MODEL=claude-opus-5-5'
 env_removals='ANTHROPIC_API_KEY,OPENAI_API_KEY,PIPELINE_SERVICE_TOKEN,PULSE_API_URL'
 
 case "${PULSE_API_ENABLED:-false}" in
