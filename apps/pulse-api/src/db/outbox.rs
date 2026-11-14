@@ -65,12 +65,18 @@ pub async fn tokens(
     })
 }
 
-pub async fn deactivate_token(pool: &PgPool, user_id: Uuid, token: &str) -> sqlx::Result<()> {
+pub async fn deactivate_token(
+    pool: &PgPool,
+    user_id: Uuid,
+    token: &str,
+    now: DateTime<Utc>,
+) -> sqlx::Result<()> {
     sqlx::query(
-        "update device_tokens set is_active=false, updated_at=now() where user_id=$1 and token=$2",
+        "update device_tokens set is_active=false, updated_at=$3 where user_id=$1 and token=$2",
     )
     .bind(user_id)
     .bind(token)
+    .bind(now)
     .execute(pool)
     .await
     .map(|_| ())
@@ -126,7 +132,7 @@ async fn close(
     error: Option<&str>,
     now: DateTime<Utc>,
 ) -> sqlx::Result<()> {
-    sqlx::query("update notification_outbox set state=$4, last_error=$5, lease_expires_at=null, updated_at=$6 where feed_id=$1 and date=$2 and user_id=$3 and channel='push'")
-        .bind(l.feed_id).bind(l.date).bind(l.user_id).bind(state).bind(error).bind(now)
+    sqlx::query("update notification_outbox set state=$4, last_error=$5, lease_expires_at=null, updated_at=$6 where feed_id=$1 and date=$2 and user_id=$3 and channel='push' and state='pending' and attempts=$7")
+        .bind(l.feed_id).bind(l.date).bind(l.user_id).bind(state).bind(error).bind(now).bind(l.attempts)
         .execute(&mut **tx).await.map(|_| ())
 }

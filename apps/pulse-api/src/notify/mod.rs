@@ -3,7 +3,7 @@ pub mod message;
 use crate::db::{briefs, outbox};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use sqlx::PgPool;
-use std::future::Future;
+use std::{future::Future, pin::Pin, task::Poll};
 use tracing::{error, warn};
 
 pub const MAX_ATTEMPTS: i32 = 5;
@@ -86,22 +86,34 @@ async fn process(
     let Some(brief) = briefs::get(pool, l.feed_id, l.date).await? else {
         return outbox::mark_skipped(pool, l, "no_brief", now).await;
     };
-    let slug: String = sqlx::query_scalar("select slug from feeds where id=$1")
-        .bind(l.feed_id)
-        .fetch_one(pool)
-        .await?;
+    let slug: Option<String> = sqlx::query_scalar(
+        "select slug from feeds where id=$1 and is_active and slug='engineering'",
+    )
+    .bind(l.feed_id)
+    .fetch_optional(pool)
+    .await?;
+    let Some(slug) = slug else {
+        return outbox::mark_skipped(pool, l, "feed_inactive", now).await;
+    };
     let msg = message::build(&brief, &slug);
 
+    let sends = tokens.iter().map(|(token, sandbox)| {
+        let msg = &msg;
+        Box::pin(async move {
+            match tokio::time::timeout(SEND_TIMEOUT, d.push(token, *sandbox, msg)).await {
+                Ok(r) => r,
+                Err(_) => Err(SendError::Transient("send timed out".into())),
+            }
+        }) as Pin<Box<dyn Future<Output = Result<(), SendError>> + Send + '_>>
+    });
+    let results = join_all(sends.collect()).await;
+
     let (mut accepted, mut transient, mut permanent) = (false, None, None);
-    for (token, sandbox) in &tokens {
-        let r = match tokio::time::timeout(SEND_TIMEOUT, d.push(token, *sandbox, &msg)).await {
-            Ok(r) => r,
-            Err(_) => Err(SendError::Transient("send timed out".into())),
-        };
+    for ((token, _), r) in tokens.iter().zip(results) {
         match r {
             Ok(()) => accepted = true,
             Err(SendError::InvalidToken) => {
-                outbox::deactivate_token(pool, l.user_id, token).await?
+                outbox::deactivate_token(pool, l.user_id, token, now).await?
             }
             Err(SendError::Transient(e)) => transient = Some(scrub(&e, token)),
             Err(SendError::Permanent(e)) => permanent = Some(scrub(&e, token)),
@@ -125,4 +137,26 @@ async fn process(
 
 fn scrub(e: &str, token: &str) -> String {
     e.replace(token, "[token]").chars().take(200).collect()
+}
+
+async fn join_all<'a, T>(mut fs: Vec<Pin<Box<dyn Future<Output = T> + Send + 'a>>>) -> Vec<T> {
+    let mut out: Vec<Option<T>> = fs.iter().map(|_| None).collect();
+    std::future::poll_fn(|cx| {
+        let mut pending = false;
+        for (f, o) in fs.iter_mut().zip(out.iter_mut()) {
+            if o.is_none() {
+                match f.as_mut().poll(cx) {
+                    Poll::Ready(v) => *o = Some(v),
+                    Poll::Pending => pending = true,
+                }
+            }
+        }
+        if pending {
+            Poll::Pending
+        } else {
+            Poll::Ready(())
+        }
+    })
+    .await;
+    out.into_iter().flatten().collect()
 }

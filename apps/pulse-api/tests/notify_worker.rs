@@ -1,5 +1,5 @@
 mod common;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, SubsecRound, Utc};
 use common::*;
 use pulse_api::db::outbox;
 use pulse_api::notify::{run_once, Deliver, Message, SendError, MAX_ATTEMPTS};
@@ -71,7 +71,7 @@ async fn setup(pool: &PgPool, tokens: &[&str]) -> Setup {
         .await
         .unwrap();
     tx.commit().await.unwrap();
-    let now = Utc::now();
+    let now = Utc::now().trunc_subsecs(6);
     Setup { user, now }
 }
 
@@ -170,7 +170,7 @@ async fn setup_again(pool: &PgPool) -> Setup {
         .unwrap();
     sqlx::query("insert into notification_outbox(feed_id,date,user_id,channel) values($1,$2,$3,'push') on conflict do nothing")
         .bind(feed).bind(date).bind(user).execute(pool).await.unwrap();
-    let now = Utc::now();
+    let now = Utc::now().trunc_subsecs(6);
     Setup { user, now }
 }
 
@@ -366,4 +366,45 @@ async fn sandbox_token_is_sent_with_sandbox_flag(pool: PgPool) {
     c.sort();
     assert_eq!((c[0].0.as_str(), c[0].1), ("t1", true));
     assert_eq!((c[1].0.as_str(), c[1].1), ("t2", false));
+}
+
+#[sqlx::test]
+async fn retried_row_is_not_released_in_the_same_run(pool: PgPool) {
+    let s = setup(&pool, &["t1"]).await;
+    let f = Fake::default();
+    f.script("t1", vec![Err(transient())]);
+    assert_eq!(run_once(&pool, &f, s.now).await.unwrap(), 1);
+    assert_eq!(f.calls().len(), 1);
+}
+
+#[sqlx::test]
+async fn late_outcome_from_a_superseded_lease_is_ignored(pool: PgPool) {
+    let s = setup(&pool, &["t1"]).await;
+    let old = outbox::lease(&pool, s.now, 1).await.unwrap().pop().unwrap();
+    let later = s.now + Duration::minutes(3);
+    let new = outbox::lease(&pool, later, 1).await.unwrap().pop().unwrap();
+    assert_eq!(new.attempts, 2);
+    outbox::mark_sent(&pool, &new, later).await.unwrap();
+    outbox::mark_failed(&pool, &old, "late", later)
+        .await
+        .unwrap();
+    assert_eq!(row(&pool, &s).await.0, "sent");
+    assert_eq!(sent_count(&pool).await, 1);
+}
+
+#[sqlx::test]
+async fn deactivated_feed_is_skipped(pool: PgPool) {
+    let s = setup(&pool, &["t1"]).await;
+    sqlx::query("update feeds set is_active=false")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let f = Fake::default();
+    run_once(&pool, &f, s.now).await.unwrap();
+    assert!(f.calls().is_empty());
+    let r = row(&pool, &s).await;
+    assert_eq!(
+        (r.0.as_str(), r.2.as_deref()),
+        ("skipped", Some("feed_inactive"))
+    );
 }
