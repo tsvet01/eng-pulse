@@ -9,13 +9,14 @@ pub async fn upsert(
     platform: &str,
     token: &str,
     app_version: Option<&str>,
+    environment: &str,
 ) -> sqlx::Result<bool> {
     let owner: Option<Uuid> = sqlx::query_scalar(
-        "insert into device_tokens (user_id, platform, token, app_version) values ($1,$2,$3,$4)
-         on conflict (token) do update set platform = excluded.platform, app_version = excluded.app_version, is_active = true, updated_at = now()
+        "insert into device_tokens (user_id, platform, token, app_version, environment) values ($1,$2,$3,$4,$5)
+         on conflict (token) do update set platform = excluded.platform, app_version = excluded.app_version, environment = excluded.environment, is_active = true, updated_at = now()
          where device_tokens.user_id = excluded.user_id
          returning user_id")
-        .bind(user_id).bind(platform).bind(token).bind(app_version)
+        .bind(user_id).bind(platform).bind(token).bind(app_version).bind(environment)
         .fetch_optional(pool).await?;
     Ok(owner.is_some())
 }

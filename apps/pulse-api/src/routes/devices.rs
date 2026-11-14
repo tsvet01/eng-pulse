@@ -11,6 +11,7 @@ struct Register {
     platform: String,
     token: String,
     app_version: Option<String>,
+    environment: Option<String>,
 }
 
 async fn register(
@@ -23,12 +24,19 @@ async fn register(
             "platform must be ios|android and token non-empty".into(),
         ));
     }
+    let environment = b.environment.as_deref().unwrap_or("production");
+    if !matches!(environment, "sandbox" | "production") {
+        return Err(ApiError::BadRequest(
+            "environment must be sandbox|production".into(),
+        ));
+    }
     let owned = devices::upsert(
         &s.pool,
         user.id,
         &b.platform,
         b.token.trim(),
         b.app_version.as_deref(),
+        environment,
     )
     .await?;
     if owned {

@@ -100,3 +100,25 @@ async fn device_token_cannot_be_taken_over(pool: PgPool) {
             .unwrap();
     assert_eq!(ver.as_deref(), Some("2.0"));
 }
+
+#[sqlx::test]
+async fn device_environment_is_stored_validated_and_updated(pool: PgPool) {
+    let (_s, url) = jwks_mock().await;
+    let (uid, t) = registered_user(&pool, "env@example.com", false).await;
+    let app = app(pool.clone(), &url);
+    let put = |body| send(&app, Method::PUT, "/v1/devices", Some(&t), Some(body));
+    let env = || async {
+        sqlx::query_scalar::<_, String>("select environment from device_tokens where user_id = $1")
+            .bind(uid)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+
+    let (s, _) = put(json!({"platform": "ios", "token": "tok-e"})).await;
+    assert_eq!((s, env().await.as_str()), (204, "production"));
+    let (s, _) = put(json!({"platform": "ios", "token": "tok-e", "environment": "sandbox"})).await;
+    assert_eq!((s, env().await.as_str()), (204, "sandbox"));
+    let (s, _) = put(json!({"platform": "ios", "token": "tok-e", "environment": "staging"})).await;
+    assert_eq!((s, env().await.as_str()), (422, "sandbox"));
+}
