@@ -1,6 +1,8 @@
 """Prepare the API runtime configuration without printing private values."""
 
 import argparse
+import binascii
+import base64
 import json
 import os
 from pathlib import Path
@@ -47,6 +49,14 @@ def prepare_runtime(base, public):
         value = settings.get(key, "")
         if not value or "<" in value or ">" in value:
             raise ValueError(f"PULSE_ENV requires an existing non-placeholder {key}")
+
+    if "APNS_KEY_BASE64" in settings:
+        try:
+            pem = base64.b64decode(settings["APNS_KEY_BASE64"], validate=True).decode("utf-8")
+        except (binascii.Error, UnicodeDecodeError):
+            pem = ""
+        if "-----BEGIN PRIVATE KEY-----" not in pem:
+            raise ValueError("PULSE_ENV APNS_KEY_BASE64 must be a base64-encoded PEM private key")
 
     settings.update(public)
     for number, value in enumerate(settings.values(), 1):

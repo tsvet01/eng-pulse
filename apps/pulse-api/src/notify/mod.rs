@@ -147,7 +147,9 @@ async fn process(
         match r {
             Ok(()) => accepted = true,
             Err(SendError::InvalidToken) => {
-                outbox::deactivate_token(pool, l.user_id, token, now).await?
+                if let Err(e) = outbox::deactivate_token(pool, l.user_id, token, now).await {
+                    error!(error = %e, "token deactivation failed");
+                }
             }
             Err(SendError::Transient(e)) => transient = Some(scrub(&e, token)),
             Err(SendError::Permanent(e)) => permanent = Some(scrub(&e, token)),
@@ -193,4 +195,15 @@ async fn join_all<'a, T>(mut fs: Vec<Pin<Box<dyn Future<Output = T> + Send + 'a>
     })
     .await;
     out.into_iter().flatten().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backoff_steps_up_then_caps() {
+        let mins: Vec<i64> = (1..=5).map(|a| backoff(a).num_minutes()).collect();
+        assert_eq!(mins, [1, 5, 15, 60, 60]);
+    }
 }

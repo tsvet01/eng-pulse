@@ -17,4 +17,5 @@ jobs:
       - name: Verify engineering mirror freshness
         run: bash scripts/check-pilot-freshness.sh
       - name: Verify push notification health
+        if: ${{ !cancelled() }}
         run: bash scripts/check-pilot-notifications.sh

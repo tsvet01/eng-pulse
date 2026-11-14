@@ -87,12 +87,15 @@ impl Deliver for Apns {
             "date": m.date.to_string(),
         });
         let jwt = self.bearer().await?;
+        let expiration = chrono::Utc::now().timestamp() + 12 * 3600;
         let resp = self
             .http
             .post(format!("{base}/3/device/{token}"))
             .header("authorization", format!("bearer {jwt}"))
             .header("apns-topic", &self.cfg.topic)
             .header("apns-push-type", "alert")
+            .header("apns-collapse-id", format!("{}-{}", m.feed_slug, m.date))
+            .header("apns-expiration", expiration.to_string())
             .json(&body)
             .send()
             .await

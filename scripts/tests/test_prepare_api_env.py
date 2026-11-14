@@ -1,3 +1,4 @@
+import base64
 import importlib.util
 import json
 import os
@@ -24,7 +25,8 @@ PUBLIC = {
 PASSWORD = "test-existing-database-password"
 TOKEN = "test-existing-service-token"
 BASE = f"POSTGRES_PASSWORD={PASSWORD}\nPIPELINE_SERVICE_TOKEN={TOKEN}\nRUST_LOG=info\n"
-APNS = "APNS_KEY_BASE64=dGVzdC1rZXk=\nAPNS_KEY_ID=TESTKEYID1\nAPNS_TEAM_ID=TESTTEAMID\n"
+KEY = "LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCnRlc3QKLS0tLS1FTkQgUFJJVkFURSBLRVktLS0tLQo="
+APNS = f"APNS_KEY_BASE64={KEY}\nAPNS_KEY_ID=TESTKEYID1\nAPNS_TEAM_ID=TESTTEAMID\n"
 
 
 class PrepareApiEnvTest(unittest.TestCase):
@@ -56,6 +58,26 @@ class PrepareApiEnvTest(unittest.TestCase):
         result = MODULE.prepare_runtime(BASE + "NOTIFY_PUSH_ENABLED=true\n", PUBLIC)
         self.assertIn("NOTIFY_PUSH_ENABLED=false\n", result)
 
+    def test_apns_key_must_be_a_base64_pem_whatever_the_flag(self):
+        valid = f"APNS_KEY_BASE64={KEY}\n"
+        for flag in ("false", "true"):
+            with self.subTest(flag=flag):
+                public = {**PUBLIC, "NOTIFY_PUSH_ENABLED": flag}
+                body = BASE + (APNS if flag == "true" else valid)
+                self.assertIn(valid, MODULE.prepare_runtime(body, public))
+        bad = {
+            "garbage": "not*base64!",
+            "non-utf8": base64.b64encode(b"\xff\xfe\xfd").decode(),
+            "non-pem": base64.b64encode(b"just some text").decode(),
+        }
+        for name, value in bad.items():
+            for flag in ("false", "true"):
+                with self.subTest(case=name, flag=flag), self.assertRaises(ValueError) as error:
+                    MODULE.prepare_runtime(BASE + APNS.replace(KEY, value),
+                                           {**PUBLIC, "NOTIFY_PUSH_ENABLED": flag})
+                self.assertIn("APNS_KEY_BASE64", str(error.exception))
+                self.assertNotIn(value, str(error.exception))
+
     def test_push_on_requires_apns_secrets_without_echoing_them(self):
         public = {**PUBLIC, "NOTIFY_PUSH_ENABLED": "true"}
         for name in ("APNS_KEY_BASE64", "APNS_KEY_ID", "APNS_TEAM_ID"):
@@ -66,13 +88,13 @@ class PrepareApiEnvTest(unittest.TestCase):
                     with self.assertRaises(ValueError) as error:
                         MODULE.prepare_runtime(base, public)
                     self.assertIn(name, str(error.exception))
-                    self.assertNotIn("dGVzdC1rZXk=", str(error.exception))
+                    self.assertNotIn(KEY, str(error.exception))
 
     def test_push_on_passes_apns_secrets_through(self):
         result = MODULE.prepare_runtime(BASE + APNS, {**PUBLIC, "NOTIFY_PUSH_ENABLED": "true"})
         values = dict(line.split("=", 1) for line in result.splitlines())
         self.assertEqual(values["NOTIFY_PUSH_ENABLED"], "true")
-        self.assertEqual(values["APNS_KEY_BASE64"], "dGVzdC1rZXk=")
+        self.assertEqual(values["APNS_KEY_BASE64"], KEY)
         self.assertEqual(values["APNS_KEY_ID"], "TESTKEYID1")
         self.assertEqual(values["APNS_TEAM_ID"], "TESTTEAMID")
 

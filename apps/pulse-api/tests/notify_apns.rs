@@ -68,6 +68,10 @@ async fn posts_alert_with_required_headers() {
     let h = |k: &str| req.headers.get(k).unwrap().to_str().unwrap().to_string();
     assert_eq!(h("apns-topic"), "org.tsvetkov.eng-pulse");
     assert_eq!(h("apns-push-type"), "alert");
+    assert_eq!(h("apns-collapse-id"), "engineering-2026-11-14");
+    let exp: i64 = h("apns-expiration").parse().unwrap();
+    let want = chrono::Utc::now().timestamp() + 12 * 3600;
+    assert!((exp - want).abs() <= 60, "expiration {exp} vs {want}");
     let (head, claims) = jwt_parts(&h("authorization"));
     assert_eq!(head.alg, jsonwebtoken::Algorithm::ES256);
     assert_eq!(head.kid.as_deref(), Some("KEY123"));

@@ -22,7 +22,13 @@ Optional: `APNS_TOPIC` (default `org.tsvetkov.eng-pulse`), `APNS_PRODUCTION_URL`
 
 1. With the flag `false`, deploy and confirm `GET /healthz/notifications` returns 503 `{"reason":"disabled"}`. The `Pilot feed freshness` workflow accepts that state.
 2. Set `NOTIFY_PUSH_ENABLED` to `true` in `config/pilot-auth.json`, merge and deploy. The endpoint returns 200 `{"reason":"current"}`; 503 reasons are `failed` (a push failed in the last 24 h), `backlog` (a pending push waited over 30 min) and `unavailable` (database error).
-3. Pushes are queued only for a brief dated today, so enabling never releases a backlog. Confirm receipt on a real device after the next 06:00 UTC brief.
+3. Pushes are queued only for a brief dated today. On a first enable there is nothing to release. Confirm receipt on a real device after the next 06:00 UTC brief.
+
+On a re-enable, rows still `pending` from before the flag was turned off are sent if they are under 12 hours old. Skip them first if that is unwanted:
+
+```sql
+update notification_outbox set state='skipped', last_error='operator', lease_expires_at=null where state='pending';
+```
 
 ## Inspect
 
@@ -42,7 +48,17 @@ where channel = 'push' and state = 'failed' order by updated_at desc limit 20;
 
 ## Turn off
 
-Set `NOTIFY_PUSH_ENABLED` to `false` and deploy. Nothing is enqueued and the worker does not start. Rows left `pending` are not replayed on a later enable: they expire after 12 hours and are skipped.
+Set `NOTIFY_PUSH_ENABLED` to `false` and deploy. Nothing is enqueued and the worker does not start. Rows left `pending` stay in the table: on a later enable those under 12 hours old are sent, older ones are skipped as expired. Run the `skipped` update from [Enable](#enable) before re-enabling to drop them.
+
+## Failed rows
+
+One `failed` row keeps `/healthz/notifications` degraded for 24 hours. After a credentials mistake, fix the secrets and acknowledge the rows:
+
+```sql
+update notification_outbox set state='skipped', last_error='operator' where state='failed';
+```
+
+Failed rows are never resent: that day's push is lost.
 
 ## Delivery guarantees
 

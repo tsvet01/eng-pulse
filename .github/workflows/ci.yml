@@ -365,7 +365,7 @@ jobs:
           printf '%s\n' "$FILE_CADDY" > Caddyfile
           printf '%s\n' "$FILE_BACKUP" > backup.sh && chmod 755 backup.sh
           printf '%s\n' "$PULSE_ENV" > .env
-          bad=$(grep -nvE '^[A-Z_]+=[^[:space:]]*$' .env | cut -d: -f1 | tr '\n' ' '); [ -z "$bad" ] || { echo "PULSE_ENV malformed at line(s) $bad: expected KEY=value with no spaces"; exit 1; }
+          bad=$(grep -nvE '^[A-Z][A-Z0-9_]*=[^[:space:]]*$' .env | cut -d: -f1 | tr '\n' ' '); [ -z "$bad" ] || { echo "PULSE_ENV malformed at line(s) $bad: expected KEY=value with no spaces"; exit 1; }
           cat .env.defaults >> .env                      # compose interpolates only from .env
           echo "PULSE_API_TAG=$IMAGE_TAG" >> .env
           printf '%s\n' "$GCS_BACKUP_SA_JSON" > gcs-backup-sa.json

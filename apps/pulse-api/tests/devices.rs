@@ -108,6 +108,56 @@ async fn device_token_cannot_be_taken_over(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn inactive_token_can_be_taken_over_but_active_cannot(pool: PgPool) {
+    let (_s, url) = jwks_mock().await;
+    let (uid_a, t_a) = registered_user(&pool, "a2@example.com", false).await;
+    let (uid_b, t_b) = registered_user(&pool, "b2@example.com", false).await;
+    let app = app(pool.clone(), &url);
+    let put = |t: &String, tk: String, ver: &'static str| {
+        let (app, t) = (&app, t.clone());
+        async move {
+            send(
+                app,
+                Method::PUT,
+                "/v1/devices",
+                Some(&t),
+                Some(json!({"platform": "ios", "token": tk, "app_version": ver})),
+            )
+            .await
+        }
+    };
+    let row = |tk: String| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_as::<_, (uuid::Uuid, bool, Option<String>)>(
+                "select user_id, is_active, app_version from device_tokens where token = $1",
+            )
+            .bind(tk)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+
+    assert_eq!(put(&t_a, tok('b'), "1").await.0, 204);
+    let (status, _) = send(
+        &app,
+        Method::DELETE,
+        "/v1/devices",
+        Some(&t_a),
+        Some(json!({"token": tok('b')})),
+    )
+    .await;
+    assert_eq!(status, 204);
+    assert_eq!(put(&t_b, tok('b'), "2").await.0, 204);
+    assert_eq!(row(tok('b')).await, (uid_b, true, Some("2".into())));
+
+    assert_eq!(put(&t_a, tok('c'), "1").await.0, 204);
+    assert_eq!(put(&t_b, tok('c'), "2").await.0, 409);
+    assert_eq!(row(tok('c')).await, (uid_a, true, Some("1".into())));
+}
+
+#[sqlx::test]
 async fn device_environment_is_stored_validated_and_updated(pool: PgPool) {
     let (_s, url) = jwks_mock().await;
     let (uid, t) = registered_user(&pool, "env@example.com", false).await;

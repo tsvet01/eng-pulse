@@ -55,6 +55,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         cfg: cfg.clone(),
         jwks,
     };
+    let apns = cfg.apns.clone().map(notify::apns::Apns::new).transpose()?; // a bad key stops startup before /healthz can answer
     let listener = tokio::net::TcpListener::bind(&cfg.bind_addr).await?;
     info!(bind = %cfg.bind_addr, "pulse-api listening");
     let server = async { axum::serve(listener, routes::router(state.clone())).await };
@@ -67,10 +68,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     let push = async {
-        let Some(apns) = cfg.apns.clone() else {
+        let Some(apns) = apns else {
             return std::future::pending().await;
         };
-        let apns = notify::apns::Apns::new(apns)?;
         notify::run(state.pool.clone(), apns).await?;
         Err::<(), String>("notification worker stopped unexpectedly".into())
     };
