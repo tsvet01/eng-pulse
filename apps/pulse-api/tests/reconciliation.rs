@@ -50,7 +50,7 @@ async fn archive(server: &MockServer) {
         .await;
 }
 async fn cycle(pool: &PgPool, server: &MockServer) -> Result<CycleOutcome, String> {
-    reconciliation::reconcile_cycle(pool, &source(server), end(), Duration::ZERO).await
+    reconciliation::reconcile_cycle(pool, &source(server), end(), Duration::ZERO, false).await
 }
 
 #[sqlx::test]
@@ -336,7 +336,8 @@ async fn cancelled_worker_releases_ownership_and_does_not_invent_success(pool: P
     let worker_pool = pool.clone();
     let worker_source = source(&server);
     let worker = tokio::spawn(async move {
-        reconciliation::reconcile_cycle(&worker_pool, &worker_source, end(), Duration::ZERO).await
+        reconciliation::reconcile_cycle(&worker_pool, &worker_source, end(), Duration::ZERO, false)
+            .await
     });
     tokio::time::timeout(Duration::from_secs(3), async {
         while server.received_requests().await.unwrap().is_empty() {
@@ -381,7 +382,7 @@ async fn lost_owner_cannot_overwrite_a_successor_checkpoint(pool: PgPool) {
     let old_source =
         PublicArchive::new(format!("http://{address}/archive/").parse().unwrap()).unwrap();
     let old_worker = tokio::spawn(async move {
-        reconciliation::reconcile_cycle(&old_pool, &old_source, end(), Duration::ZERO).await
+        reconciliation::reconcile_cycle(&old_pool, &old_source, end(), Duration::ZERO, false).await
     });
     tokio::time::timeout(Duration::from_secs(3), entered.acquire())
         .await

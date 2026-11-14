@@ -117,10 +117,14 @@ pub async fn reconcile_cycle(
     source: &PublicArchive,
     end: NaiveDate,
     retry_delay: Duration,
+    push_enabled: bool,
 ) -> Result<CycleOutcome, String> {
-    tokio::time::timeout(CYCLE_LIMIT, cycle_inner(pool, source, end, retry_delay))
-        .await
-        .map_err(|_| "reconciliation cycle exceeded its eleven-minute limit".to_string())?
+    tokio::time::timeout(
+        CYCLE_LIMIT,
+        cycle_inner(pool, source, end, retry_delay, push_enabled),
+    )
+    .await
+    .map_err(|_| "reconciliation cycle exceeded its eleven-minute limit".to_string())?
 }
 
 async fn cycle_inner(
@@ -128,6 +132,7 @@ async fn cycle_inner(
     source: &PublicArchive,
     end: NaiveDate,
     retry_delay: Duration,
+    push_enabled: bool,
 ) -> Result<CycleOutcome, String> {
     // Autocommitted checkpoints use the lock's session; a lost owner cannot write again.
     let mut owner = db(pool.acquire()).await?;
@@ -149,7 +154,7 @@ async fn cycle_inner(
                 .execute(&mut *owner),
         )
         .await?;
-        match history::import_window(pool, source, end).await {
+        match history::import_window(pool, source, end, push_enabled).await {
             Ok(report) => {
                 let latest = report.expected_dates.iter().max().copied();
                 let json = serde_json::to_value(&report)
@@ -179,7 +184,7 @@ async fn cycle_inner(
     Ok(CycleOutcome::Failed)
 }
 
-pub async fn run(pool: PgPool) -> Result<(), String> {
+pub async fn run(pool: PgPool, push_enabled: bool) -> Result<(), String> {
     let source = PublicArchive::new(
         history::GCS_ROOT
             .parse()
@@ -189,7 +194,15 @@ pub async fn run(pool: PgPool) -> Result<(), String> {
     ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         ticks.tick().await;
-        match reconcile_cycle(&pool, &source, Utc::now().date_naive(), RETRY_DELAY).await {
+        match reconcile_cycle(
+            &pool,
+            &source,
+            Utc::now().date_naive(),
+            RETRY_DELAY,
+            push_enabled,
+        )
+        .await
+        {
             Ok(outcome) => tracing::info!(?outcome, "History reconciliation cycle finished"),
             Err(error) => tracing::error!(%error,"History reconciliation cycle failed"),
         }

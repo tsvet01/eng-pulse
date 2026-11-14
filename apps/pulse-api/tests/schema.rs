@@ -25,6 +25,7 @@ async fn schema_has_all_tables(pool: PgPool) {
             "invites",
             "legacy_brief_identity",
             "memberships",
+            "notification_outbox",
             "notifications_sent",
             "reconciliation_state",
             "runs",

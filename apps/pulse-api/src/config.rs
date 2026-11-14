@@ -10,6 +10,7 @@ pub struct Config {
     pub pipeline_service_token: String,
     pub admin_email: Option<String>,
     pub reconcile_history_enabled: bool,
+    pub notify_push_enabled: bool,
 }
 
 impl Config {
@@ -31,6 +32,11 @@ impl Config {
                 None | Some("false") => false,
                 Some("true") => true,
                 _ => return Err("RECONCILE_HISTORY_ENABLED must be true or false".into()),
+            },
+            notify_push_enabled: match v.get("NOTIFY_PUSH_ENABLED").map(String::as_str) {
+                None | Some("false") => false,
+                Some("true") => true,
+                _ => return Err("NOTIFY_PUSH_ENABLED must be true or false".into()),
             },
             database_url: req("DATABASE_URL")?,
             bind_addr: v

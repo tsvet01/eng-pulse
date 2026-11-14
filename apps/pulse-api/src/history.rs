@@ -1,5 +1,5 @@
 //! Silent, atomic import of already-published engineering briefs.
-use crate::db::briefs::BriefRow;
+use crate::db::{briefs::BriefRow, outbox};
 use chrono::{DateTime, Days, NaiveDate, Utc};
 use pulse_core::Brief;
 use serde::{Deserialize, Serialize};
@@ -252,16 +252,21 @@ pub async fn import_window(
     pool: &PgPool,
     source: &PublicArchive,
     end: NaiveDate,
+    push_enabled: bool,
 ) -> Result<ImportReport, String> {
-    tokio::time::timeout(Duration::from_secs(180), import_inner(pool, source, end))
-        .await
-        .map_err(|_| "history import exceeded its three-minute limit".to_string())?
+    tokio::time::timeout(
+        Duration::from_secs(180),
+        import_inner(pool, source, end, push_enabled),
+    )
+    .await
+    .map_err(|_| "history import exceeded its three-minute limit".to_string())?
 }
 
 async fn import_inner(
     pool: &PgPool,
     source: &PublicArchive,
     end: NaiveDate,
+    push_enabled: bool,
 ) -> Result<ImportReport, String> {
     let start = end
         .checked_sub_days(Days::new(29))
@@ -303,10 +308,11 @@ async fn import_inner(
         unchanged: 0,
         verified: 0,
     };
+    let today = Utc::now().date_naive();
     for brief in &briefs {
         let date =
             NaiveDate::parse_from_str(&brief.date, "%Y-%m-%d").map_err(|_| "invalid brief date")?;
-        // Import never replaces a live write or runs notification/LLM paths.
+        // Import never replaces a live write or runs LLM paths.
         let result = sqlx::query("insert into briefs(feed_id,date,format,payload,article_url,article_title,model,eval_score) values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(feed_id,date) do nothing")
             .bind(feed_id).bind(date).bind(&brief.format).bind(&brief.payload).bind(&brief.article_url)
             .bind(&brief.article_title).bind(&brief.model).bind(brief.eval_score)
@@ -323,6 +329,11 @@ async fn import_inner(
             return Err(format!(
                 "stored brief differs from archive for {date}; no changes committed"
             ));
+        }
+        if result.rows_affected() == 1 {
+            outbox::enqueue(&mut tx, feed_id, date, today, push_enabled)
+                .await
+                .map_err(|_| format!("could not enqueue notifications for {date}"))?;
         }
         report.inserted += result.rows_affected() as usize;
         report.unchanged += usize::from(result.rows_affected() == 0);
@@ -352,7 +363,7 @@ pub async fn run(pool: &PgPool, args: &[String]) -> Result<(), String> {
             .parse()
             .map_err(|_| "invalid public archive root")?,
     )?;
-    let report = import_window(pool, &source, Utc::now().date_naive()).await?;
+    let report = import_window(pool, &source, Utc::now().date_naive(), false).await?;
     println!(
         "{}",
         serde_json::to_string(&report).map_err(|_| "could not encode import report")?

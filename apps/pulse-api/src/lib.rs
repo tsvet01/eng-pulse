@@ -57,7 +57,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(&cfg.bind_addr).await?;
     info!(bind = %cfg.bind_addr, "pulse-api listening");
     if cfg.reconcile_history_enabled {
-        let worker = reconciliation::run(state.pool.clone());
+        let worker = reconciliation::run(state.pool.clone(), cfg.notify_push_enabled);
         tokio::select! {
             result = axum::serve(listener, routes::router(state)) => result?,
             result = worker => {

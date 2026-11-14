@@ -1,6 +1,6 @@
 use crate::{
     auth::extractors::ServiceToken,
-    db::{briefs, feedback, feeds, runs},
+    db::{briefs, feedback, feeds, outbox, runs},
     error::ApiError,
     state::AppState,
 };
@@ -78,8 +78,13 @@ async fn ingest_brief(
     let feed_id = briefs::feed_id_by_slug(&s.pool, &b.feed_slug)
         .await?
         .ok_or(ApiError::NotFound("feed"))?;
-    let created = briefs::upsert(&s.pool, feed_id, date, &b).await?;
-    // Phase 1: fan-out is off; Phase 3 triggers notifications here.
+    let mut tx = s.pool.begin().await?;
+    let created = briefs::upsert(&mut tx, feed_id, date, &b).await?;
+    if created {
+        let today = chrono::Utc::now().date_naive();
+        outbox::enqueue(&mut tx, feed_id, date, today, s.cfg.notify_push_enabled).await?;
+    }
+    tx.commit().await?;
     Ok(Json(
         json!({"feed_id": feed_id, "date": b.date, "created": created}),
     ))

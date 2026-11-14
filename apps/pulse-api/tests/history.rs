@@ -94,7 +94,9 @@ async fn import_preserves_payload_metadata_and_personal_state_on_replay(pool: Pg
         json!({"deep_dive":"Minimal valid brief"}),
     )
     .await;
-    let first = import_window(&pool, &source(&server), end()).await.unwrap();
+    let first = import_window(&pool, &source(&server), end(), false)
+        .await
+        .unwrap();
     assert_eq!((first.inserted, first.unchanged, first.verified), (2, 0, 2));
     assert_eq!(
         first.window_start,
@@ -120,7 +122,9 @@ async fn import_preserves_payload_metadata_and_personal_state_on_replay(pool: Pg
     .execute(&pool)
     .await
     .unwrap();
-    let replay = import_window(&pool, &source(&server), end()).await.unwrap();
+    let replay = import_window(&pool, &source(&server), end(), false)
+        .await
+        .unwrap();
     assert_eq!(
         (replay.inserted, replay.unchanged, replay.verified),
         (0, 2, 2)
@@ -170,7 +174,7 @@ async fn conflicting_existing_brief_rolls_back_new_rows(pool: PgPool) {
     .await;
     artifact(&server, "2026-10-16", payload()).await;
     artifact(&server, "2026-10-17", payload()).await;
-    let error = import_window(&pool, &source(&server), end())
+    let error = import_window(&pool, &source(&server), end(), false)
         .await
         .unwrap_err();
     assert!(error.contains("differs"), "{error}");
@@ -188,7 +192,7 @@ async fn conflicting_existing_brief_rolls_back_new_rows(pool: PgPool) {
 #[sqlx::test]
 async fn missing_or_disabled_feed_stops_before_network(pool: PgPool) {
     let server = MockServer::start().await;
-    assert!(import_window(&pool, &source(&server), end())
+    assert!(import_window(&pool, &source(&server), end(), false)
         .await
         .unwrap_err()
         .contains("engineering"));
@@ -197,7 +201,7 @@ async fn missing_or_disabled_feed_stops_before_network(pool: PgPool) {
         .execute(&pool)
         .await
         .unwrap();
-    assert!(import_window(&pool, &source(&server), end())
+    assert!(import_window(&pool, &source(&server), end(), false)
         .await
         .unwrap_err()
         .contains("engineering"));
@@ -243,7 +247,9 @@ async fn rejects_untrusted_or_ambiguous_manifest_before_artifact_fetch(pool: PgP
         };
         manifest(&server, rows).await;
         assert!(
-            import_window(&pool, &source(&server), end()).await.is_err(),
+            import_window(&pool, &source(&server), end(), false)
+                .await
+                .is_err(),
             "{kind}"
         );
         assert_eq!(server.received_requests().await.unwrap().len(), 2, "{kind}");
@@ -280,7 +286,9 @@ async fn missing_malformed_redirected_or_large_artifact_never_partially_imports(
             .mount(&server)
             .await;
         assert!(
-            import_window(&pool, &source(&server), end()).await.is_err(),
+            import_window(&pool, &source(&server), end(), false)
+                .await
+                .is_err(),
             "{kind}"
         );
         assert_eq!(count(&pool).await, 0, "{kind}");
@@ -311,7 +319,9 @@ async fn ignores_other_formats_and_dates_outside_the_window(pool: PgPool) {
     )
     .await;
     artifact(&server, "2026-10-17", payload()).await;
-    let report = import_window(&pool, &source(&server), end()).await.unwrap();
+    let report = import_window(&pool, &source(&server), end(), false)
+        .await
+        .unwrap();
     assert_eq!(report.expected_dates, vec![end()]);
     assert_eq!(count(&pool).await, 1);
     let requests = server.received_requests().await.unwrap();
@@ -342,7 +352,9 @@ async fn rejects_failed_redirected_or_oversized_manifest_without_writes(pool: Pg
             .mount(&server)
             .await;
         assert!(
-            import_window(&pool, &source(&server), end()).await.is_err(),
+            import_window(&pool, &source(&server), end(), false)
+                .await
+                .is_err(),
             "{kind}"
         );
         assert_eq!(count(&pool).await, 0);
@@ -378,7 +390,7 @@ async fn changing_manifest_during_download_aborts_before_writes(pool: PgPool) {
         .mount(&server)
         .await;
     artifact(&server, "2026-10-17", payload()).await;
-    let error = import_window(&pool, &source(&server), end())
+    let error = import_window(&pool, &source(&server), end(), false)
         .await
         .unwrap_err();
     assert!(error.contains("changed"), "{error}");
@@ -410,7 +422,7 @@ async fn unchanged_manifest_with_newer_or_equal_artifact_aborts_before_writes(po
             )
             .mount(&server)
             .await;
-        let error = import_window(&pool, &source(&server), end())
+        let error = import_window(&pool, &source(&server), end(), false)
             .await
             .unwrap_err();
         assert!(error.contains("publication"), "{error}");
@@ -448,7 +460,9 @@ async fn downloads_exact_generation_instead_of_stale_cached_artifact(pool: PgPoo
         .with_priority(1)
         .mount(&server)
         .await;
-    import_window(&pool, &source(&server), end()).await.unwrap();
+    import_window(&pool, &source(&server), end(), false)
+        .await
+        .unwrap();
     assert_eq!(
         pulse_api::db::briefs::get(&pool, id, end())
             .await
@@ -507,7 +521,9 @@ async fn invalid_object_metadata_or_unavailable_generation_never_writes(pool: Pg
             .mount(&server)
             .await;
         assert!(
-            import_window(&pool, &source(&server), end()).await.is_err(),
+            import_window(&pool, &source(&server), end(), false)
+                .await
+                .is_err(),
             "{kind}"
         );
         assert_eq!(count(&pool).await, 0, "{kind}");
