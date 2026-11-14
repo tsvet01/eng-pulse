@@ -82,8 +82,8 @@ Output ONLY valid JSON matching this schema:
 {{
   "key_idea": "One sentence. The distilled insight — the 'so what'. No hedging.",
   "why_it_matters": "2-3 sentences. The practical consequence for engineers working in the article's own domain.",
-  "what_to_change": "One concrete action to try this week, or null if the article doesn't support one. Never invent advice.",
-  "deep_dive": "Full technical analysis in markdown. 3-5 paragraphs. Include specific numbers, techniques, trade-offs. Be dense — every sentence should teach something.",
+  "what_to_change": "One concrete action to try this week, written as a clear, simple step, or null if the article doesn't support one. Never invent advice.",
+  "deep_dive": "Explain how it works, in markdown. 3-5 short paragraphs: first the concrete problem, then the mechanism that solves it step by step, then the article's own numbers and trade-offs. A reader who has not seen the article should be able to explain the mechanism afterwards.",
   "meta": {{
     "confidence": 0.85,
     "category": "one of: performance-engineering, ai-tooling, platform-engineering, leadership, trading-systems, architecture, general"
@@ -96,8 +96,10 @@ Rules:
 - why_it_matters states the consequence directly, in the article's own domain
 - Never name or describe the audience: no "For a ... team" or "For ... engineers" openers, no employer, industry, or role
 - Do not tie the article to a language, industry, or domain it does not discuss
-- deep_dive uses markdown formatting (bold, bullets, code) for scannability
-- Be compact — say it in fewer words, not more
+- Use plain, simple language and short sentences. Prefer the everyday word; define a term the first time if the article's readers might not know it.
+- Be concrete: explain the specific mechanism and name the specifics from the article. Do not replace them with a general principle or mental model.
+- Every number, name and mechanism must come from the article. If the article does not say it, leave it out.
+- deep_dive uses light markdown (bold lead-ins, short bullets, code). No tables. Keep it short enough to read in 2-3 minutes.
 - No fluff, no filler transitions, no "in conclusion"
 - Ignore promotional content
 
@@ -111,6 +113,14 @@ Content: {}"#,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_summary_prompt_asks_for_concrete_grounded_briefs() {
+        let prompt = summary_prompt("HN", "Title", "Content");
+        assert!(prompt.contains("first the concrete problem, then the mechanism"));
+        assert!(prompt.contains("must come from the article"));
+        assert!(prompt.contains("No tables"));
+    }
 
     #[test]
     fn test_summary_requires_english_for_russian_source() {
