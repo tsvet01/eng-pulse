@@ -1,4 +1,7 @@
-use crate::{auth::extractors::AuthUser, db::devices, error::ApiError, state::AppState};
+use crate::{
+    auth::extractors::AuthUser, db::devices, error::ApiError, notify::apns::is_apns_token,
+    state::AppState,
+};
 use axum::{extract::State, http::StatusCode, routing::put, Json, Router};
 use serde::Deserialize;
 
@@ -24,6 +27,17 @@ async fn register(
             "platform must be ios|android and token non-empty".into(),
         ));
     }
+    let ios = b.platform == "ios";
+    if ios && !is_apns_token(b.token.trim()) {
+        return Err(ApiError::BadRequest(
+            "ios token must be 64-200 hex characters".into(),
+        ));
+    }
+    let token = if ios {
+        b.token.trim().to_ascii_lowercase()
+    } else {
+        b.token.trim().to_string()
+    };
     let environment = b.environment.as_deref().unwrap_or("production");
     if !matches!(environment, "sandbox" | "production") {
         return Err(ApiError::BadRequest(
@@ -34,7 +48,7 @@ async fn register(
         &s.pool,
         user.id,
         &b.platform,
-        b.token.trim(),
+        &token,
         b.app_version.as_deref(),
         environment,
     )
@@ -56,6 +70,12 @@ async fn remove(
     user: AuthUser,
     Json(b): Json<Remove>,
 ) -> Result<StatusCode, ApiError> {
-    devices::deactivate(&s.pool, user.id, b.token.trim()).await?;
+    let t = b.token.trim();
+    let t = if is_apns_token(t) {
+        t.to_ascii_lowercase()
+    } else {
+        t.to_string()
+    };
+    devices::deactivate(&s.pool, user.id, &t).await?;
     Ok(StatusCode::NO_CONTENT)
 }

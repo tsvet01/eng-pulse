@@ -11,7 +11,7 @@ use wiremock::{
     Mock, MockServer, ResponseTemplate,
 };
 
-const TOKEN: &str = "abc123devicetoken";
+const TOKEN: &str = "abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd";
 
 fn cfg(prod: &str, sandbox: &str) -> ApnsConfig {
     ApnsConfig {
@@ -229,4 +229,17 @@ fn new_rejects_a_key_that_is_not_p256_pem() {
         panic!("expected error")
     };
     assert!(!e.contains("notakey"));
+}
+
+#[tokio::test]
+async fn malformed_tokens_are_invalid_without_a_request() {
+    let s = MockServer::start().await;
+    let a = Apns::new(cfg(&s.uri(), &s.uri())).unwrap();
+    for bad in ["../../3/device/x", "abc?x=1", &"a".repeat(63)] {
+        assert!(matches!(
+            a.push(bad, false, &msg()).await,
+            Err(SendError::InvalidToken)
+        ));
+    }
+    assert!(s.received_requests().await.unwrap().is_empty());
 }

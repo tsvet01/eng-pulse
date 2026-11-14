@@ -6,6 +6,10 @@ use tokio::sync::Mutex;
 
 const JWT_TTL: Duration = Duration::from_secs(50 * 60);
 
+pub fn is_apns_token(s: &str) -> bool {
+    (64..=200).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 pub struct ApnsConfig {
     pub key_pem: String,
     pub key_id: String,
@@ -57,6 +61,9 @@ impl Apns {
 
 impl Deliver for Apns {
     async fn push(&self, token: &str, sandbox: bool, m: &Message) -> Result<(), SendError> {
+        if !is_apns_token(token) {
+            return Err(SendError::InvalidToken);
+        }
         let base = if sandbox {
             &self.cfg.sandbox_url
         } else {
