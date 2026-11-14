@@ -136,3 +136,16 @@ async fn close(
         .bind(l.feed_id).bind(l.date).bind(l.user_id).bind(state).bind(error).bind(now).bind(l.attempts)
         .execute(&mut **tx).await.map(|_| ())
 }
+
+/// `failed` if a push failed in the last 24 h, `backlog` if one has waited over 30 min, else `current`.
+pub async fn health(pool: &PgPool, now: DateTime<Utc>) -> sqlx::Result<&'static str> {
+    let (failed, backlog): (bool, bool) = sqlx::query_as("select coalesce(bool_or(state='failed' and updated_at>$1-interval '24 hours'),false), coalesce(bool_or(state='pending' and created_at<$1-interval '30 minutes'),false) from notification_outbox where channel='push'")
+        .bind(now).fetch_one(pool).await?;
+    Ok(if failed {
+        "failed"
+    } else if backlog {
+        "backlog"
+    } else {
+        "current"
+    })
+}

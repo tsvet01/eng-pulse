@@ -1,8 +1,13 @@
 pub mod apns;
 pub mod message;
 
-use crate::db::{briefs, outbox};
+use crate::{
+    db::{briefs, outbox},
+    state::AppState,
+};
+use axum::{extract::State, http::StatusCode, Json};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
+use serde::Serialize;
 use sqlx::PgPool;
 use std::{future::Future, pin::Pin, task::Poll};
 use tracing::{error, warn};
@@ -43,6 +48,28 @@ pub fn backoff(attempts: i32) -> Duration {
         3 => 15,
         _ => 60,
     })
+}
+
+#[derive(Debug, Serialize)]
+pub struct Health {
+    pub status: &'static str,
+    pub reason: &'static str,
+}
+
+pub async fn healthz(State(state): State<AppState>) -> (StatusCode, Json<Health>) {
+    let reason = if !state.cfg.notify_push_enabled {
+        "disabled"
+    } else {
+        outbox::health(&state.pool, Utc::now())
+            .await
+            .unwrap_or("unavailable")
+    };
+    let (code, status) = if reason == "current" {
+        (StatusCode::OK, "ok")
+    } else {
+        (StatusCode::SERVICE_UNAVAILABLE, "degraded")
+    };
+    (code, Json(Health { status, reason }))
 }
 
 pub async fn run(pool: PgPool, d: impl Deliver) -> Result<(), String> {

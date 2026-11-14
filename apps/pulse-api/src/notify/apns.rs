@@ -10,6 +10,7 @@ pub fn is_apns_token(s: &str) -> bool {
     (64..=200).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
+#[derive(Clone)]
 pub struct ApnsConfig {
     pub key_pem: String,
     pub key_id: String,
@@ -17,6 +18,17 @@ pub struct ApnsConfig {
     pub topic: String,
     pub production_url: String,
     pub sandbox_url: String,
+}
+
+impl std::fmt::Debug for ApnsConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ApnsConfig")
+            .field("key_pem", &"<redacted>")
+            .field("key_id", &self.key_id)
+            .field("team_id", &self.team_id)
+            .field("topic", &self.topic)
+            .finish_non_exhaustive()
+    }
 }
 
 pub struct Apns {

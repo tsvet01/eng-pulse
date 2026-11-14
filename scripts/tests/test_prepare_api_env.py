@@ -19,10 +19,12 @@ PUBLIC = {
     "SUPABASE_AUDIENCE": "authenticated",
     "ADMIN_EMAIL": "admin@example.com",
     "RECONCILE_HISTORY_ENABLED": "true",
+    "NOTIFY_PUSH_ENABLED": "false",
 }
 PASSWORD = "test-existing-database-password"
 TOKEN = "test-existing-service-token"
 BASE = f"POSTGRES_PASSWORD={PASSWORD}\nPIPELINE_SERVICE_TOKEN={TOKEN}\nRUST_LOG=info\n"
+APNS = "APNS_KEY_BASE64=dGVzdC1rZXk=\nAPNS_KEY_ID=TESTKEYID1\nAPNS_TEAM_ID=TESTTEAMID\n"
 
 
 class PrepareApiEnvTest(unittest.TestCase):
@@ -41,6 +43,41 @@ class PrepareApiEnvTest(unittest.TestCase):
         for value in ("yes", "TRUE", "", True):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 MODULE.prepare_runtime(BASE, {**PUBLIC, "RECONCILE_HISTORY_ENABLED": value})
+
+    def test_push_flag_is_required_and_strict(self):
+        public = {k: v for k, v in PUBLIC.items() if k != "NOTIFY_PUSH_ENABLED"}
+        with self.assertRaises(ValueError):
+            MODULE.prepare_runtime(BASE, public)
+        for value in ("yes", "TRUE", "", True):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                MODULE.prepare_runtime(BASE, {**PUBLIC, "NOTIFY_PUSH_ENABLED": value})
+
+    def test_push_flag_overrides_secret_copy(self):
+        result = MODULE.prepare_runtime(BASE + "NOTIFY_PUSH_ENABLED=true\n", PUBLIC)
+        self.assertIn("NOTIFY_PUSH_ENABLED=false\n", result)
+
+    def test_push_on_requires_apns_secrets_without_echoing_them(self):
+        public = {**PUBLIC, "NOTIFY_PUSH_ENABLED": "true"}
+        for name in ("APNS_KEY_BASE64", "APNS_KEY_ID", "APNS_TEAM_ID"):
+            lines = [line for line in APNS.splitlines(True) if not line.startswith(name)]
+            for base in (BASE + "".join(lines), BASE + "".join(lines) + f"{name}=\n",
+                         BASE + "".join(lines) + f"{name}=<placeholder>\n"):
+                with self.subTest(name=name, base_length=len(base)):
+                    with self.assertRaises(ValueError) as error:
+                        MODULE.prepare_runtime(base, public)
+                    self.assertIn(name, str(error.exception))
+                    self.assertNotIn("dGVzdC1rZXk=", str(error.exception))
+
+    def test_push_on_passes_apns_secrets_through(self):
+        result = MODULE.prepare_runtime(BASE + APNS, {**PUBLIC, "NOTIFY_PUSH_ENABLED": "true"})
+        values = dict(line.split("=", 1) for line in result.splitlines())
+        self.assertEqual(values["NOTIFY_PUSH_ENABLED"], "true")
+        self.assertEqual(values["APNS_KEY_BASE64"], "dGVzdC1rZXk=")
+        self.assertEqual(values["APNS_KEY_ID"], "TESTKEYID1")
+        self.assertEqual(values["APNS_TEAM_ID"], "TESTTEAMID")
+
+    def test_push_off_does_not_need_apns_secrets(self):
+        self.assertIn("NOTIFY_PUSH_ENABLED=false\n", MODULE.prepare_runtime(BASE, PUBLIC))
 
     def test_rejects_missing_empty_and_placeholder_private_fields(self):
         for base in ("", BASE.replace(f"POSTGRES_PASSWORD={PASSWORD}\n", ""),

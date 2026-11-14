@@ -8,8 +8,9 @@ import re
 import sys
 
 
-PUBLIC_KEYS = {"SUPABASE_JWKS_URL", "SUPABASE_ISSUER", "SUPABASE_AUDIENCE", "ADMIN_EMAIL", "RECONCILE_HISTORY_ENABLED"}
+PUBLIC_KEYS = {"SUPABASE_JWKS_URL", "SUPABASE_ISSUER", "SUPABASE_AUDIENCE", "ADMIN_EMAIL", "RECONCILE_HISTORY_ENABLED", "NOTIFY_PUSH_ENABLED"}
 PRIVATE_KEYS = ("POSTGRES_PASSWORD", "PIPELINE_SERVICE_TOKEN")
+PUSH_KEYS = ("APNS_KEY_BASE64", "APNS_KEY_ID", "APNS_TEAM_ID")  # required only while push is on
 # The deployment sources this file as shell input as well as using it for Compose.
 SAFE_VALUE = re.compile(r"[A-Za-z0-9_./:@,+%=\-]*", re.ASCII)
 
@@ -31,16 +32,18 @@ def prepare_runtime(base, public):
         raise ValueError("Invalid ADMIN_EMAIL")
     if public["RECONCILE_HISTORY_ENABLED"] not in ("true", "false"):
         raise ValueError("RECONCILE_HISTORY_ENABLED must be true or false")
+    if public["NOTIFY_PUSH_ENABLED"] not in ("true", "false"):
+        raise ValueError("NOTIFY_PUSH_ENABLED must be true or false")
 
     settings = {}
     for number, line in enumerate(base.splitlines(), 1):
-        if not re.fullmatch(r"[A-Z_]+=[^\s]*", line):
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]*=[^\s]*", line):
             raise ValueError(f"PULSE_ENV malformed at line {number}")
         key, value = line.split("=", 1)
         if key in settings:
             raise ValueError(f"PULSE_ENV duplicate key at line {number}")
         settings[key] = value
-    for key in PRIVATE_KEYS:
+    for key in PRIVATE_KEYS + (PUSH_KEYS if public["NOTIFY_PUSH_ENABLED"] == "true" else ()):
         value = settings.get(key, "")
         if not value or "<" in value or ">" in value:
             raise ValueError(f"PULSE_ENV requires an existing non-placeholder {key}")

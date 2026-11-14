@@ -57,17 +57,27 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     let listener = tokio::net::TcpListener::bind(&cfg.bind_addr).await?;
     info!(bind = %cfg.bind_addr, "pulse-api listening");
-    if cfg.reconcile_history_enabled {
-        let worker = reconciliation::run(state.pool.clone(), cfg.notify_push_enabled);
-        tokio::select! {
-            result = axum::serve(listener, routes::router(state)) => result?,
-            result = worker => {
-                result?;
-                return Err("reconciliation worker stopped unexpectedly".into());
-            }
+    let server = async { axum::serve(listener, routes::router(state.clone())).await };
+    let reconcile = async {
+        if cfg.reconcile_history_enabled {
+            reconciliation::run(state.pool.clone(), cfg.notify_push_enabled).await?;
+            Err::<(), String>("reconciliation worker stopped unexpectedly".into())
+        } else {
+            std::future::pending().await
         }
-    } else {
-        axum::serve(listener, routes::router(state)).await?;
+    };
+    let push = async {
+        let Some(apns) = cfg.apns.clone() else {
+            return std::future::pending().await;
+        };
+        let apns = notify::apns::Apns::new(apns)?;
+        notify::run(state.pool.clone(), apns).await?;
+        Err::<(), String>("notification worker stopped unexpectedly".into())
+    };
+    tokio::select! {
+        result = server => result?,
+        result = reconcile => result?,
+        result = push => result?,
     }
     Ok(())
 }

@@ -52,7 +52,12 @@ async fn rows(pool: &PgPool) -> Vec<(Uuid, String, String)> {
         .await
         .unwrap()
 }
-const ON: &[(&str, &str)] = &[("NOTIFY_PUSH_ENABLED", "true")];
+const ON: &[(&str, &str)] = &[
+    ("NOTIFY_PUSH_ENABLED", "true"),
+    ("APNS_KEY_BASE64", "dGVzdA=="),
+    ("APNS_KEY_ID", "KEYID"),
+    ("APNS_TEAM_ID", "TEAMID"),
+];
 
 #[sqlx::test]
 async fn ingest_today_enqueues_one_push_row_per_opted_in_member(pool: PgPool) {

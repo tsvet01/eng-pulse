@@ -1,4 +1,5 @@
 mod common;
+use base64::Engine;
 use chrono::{DateTime, Duration, SubsecRound, Utc};
 use common::*;
 use pulse_api::db::outbox;
@@ -471,4 +472,92 @@ async fn deactivated_feed_is_skipped(pool: PgPool) {
         (r.0.as_str(), r.2.as_deref()),
         ("skipped", Some("feed_inactive"))
     );
+}
+
+fn health_app(pool: PgPool, on: bool) -> axum::Router {
+    let key = base64::engine::general_purpose::STANDARD.encode(TEST_PRIVATE_KEY_PEM);
+    let on = if on { "true" } else { "false" };
+    app_with(
+        pool,
+        "https://unused.invalid/jwks",
+        &[
+            ("NOTIFY_PUSH_ENABLED", on),
+            ("APNS_KEY_BASE64", &key),
+            ("APNS_KEY_ID", "KEYID"),
+            ("APNS_TEAM_ID", "TEAMID"),
+        ],
+    )
+}
+
+async fn health(app: &axum::Router) -> (u16, serde_json::Value) {
+    send(
+        app,
+        axum::http::Method::GET,
+        "/healthz/notifications",
+        None,
+        None,
+    )
+    .await
+}
+
+#[sqlx::test]
+async fn health_is_degraded_when_the_flag_is_off(pool: PgPool) {
+    let (code, body) = health(&health_app(pool, false)).await;
+    assert_eq!(code, 503);
+    assert_eq!(
+        body,
+        serde_json::json!({"status":"degraded","reason":"disabled"})
+    );
+}
+
+#[sqlx::test]
+async fn health_is_current_with_a_fresh_queue(pool: PgPool) {
+    setup(&pool, &["t1"]).await;
+    let (code, body) = health(&health_app(pool, true)).await;
+    assert_eq!(code, 200);
+    assert_eq!(body, serde_json::json!({"status":"ok","reason":"current"}));
+}
+
+#[sqlx::test]
+async fn health_reports_a_recent_failure_and_ignores_an_old_one(pool: PgPool) {
+    setup(&pool, &["t1"]).await;
+    sqlx::query(
+        "update notification_outbox set state='failed', updated_at=now()-interval '1 hour'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let app = health_app(pool.clone(), true);
+    let (code, body) = health(&app).await;
+    assert_eq!((code, body["reason"].as_str()), (503, Some("failed")));
+    sqlx::query("update notification_outbox set updated_at=now()-interval '25 hours'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(health(&app).await.0, 200);
+}
+
+#[sqlx::test]
+async fn health_reports_a_backlog_only_after_thirty_minutes(pool: PgPool) {
+    setup(&pool, &["t1"]).await;
+    let app = health_app(pool.clone(), true);
+    sqlx::query("update notification_outbox set created_at=now()-interval '29 minutes'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(health(&app).await.0, 200);
+    sqlx::query("update notification_outbox set created_at=now()-interval '31 minutes'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (code, body) = health(&app).await;
+    assert_eq!((code, body["reason"].as_str()), (503, Some("backlog")));
+}
+
+#[sqlx::test]
+async fn health_is_unavailable_when_the_database_fails(pool: PgPool) {
+    let app = health_app(pool.clone(), true);
+    pool.close().await;
+    let (code, body) = health(&app).await;
+    assert_eq!((code, body["reason"].as_str()), (503, Some("unavailable")));
 }

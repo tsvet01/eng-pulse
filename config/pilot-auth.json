@@ -3,5 +3,6 @@
   "SUPABASE_ISSUER": "https://zimjnykjqsxwsidwmemd.supabase.co/auth/v1",
   "SUPABASE_AUDIENCE": "authenticated",
   "ADMIN_EMAIL": "anton.tsvetkov@gmail.com",
-  "RECONCILE_HISTORY_ENABLED": "true"
+  "RECONCILE_HISTORY_ENABLED": "true",
+  "NOTIFY_PUSH_ENABLED": "false"
 }
