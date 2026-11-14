@@ -59,15 +59,21 @@ pub async fn run_once(
     d: &impl Deliver,
     now: DateTime<Utc>,
 ) -> Result<usize, String> {
-    let rows = outbox::lease(pool, now, BATCH)
-        .await
-        .map_err(|e| e.to_string())?;
-    for l in &rows {
-        if let Err(e) = process(pool, d, now, l).await {
+    let mut n = 0;
+    while n < BATCH {
+        let Some(l) = outbox::lease(pool, now, 1)
+            .await
+            .map_err(|e| e.to_string())?
+            .pop()
+        else {
+            break;
+        };
+        n += 1;
+        if let Err(e) = process(pool, d, now, &l).await {
             error!(user_id = %l.user_id, error = %e, "notification row failed");
         }
     }
-    Ok(rows.len())
+    Ok(n as usize)
 }
 
 async fn process(

@@ -375,6 +375,70 @@ async fn retried_row_is_not_released_in_the_same_run(pool: PgPool) {
     f.script("t1", vec![Err(transient())]);
     assert_eq!(run_once(&pool, &f, s.now).await.unwrap(), 1);
     assert_eq!(f.calls().len(), 1);
+    assert_eq!(row(&pool, &s).await.1, 1);
+}
+
+async fn add_due_users(pool: &PgPool, n: usize) {
+    let feed: Uuid = sqlx::query_scalar("select id from feeds")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let date = Utc::now().date_naive();
+    for i in 0..n {
+        let (u, _) = registered_user(pool, &format!("u{i}@example.com"), false).await;
+        sqlx::query("insert into memberships(user_id,feed_id,notify_push) values($1,$2,true)")
+            .bind(u)
+            .bind(feed)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query("insert into device_tokens(user_id,platform,token) values($1,'ios',$2)")
+            .bind(u)
+            .bind(format!("tok{i}"))
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into notification_outbox(feed_id,date,user_id,channel) values($1,$2,$3,'push')",
+        )
+        .bind(feed)
+        .bind(date)
+        .bind(u)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+#[sqlx::test]
+async fn run_continues_past_the_first_row(pool: PgPool) {
+    let s = setup(&pool, &["t0"]).await;
+    add_due_users(&pool, 2).await;
+    let f = Fake::default();
+    let now = s.now + Duration::seconds(1);
+    assert_eq!(run_once(&pool, &f, now).await.unwrap(), 3);
+    assert_eq!(f.calls().len(), 3);
+    let sent: i64 =
+        sqlx::query_scalar("select count(*) from notification_outbox where state='sent'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(sent, 3);
+}
+
+#[sqlx::test]
+async fn run_once_processes_at_most_20_rows(pool: PgPool) {
+    let s = setup(&pool, &["t0"]).await;
+    add_due_users(&pool, 20).await;
+    let f = Fake::default();
+    let now = s.now + Duration::seconds(1);
+    assert_eq!(run_once(&pool, &f, now).await.unwrap(), 20);
+    let left: Vec<(String, i32)> =
+        sqlx::query_as("select state, attempts from notification_outbox where state<>'sent'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(left, vec![("pending".to_string(), 0)]);
 }
 
 #[sqlx::test]
