@@ -76,6 +76,33 @@ pub async fn is_member(pool: &PgPool, user_id: Uuid, feed_id: Uuid) -> sqlx::Res
     .await
 }
 
+pub async fn notify_push(
+    pool: &PgPool,
+    user_id: Uuid,
+    feed_id: Uuid,
+) -> sqlx::Result<Option<bool>> {
+    sqlx::query_scalar("select notify_push from memberships where user_id = $1 and feed_id = $2")
+        .bind(user_id)
+        .bind(feed_id)
+        .fetch_optional(pool)
+        .await
+}
+
+pub async fn set_notify_push(
+    pool: &PgPool,
+    user_id: Uuid,
+    feed_id: Uuid,
+    value: bool,
+) -> sqlx::Result<bool> {
+    sqlx::query("update memberships set notify_push = $3 where user_id = $1 and feed_id = $2")
+        .bind(user_id)
+        .bind(feed_id)
+        .bind(value)
+        .execute(pool)
+        .await
+        .map(|r| r.rows_affected() == 1)
+}
+
 pub async fn upsert_membership(
     pool: &PgPool,
     user_id: Uuid,
