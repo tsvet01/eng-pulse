@@ -5,6 +5,7 @@ pub mod error;
 pub mod feedcheck;
 pub mod health;
 pub mod history;
+pub mod notify;
 pub mod reconciliation;
 pub mod routes;
 pub mod seed;
