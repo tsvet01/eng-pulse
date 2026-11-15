@@ -95,7 +95,7 @@ final class PilotPushModel: ObservableObject {
         if previous?.enabled == false { try await disconnect(target) }
         guard scope == target, generation == start else { return }
         guard environment != nil else { throw PushError.signing }
-        status = .connecting
+        if status != .ready { status = .connecting }
         let granted = try await authorization(prompt)
         guard scope == target, generation == start else { return }
         guard granted else {
@@ -114,16 +114,20 @@ final class PilotPushModel: ObservableObject {
 
     // Always obtain a fresh token from Apple; the journal token is used only for cleanup.
     func received(_ data: Data) async {
-        guard let target = scope, acceptingTokens, (32...100).contains(data.count), let environment else { return }
+        guard let target = scope, acceptingTokens, let environment else { return }
+        guard (32...100).contains(data.count) else { registrationFailed(); return }
         let token = data.map { String(format: "%02x", $0) }.joined()
         let start = generation
+        let reconfirming = status == .ready && latestToken == token
         latestToken = token
-        try? clearReceipt()
-        status = .connecting
+        if !reconfirming {
+            status = .connecting
+            try? clearReceipt()
+        }
         await enqueue { [self] in
             guard scope == target, generation == start, acceptingTokens,
                   var binding = try read(), binding.enabled, binding.belongs(to: target) else { return }
-            try clearReceipt()
+            if !reconfirming { try clearReceipt() }
             if let old = binding.token, old != token {
                 try await remove(old, session: target.session)
                 guard scope == target, generation == start else { return }
@@ -142,6 +146,7 @@ final class PilotPushModel: ObservableObject {
 
     func registrationFailed() {
         guard acceptingTokens else { return }
+        latestToken = nil
         try? clearReceipt()
         status = .failed("Couldn’t register with Apple. Try again.")
     }
@@ -224,6 +229,7 @@ final class PilotPushModel: ObservableObject {
                     onAccessFailure?(error, owner.session)
                 }
                 if generation == start {
+                    try? clearReceipt()
                     status = .failed((error as? PushError)?.localizedDescription ?? "Couldn’t update this iPhone. Check your connection and retry.")
                 }
             }

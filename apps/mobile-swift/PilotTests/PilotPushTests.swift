@@ -12,13 +12,13 @@ final class PilotPushTests: XCTestCase {
     override func tearDown() async throws { try? FileManager.default.removeItem(at: root) }
 
     private func fixture(_ transport: any PilotTransport, journal: MemoryCredentials = MemoryCredentials(),
-                         granted: Bool = true) async throws -> (PilotPushModel, PilotSession) {
+                         granted: Bool = true, authorization: ((Bool) async throws -> Bool)? = nil) async throws -> (PilotPushModel, PilotSession) {
         let auth = PilotAuthClient(configuration: .test, transport: RecordingTransport([]),
             storage: MemoryCredentials(data: try JSONEncoder().encode(testSession())))
         let api = PilotAPIClient(configuration: .test, auth: auth, transport: transport)
         let session = try await auth.currentSession()
         return (PilotPushModel(api: api, journal: journal, receiptDirectory: root, environment: "sandbox", version: "7.1",
-            authorization: { _ in granted }, register: {}, unregister: {}), try XCTUnwrap(session))
+            authorization: authorization ?? { _ in granted }, register: {}, unregister: {}), try XCTUnwrap(session))
     }
 
     func testOnlyExplicitAuthorizedAdmissionRegistersAndWritesFingerprint() async throws {
@@ -46,6 +46,45 @@ final class PilotPushTests: XCTestCase {
         XCTAssertEqual(receipt, ["user_id":userB.uuidString.lowercased(), "token_sha256":digest, "environment":"sandbox"])
         XCTAssertTrue(model.canPresent(feed: "pilot-test"))
         XCTAssertFalse(model.canPresent(feed: "engineering"))
+    }
+
+    func testConfirmedBannerSurvivesForegroundRefreshUntilTokenActuallyChanges() async throws {
+        let transport = PausedTransport()
+        let checking = expectation(description: "Rechecking system permission")
+        var permission: CheckedContinuation<Bool, Never>?
+        let (model, session) = try await fixture(transport) { prompt in
+            if prompt { return true }
+            return await withCheckedContinuation { permission = $0; checking.fulfill() }
+        }
+        model.admit(session, user: userA)
+        await model.enable()
+        let initial = Task { await model.received(token) }
+        await transport.waitForRequests(1)
+        await transport.respond(0, status: 204)
+        await initial.value
+
+        model.admit(session, user: userA)
+        await fulfillment(of: [checking], timeout: 2)
+        XCTAssertTrue(model.canPresent(feed: "pilot-test"))
+        permission?.resume(returning: true)
+        await model.finishCleanup()
+        XCTAssertTrue(model.canPresent(feed: "pilot-test"))
+        let same = Task { await model.received(token) }
+        await transport.waitForRequests(2)
+        XCTAssertTrue(model.canPresent(feed: "pilot-test"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("confirmed.json").path))
+        await transport.respond(1, status: 204)
+        await same.value
+
+        let rotated = Task { await model.received(Data(repeating: 0xcd, count: 32)) }
+        await transport.waitForRequests(3)
+        XCTAssertFalse(model.canPresent(feed: "pilot-test"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("confirmed.json").path))
+        await transport.respond(2, status: 204)
+        await transport.waitForRequests(4)
+        await transport.respond(3, status: 204)
+        await rotated.value
+        XCTAssertTrue(model.canPresent(feed: "pilot-test"))
     }
 
     func testDeniedPermissionCannotBindEvenIfAppleProvidesToken() async throws {
