@@ -64,6 +64,7 @@ pub async fn run(args: &[String]) -> Result<(), String> {
         return Err("invalid fingerprint receipt".into());
     }
     let apns = provider(|k| std::env::var(k).ok())?;
+    apns.check_signing().await?;
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .acquire_timeout(std::time::Duration::from_secs(5))
@@ -312,6 +313,22 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn rejects_a_parseable_wrong_curve_before_reserving_an_attempt() {
+        // Test P-384 PKCS#8 with public scalar 1; APNs needs P-256.
+        let vars = std::collections::HashMap::from([
+            ("NOTIFY_PUSH_ENABLED", "false"),
+            ("APNS_KEY_BASE64", "LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1FNENBUUF3RUFZSEtvWkl6ajBDQVFZRks0RUVBQ0lFTnpBMUFnRUJCREFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFFPQotLS0tLUVORCBQUklWQVRFIEtFWS0tLS0tCg=="),
+            ("APNS_KEY_ID", "id"),
+            ("APNS_TEAM_ID", "team"),
+        ]);
+        let apns = provider(|k| vars.get(k).map(|s| s.to_string())).unwrap();
+        assert_eq!(
+            apns.check_signing().await.unwrap_err(),
+            "APNs key cannot sign an ES256 token"
+        );
     }
 
     #[test]

@@ -57,6 +57,13 @@ impl Apns {
         })
     }
 
+    pub(super) async fn check_signing(&self) -> Result<(), String> {
+        self.bearer()
+            .await
+            .map(|_| ())
+            .map_err(|_| "APNs key cannot sign an ES256 token".into())
+    }
+
     async fn bearer(&self) -> Result<String, SendError> {
         let mut g = self.jwt.lock().await;
         if let Some((t, at)) = g.as_ref() {
