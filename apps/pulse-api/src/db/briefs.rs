@@ -16,7 +16,7 @@ pub struct BriefRow {
 
 /// Returns true when a new row was created.
 pub async fn upsert(
-    pool: &PgPool,
+    tx: &mut Transaction<'_, Postgres>,
     feed_id: Uuid,
     date: NaiveDate,
     b: &pulse_core::Brief,
@@ -26,7 +26,7 @@ pub async fn upsert(
          on conflict (feed_id, date) do update set format = excluded.format, payload = excluded.payload, article_url = excluded.article_url, article_title = excluded.article_title, model = excluded.model, eval_score = excluded.eval_score
          returning (xmax = 0)")
         .bind(feed_id).bind(date).bind(&b.format).bind(&b.payload).bind(&b.article_url).bind(&b.article_title).bind(&b.model).bind(b.eval_score)
-        .fetch_one(pool).await?;
+        .fetch_one(&mut **tx).await?;
     Ok(created)
 }
 

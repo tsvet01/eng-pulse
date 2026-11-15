@@ -15,6 +15,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(health::healthz))
         .route("/healthz/briefs", get(crate::reconciliation::healthz))
+        .route("/healthz/notifications", get(crate::notify::healthz))
         .merge(users::routes())
         .merge(admin::routes())
         .merge(feeds::routes())

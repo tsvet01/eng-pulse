@@ -1842,6 +1842,7 @@ version = "0.1.0"
 dependencies = [
  "atom_syndication",
  "axum",
+ "base64 0.22.1",
  "chrono",
  "dotenvy",
  "http-body-util",

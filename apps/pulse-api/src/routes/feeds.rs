@@ -12,7 +12,13 @@ use uuid::Uuid;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/feeds", get(list).post(read_only))
-        .route("/v1/feeds/{id}/membership", post(join).delete(leave))
+        .route(
+            "/v1/feeds/{id}/membership",
+            get(preference)
+                .patch(set_preference)
+                .post(join)
+                .delete(leave),
+        )
         .route("/v1/feeds/{id}/topics", post(read_only))
         .route(
             "/v1/feeds/{id}/topics/{topic}",
@@ -67,5 +73,39 @@ async fn leave(
         return Err(ApiError::NotFound("feed"));
     }
     feeds::delete_membership(&s.pool, user.id, id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct Preference {
+    notify_push: bool,
+}
+
+async fn preference(
+    State(s): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    if !feeds::exists(&s.pool, id).await? {
+        return Err(ApiError::NotFound("feed"));
+    }
+    match feeds::notify_push(&s.pool, user.id, id).await? {
+        Some(v) => Ok(Json(json!({"notify_push": v}))),
+        None => Err(ApiError::NotFound("membership")),
+    }
+}
+
+async fn set_preference(
+    State(s): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<Uuid>,
+    Json(p): Json<Preference>,
+) -> Result<StatusCode, ApiError> {
+    if !feeds::exists(&s.pool, id).await? {
+        return Err(ApiError::NotFound("feed"));
+    }
+    if !feeds::set_notify_push(&s.pool, user.id, id, p.notify_push).await? {
+        return Err(ApiError::NotFound("membership"));
+    }
     Ok(StatusCode::NO_CONTENT)
 }

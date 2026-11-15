@@ -138,6 +138,8 @@ Swift work and the delivery worker may be developed independently after the API 
 - [ ] Establish per-recipient/channel routing: disable legacy sending to the pilot recipient/device before enabling its new sender. Verify a remaining legacy recipient still receives delivery. Keep rollback instructions to turn off the new sender and restore the legacy route without replaying old notifications.
 - [ ] On two real accounts/devices, demonstrate actual email/APNs receipt, preference changes, logout/account switching, and the next real daily brief. Provider acceptance logs alone do not establish user receipt.
 
+**Notification checkpoint, 2026-11-14:** The API now carries a durable push outbox, a leased worker with bounded retries, an APNs sender, preference and device endpoints, and `/healthz/notifications`, all behind `NOTIFY_PUSH_ENABLED` (default `false`, set in `config/pilot-auth.json`). Per Anton's decision, users are notified by push only: no email and no SMTP in the new path, and the legacy `DEST_EMAIL` email is unchanged. See the [notifications runbook](../../runbooks/notifications.md). Remaining evidence: APNs key, key ID and team ID in `PULSE_ENV`; iOS token registration and push toggle; real receipt on two devices for a daily brief, with preference-off and sign-out checks; a rehearsed rollback (flag `false`, redeploy).
+
 **P2 exit:** one complete daily journey works for two distinct accounts on real devices, with no cross-account state or routine duplicate notifications and a verified rollback path. External invitations remain gated on P1 and P2 evidence.
 
 ## P3 — Invite and observe

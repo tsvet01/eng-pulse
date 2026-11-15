@@ -1,0 +1,64 @@
+name: One-device pilot push test
+on:
+  workflow_dispatch:
+    inputs:
+      expected_api_revision:
+        description: Full commit SHA of the API already deployed to Hetzner
+        required: true
+        type: string
+      mode:
+        description: Check only, or send one sandbox alert to the approved device
+        required: true
+        type: choice
+        options: [check, send]
+        default: check
+      test_id:
+        description: UUID for this authorization; use the same UUID on check, send and reruns
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency: { group: deploy-api-main, cancel-in-progress: false }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate authorization and pin before SSH
+        env:
+          EXPECTED_API_REVISION: ${{ inputs.expected_api_revision }}
+          TEST_ID: ${{ inputs.test_id }}
+          TEST_MODE: ${{ inputs.mode }}
+          PILOT_PUSH_TEST_USER_ID: ${{ secrets.PILOT_PUSH_TEST_USER_ID }}
+          PILOT_PUSH_TEST_TOKEN_SHA256: ${{ secrets.PILOT_PUSH_TEST_TOKEN_SHA256 }}
+          HOST_FINGERPRINT: ${{ secrets.DEPLOY_HOST_FINGERPRINT }}
+        run: |
+          [[ -n "$HOST_FINGERPRINT" ]] || { echo 'Missing SSH host pin'; exit 1; }
+          bash scripts/pilot-push-test.sh --check-inputs
+          { echo 'FILE_PILOT_PROBE<<PULSE_SCRIPT_EOF'; cat scripts/pilot-push-test.sh; echo PULSE_SCRIPT_EOF; } >> "$GITHUB_ENV"
+      - name: Verify device and perform approved mode
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        env:
+          EXPECTED_API_REVISION: ${{ inputs.expected_api_revision }}
+          TEST_ID: ${{ inputs.test_id }}
+          TEST_MODE: ${{ inputs.mode }}
+          PILOT_PUSH_TEST_USER_ID: ${{ secrets.PILOT_PUSH_TEST_USER_ID }}
+          PILOT_PUSH_TEST_TOKEN_SHA256: ${{ secrets.PILOT_PUSH_TEST_TOKEN_SHA256 }}
+          APNS_KEY_BASE64: ${{ secrets.APNS_KEY_BASE64 }}
+          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+          APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
+        with:
+          host: api.eng-pulse.tsvetkov.org
+          username: deploy
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          fingerprint: ${{ secrets.DEPLOY_HOST_FINGERPRINT }}
+          envs: EXPECTED_API_REVISION,TEST_ID,TEST_MODE,PILOT_PUSH_TEST_USER_ID,PILOT_PUSH_TEST_TOKEN_SHA256,APNS_KEY_BASE64,APNS_KEY_ID,APNS_TEAM_ID,FILE_PILOT_PROBE
+          command_timeout: 1m
+          script: |
+            set -eu
+            cd /opt/pulse
+            bash -c "$FILE_PILOT_PROBE" </dev/null

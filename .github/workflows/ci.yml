@@ -51,11 +51,13 @@ jobs:
       deploy_agents: ${{ steps.release.outputs.deploy_agents }}
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with: { fetch-depth: 0 }  # Compare Cargo.lock against the actual pre-push revision.
     # The api filter lists only the libs pulse-api depends on; update it if those change.
     - id: f
       uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
       with:
         filters: |
+          lockfile: ['Cargo.lock']
           rust: ['Cargo.toml', 'Cargo.lock', 'libs/**', 'apps/daily-agent/**', 'apps/explorer-agent/**', 'apps/pulse-api/**', 'scripts/deploy-daily-agent.sh']
           api: ['Cargo.toml', 'Cargo.lock', 'libs/pulse-core/**', 'apps/pulse-api/**', 'config/pilot-auth.json', 'scripts/prepare_api_env.py']
           agents: ['Cargo.toml', 'Cargo.lock', 'libs/**', 'apps/daily-agent/**', 'apps/explorer-agent/**', 'scripts/deploy-daily-agent.sh']
@@ -68,6 +70,8 @@ jobs:
         RELEASE_EVENT: ${{ github.event_name }}
         API_CHANGED: ${{ steps.f.outputs.api }}
         AGENTS_CHANGED: ${{ steps.f.outputs.agents }}
+        ONLY_AGENT_LOCKFILE: ${{ steps.f.outputs.lockfile == 'true' && steps.f.outputs.agents_count == '1' }}
+        RELEASE_BASE: ${{ github.event.before || github.event.pull_request.base.sha }}
         REQUEST_API: ${{ inputs.deploy_api }}
         REQUEST_AGENTS: ${{ inputs.deploy_agents }}
       run: python3 scripts/release_selection.py >> "$GITHUB_OUTPUT"
@@ -365,7 +369,7 @@ jobs:
           printf '%s\n' "$FILE_CADDY" > Caddyfile
           printf '%s\n' "$FILE_BACKUP" > backup.sh && chmod 755 backup.sh
           printf '%s\n' "$PULSE_ENV" > .env
-          bad=$(grep -nvE '^[A-Z_]+=[^[:space:]]*$' .env | cut -d: -f1 | tr '\n' ' '); [ -z "$bad" ] || { echo "PULSE_ENV malformed at line(s) $bad: expected KEY=value with no spaces"; exit 1; }
+          bad=$(grep -nvE '^[A-Z][A-Z0-9_]*=[^[:space:]]*$' .env | cut -d: -f1 | tr '\n' ' '); [ -z "$bad" ] || { echo "PULSE_ENV malformed at line(s) $bad: expected KEY=value with no spaces"; exit 1; }
           cat .env.defaults >> .env                      # compose interpolates only from .env
           echo "PULSE_API_TAG=$IMAGE_TAG" >> .env
           printf '%s\n' "$GCS_BACKUP_SA_JSON" > gcs-backup-sa.json

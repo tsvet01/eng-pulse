@@ -233,3 +233,79 @@ async fn only_active_engineering_is_visible_joinable_and_readable(pool: PgPool) 
         json!([])
     );
 }
+
+async fn push_pref(pool: &PgPool, uid: uuid::Uuid, fid: uuid::Uuid) -> Option<bool> {
+    sqlx::query_scalar("select notify_push from memberships where user_id = $1 and feed_id = $2")
+        .bind(uid)
+        .bind(fid)
+        .fetch_optional(pool)
+        .await
+        .unwrap()
+}
+
+#[sqlx::test]
+async fn push_preference_reads_and_updates_own_membership(pool: PgPool) {
+    let (_s, url) = jwks_mock().await;
+    let fid = engineering_feed(&pool).await;
+    let (a, ta) = registered_user(&pool, "a@example.com", false).await;
+    let (b, tb) = registered_user(&pool, "b@example.com", false).await;
+    for u in [a, b] {
+        sqlx::query("insert into memberships (user_id, feed_id) values ($1, $2)")
+            .bind(u)
+            .bind(fid)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let app = app(pool.clone(), &url);
+    let path = format!("/v1/feeds/{fid}/membership");
+    let (status, body) = send(&app, Method::GET, &path, Some(&ta), None).await;
+    assert_eq!((status, body), (200, json!({"notify_push": true})));
+    let patch = |v| send(&app, Method::PATCH, &path, Some(&ta), Some(v));
+    assert_eq!(patch(json!({"notify_push": false})).await.0, 204);
+    let (_, body) = send(&app, Method::GET, &path, Some(&ta), None).await;
+    assert_eq!(body, json!({"notify_push": false}));
+    assert_eq!(push_pref(&pool, b, fid).await, Some(true));
+    let (_, body) = send(&app, Method::GET, &path, Some(&tb), None).await;
+    assert_eq!(body, json!({"notify_push": true}));
+    let (status, _) = patch(json!({})).await;
+    assert_eq!(status, 422);
+    assert_eq!(push_pref(&pool, a, fid).await, Some(false));
+}
+
+#[sqlx::test]
+async fn push_preference_never_creates_membership_and_hides_unknown_feeds(pool: PgPool) {
+    let (_s, url) = jwks_mock().await;
+    let fid = engineering_feed(&pool).await;
+    let (uid, t) = registered_user(&pool, "x@example.com", false).await;
+    let app = app(pool.clone(), &url);
+    let path = format!("/v1/feeds/{fid}/membership");
+    let (status, body) = send(&app, Method::GET, &path, Some(&t), None).await;
+    assert_eq!(
+        (status, body["message"].as_str()),
+        (404, Some("membership"))
+    );
+    let (status, body) = send(
+        &app,
+        Method::PATCH,
+        &path,
+        Some(&t),
+        Some(json!({"notify_push": false})),
+    )
+    .await;
+    assert_eq!(
+        (status, body["message"].as_str()),
+        (404, Some("membership"))
+    );
+    assert_eq!(push_pref(&pool, uid, fid).await, None);
+    let path = format!("/v1/feeds/{}/membership", uuid::Uuid::new_v4());
+    for (method, body) in [
+        (Method::GET, None),
+        (Method::PATCH, Some(json!({"notify_push": false}))),
+    ] {
+        let (status, body) = send(&app, method, &path, Some(&t), body).await;
+        assert_eq!((status, body["message"].as_str()), (404, Some("feed")));
+    }
+    let (status, _) = send(&app, Method::GET, &path, None, None).await;
+    assert_eq!(status, 401);
+}

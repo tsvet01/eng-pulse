@@ -5,6 +5,7 @@ pub mod error;
 pub mod feedcheck;
 pub mod health;
 pub mod history;
+pub mod notify;
 pub mod reconciliation;
 pub mod routes;
 pub mod seed;
@@ -54,19 +55,29 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         cfg: cfg.clone(),
         jwks,
     };
+    let apns = cfg.apns.clone().map(notify::apns::Apns::new).transpose()?; // a bad key stops startup before /healthz can answer
     let listener = tokio::net::TcpListener::bind(&cfg.bind_addr).await?;
     info!(bind = %cfg.bind_addr, "pulse-api listening");
-    if cfg.reconcile_history_enabled {
-        let worker = reconciliation::run(state.pool.clone());
-        tokio::select! {
-            result = axum::serve(listener, routes::router(state)) => result?,
-            result = worker => {
-                result?;
-                return Err("reconciliation worker stopped unexpectedly".into());
-            }
+    let server = async { axum::serve(listener, routes::router(state.clone())).await };
+    let reconcile = async {
+        if cfg.reconcile_history_enabled {
+            reconciliation::run(state.pool.clone(), cfg.notify_push_enabled).await?;
+            Err::<(), String>("reconciliation worker stopped unexpectedly".into())
+        } else {
+            std::future::pending().await
         }
-    } else {
-        axum::serve(listener, routes::router(state)).await?;
+    };
+    let push = async {
+        let Some(apns) = apns else {
+            return std::future::pending().await;
+        };
+        notify::run(state.pool.clone(), apns).await?;
+        Err::<(), String>("notification worker stopped unexpectedly".into())
+    };
+    tokio::select! {
+        result = server => result?,
+        result = reconcile => result?,
+        result = push => result?,
     }
     Ok(())
 }
