@@ -43,6 +43,9 @@ impl Apns {
         let key = EncodingKey::from_ec_pem(cfg.key_pem.as_bytes())
             .map_err(|_| "APNs key is not a valid P-256 PEM".to_string())?;
         let http = reqwest::Client::builder()
+            .retry(reqwest::retry::never())
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
             .timeout(Duration::from_secs(10))
             .build()
             .map_err(|e| format!("APNs client: {e}"))?;

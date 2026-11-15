@@ -247,3 +247,15 @@ async fn malformed_tokens_are_invalid_without_a_request() {
     }
     assert!(s.received_requests().await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn refuses_redirects_without_sending_a_second_request() {
+    let s = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(307).insert_header("location", "/should-not-receive"))
+        .mount(&s)
+        .await;
+    let a = Apns::new(cfg(&s.uri(), &s.uri())).unwrap();
+    assert!(a.push(TOKEN, true, &msg()).await.is_err());
+    assert_eq!(s.received_requests().await.unwrap().len(), 1);
+}

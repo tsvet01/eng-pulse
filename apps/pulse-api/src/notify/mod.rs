@@ -1,5 +1,6 @@
 pub mod apns;
 pub mod message;
+pub mod probe;
 
 use crate::{
     db::{briefs, outbox},

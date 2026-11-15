@@ -16,6 +16,37 @@ pub struct Config {
     pub apns: Option<ApnsConfig>,
 }
 
+impl ApnsConfig {
+    pub(crate) fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Result<Self, String> {
+        let required = |key: &str| {
+            lookup(key)
+                .filter(|v| !v.is_empty())
+                .ok_or_else(|| format!("{key} is required"))
+        };
+        let key = required("APNS_KEY_BASE64")?;
+        let key_id = required("APNS_KEY_ID")?;
+        let team_id = required("APNS_TEAM_ID")?;
+        let key_pem = STANDARD
+            .decode(key.trim())
+            .ok()
+            .and_then(|b| String::from_utf8(b).ok())
+            .ok_or("APNS_KEY_BASE64 is invalid")?;
+        let or = |k: &str, d: &str| {
+            lookup(k)
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| d.into())
+        };
+        Ok(Self {
+            key_pem,
+            key_id,
+            team_id,
+            topic: or("APNS_TOPIC", "org.tsvetkov.eng-pulse"),
+            production_url: or("APNS_PRODUCTION_URL", "https://api.push.apple.com"),
+            sandbox_url: or("APNS_SANDBOX_URL", "https://api.sandbox.push.apple.com"),
+        })
+    }
+}
+
 impl Config {
     pub fn from_env() -> Result<Self, String> {
         let vars: HashMap<String, String> = std::env::vars().collect();
@@ -35,28 +66,7 @@ impl Config {
             _ => return Err("NOTIFY_PUSH_ENABLED must be true or false".into()),
         };
         let apns = if notify_push_enabled {
-            let key = req("APNS_KEY_BASE64")?;
-            let key_id = req("APNS_KEY_ID")?;
-            let team_id = req("APNS_TEAM_ID")?;
-            let key_pem = STANDARD
-                .decode(key.trim())
-                .ok()
-                .and_then(|b| String::from_utf8(b).ok())
-                .ok_or("APNS_KEY_BASE64 is invalid")?;
-            let or = |k: &str, d: &str| {
-                v.get(k)
-                    .cloned()
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| d.into())
-            };
-            Some(ApnsConfig {
-                key_pem,
-                key_id,
-                team_id,
-                topic: or("APNS_TOPIC", "org.tsvetkov.eng-pulse"),
-                production_url: or("APNS_PRODUCTION_URL", "https://api.push.apple.com"),
-                sandbox_url: or("APNS_SANDBOX_URL", "https://api.sandbox.push.apple.com"),
-            })
+            Some(ApnsConfig::from_lookup(|k| v.get(k).cloned())?)
         } else {
             None
         };
