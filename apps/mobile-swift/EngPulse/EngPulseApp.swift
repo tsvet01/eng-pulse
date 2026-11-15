@@ -77,10 +77,12 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        guard ProcessInfo.processInfo.environment["ENGPULSE_TESTING"] != "1",
-              PilotBuild.allowsLegacyServices else { return true }
+        guard ProcessInfo.processInfo.environment["ENGPULSE_TESTING"] != "1" else { return true }
+        if PilotBuild.isEnabled || PilotBuild.allowsLegacyServices {
+            UNUserNotificationCenter.current().delegate = NotificationService.shared
+        }
+        guard PilotBuild.allowsLegacyServices else { return true }
         FirebaseApp.configure()
-        UNUserNotificationCenter.current().delegate = NotificationService.shared
 
         // Sign in anonymously (fire-and-forget, retries on next launch if fails)
         if Auth.auth().currentUser == nil {
@@ -99,7 +101,11 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
         Task { @MainActor in
-            NotificationService.shared.didRegisterForRemoteNotifications(deviceToken: deviceToken)
+            if PilotBuild.isEnabled {
+                await AppServices.shared.pilotAccountModel?.push?.received(deviceToken)
+            } else {
+                NotificationService.shared.didRegisterForRemoteNotifications(deviceToken: deviceToken)
+            }
         }
     }
 
@@ -107,7 +113,11 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFailToRegisterForRemoteNotificationsWithError error: Error
     ) {
-        print("Failed to register for remote notifications: \(error)")
+        if PilotBuild.isEnabled {
+            AppServices.shared.pilotAccountModel?.push?.registrationFailed()
+        } else if PilotBuild.allowsLegacyServices {
+            print("Failed to register for remote notifications")
+        }
     }
 
     nonisolated func application(

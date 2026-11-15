@@ -14,6 +14,29 @@ class NotificationService: NSObject, ObservableObject {
         super.init()
     }
 
+    static func pilotPush(api: PilotAPIClient, bundle: Bundle = .main) -> PilotPushModel {
+        let profile = bundle.url(forResource: "embedded", withExtension: "mobileprovision")
+            .map { (try? Data(contentsOf: $0)) ?? Data() }
+        let hasReceipt = bundle.appStoreReceiptURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
+        return PilotPushModel(api: api, journal: PilotKeychain(service: "org.tsvetkov.eng-pulse.push-binding"),
+            receiptDirectory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("EngPulsePilotPush", isDirectory: true),
+            environment: PilotPushEnvironment.resolve(profile: profile, storeReceipt: hasReceipt),
+            version: bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
+            authorization: { prompt in
+                let center = UNUserNotificationCenter.current()
+                switch await center.notificationSettings().authorizationStatus {
+                case .authorized: return true
+                case .notDetermined, .provisional:
+                    guard prompt else { return false }
+                    return try await center.requestAuthorization(options: [.alert, .sound])
+                default: return false
+                }
+            },
+            register: { UIApplication.shared.registerForRemoteNotifications() },
+            unregister: { UIApplication.shared.unregisterForRemoteNotifications() })
+    }
+
     // MARK: - Authorization
 
     /// Request notification permissions
@@ -121,8 +144,11 @@ extension NotificationService: UNUserNotificationCenterDelegate {
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        guard PilotBuild.allowsLegacyServices else { return [] }
-        return [.banner, .badge, .sound]
+        if PilotBuild.allowsLegacyServices { return [.banner, .badge, .sound] }
+        guard PilotBuild.isEnabled, notification.request.trigger is UNPushNotificationTrigger else { return [] }
+        let feed = notification.request.content.userInfo["feed"] as? String
+        let show = await MainActor.run { AppServices.shared.pilotAccountModel?.push?.canPresent(feed: feed) == true }
+        return show ? [.banner, .sound] : []
     }
 
     /// Handle notification tap

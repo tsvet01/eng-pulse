@@ -19,7 +19,8 @@ final class AppServices: ObservableObject {
             let auth = PilotAuthClient(configuration: config, storage: PilotKeychain())
             let api = PilotAPIClient(configuration: config, auth: auth)
             let model = PilotAccountModel(auth: auth, api: api,
-                admissionStorage: PilotKeychain(service: "org.tsvetkov.eng-pulse.admitted-account"))
+                admissionStorage: PilotKeychain(service: "org.tsvetkov.eng-pulse.admitted-account"),
+                push: NotificationService.pilotPush(api: api))
             self.init(account: model, api: api)
         } else { self.init(account: nil, api: nil) }
     }
