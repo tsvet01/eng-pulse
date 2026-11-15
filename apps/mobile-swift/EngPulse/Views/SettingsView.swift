@@ -122,6 +122,7 @@ struct SettingsView: View {
 
                 } else if let model = AppServices.shared.pilotAccountModel,
                           case .admitted(_, let user) = model.phase {
+                    if let push = model.push { PilotPushSettings(model: push) }
                     SettingsSection(title: "Account", icon: "person.crop.circle") {
                         Text(user.email).font(.subheadline)
                         Button("Sign out", role: .destructive) { Task { await model.signOut() } }
@@ -242,6 +243,53 @@ struct SettingsView: View {
             await appState.clearCache()
             await loadCacheSize()
         }
+    }
+}
+
+private struct PilotPushSettings: View {
+    @ObservedObject var model: PilotPushModel
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        SettingsSection(title: "Push notifications", icon: "bell") {
+            switch model.status {
+            case .unavailable:
+                Text("Connect to verify your pilot access before registering this iPhone.")
+            case .off:
+                Text("Receive pilot notifications on this iPhone. Registration does not change your daily delivery preferences.")
+                registerButton
+            case .connecting:
+                Text("Connecting this iPhone…")
+                disconnectButton
+            case .ready:
+                Label("This iPhone is registered", systemImage: "checkmark.circle")
+                    .accessibilityIdentifier("pilot.push.registered")
+                disconnectButton
+            case .disconnecting:
+                Text("Disconnecting this iPhone…")
+            case .denied:
+                Text("Allow notifications in iOS Settings, then register this iPhone.")
+                Button("Open notification settings") {
+                    if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
+                }
+                registerButton
+            case .failed(let message):
+                Text(message)
+                registerButton
+                disconnectButton
+            }
+        }
+        .font(.subheadline)
+    }
+
+    private var registerButton: some View {
+        Button("Register this iPhone") { Task { await model.enable() } }
+            .accessibilityIdentifier("pilot.push.register")
+    }
+
+    private var disconnectButton: some View {
+        Button("Disconnect this iPhone", role: .destructive) { Task { await model.disable() } }
+            .accessibilityIdentifier("pilot.push.disconnect")
     }
 }
 

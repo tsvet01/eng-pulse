@@ -20,10 +20,19 @@ final class PilotAccountModel: ObservableObject {
         }
     }
 
-    @Published private(set) var phase: Phase = .restoring
+    @Published private(set) var phase: Phase = .restoring {
+        didSet {
+            switch phase {
+            case .signedOut: push?.leave(session: oldValue.session)
+            case .blocked(let session), .needsInvite(let session): push?.leave(session: session)
+            default: break
+            }
+        }
+    }
     @Published private(set) var isBusy = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var codeSentTo: String?
+    let push: PilotPushModel?
     private let auth: PilotAuthClient
     private let api: PilotAPIClient
     private let admissionStorage: (any PilotCredentialStorage)?
@@ -31,8 +40,9 @@ final class PilotAccountModel: ObservableObject {
     private var appleAttempt: UUID?
     private struct Admission: Codable { let identity: UUID; let user: PilotUser; let feed: String }
 
-    init(auth: PilotAuthClient, api: PilotAPIClient, admissionStorage: (any PilotCredentialStorage)? = nil) {
-        self.auth = auth; self.api = api; self.admissionStorage = admissionStorage
+    init(auth: PilotAuthClient, api: PilotAPIClient, admissionStorage: (any PilotCredentialStorage)? = nil, push: PilotPushModel? = nil) {
+        self.auth = auth; self.api = api; self.admissionStorage = admissionStorage; self.push = push
+        push?.onAccessFailure = { [weak self] error, session in self?.readerFailed(error, session: session) }
     }
 
     func restore() async {
@@ -111,6 +121,7 @@ final class PilotAccountModel: ObservableObject {
         codeSentTo = nil
         errorMessage = nil
         isBusy = true
+        await push?.finishCleanup()
         do { try await auth.signOut() }
         catch {
             guard operation == version else { return }
@@ -178,6 +189,9 @@ final class PilotAccountModel: ObservableObject {
             try? admissionStorage?.write(data)
         }
         phase = result.0
+        if case .admitted(let session, let user) = phase, result.1 == nil {
+            push?.admit(session, user: user.id)
+        }
         errorMessage = result.1
         codeSentTo = nil
     }

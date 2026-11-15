@@ -51,6 +51,7 @@
 		AC100004 /* PilotAccountModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200004 /* PilotAccountModel.swift */; };
 		AC100005 /* PilotKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200005 /* PilotKeychain.swift */; };
 		AC100006 /* PilotBuild.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200006 /* PilotBuild.swift */; };
+		PN100001 /* PilotPush.swift in Sources */ = {isa = PBXBuildFile; fileRef = PN200001 /* PilotPush.swift */; };
 		AC100007 /* PilotSignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200007 /* PilotSignInView.swift */; };
 		AC100008 /* PilotKeychainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200008 /* PilotKeychainTests.swift */; };
 		AC100009 /* PilotFeedReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC200009 /* PilotFeedReader.swift */; };
@@ -124,6 +125,7 @@
 		AC200004 /* PilotAccountModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pilot/PilotAccountModel.swift; sourceTree = "<group>"; };
 		AC200005 /* PilotKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pilot/PilotKeychain.swift; sourceTree = "<group>"; };
 		AC200006 /* PilotBuild.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pilot/PilotBuild.swift; sourceTree = "<group>"; };
+		PN200001 /* PilotPush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pilot/PilotPush.swift; sourceTree = "<group>"; };
 		AC200007 /* PilotSignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/PilotSignInView.swift; sourceTree = "<group>"; };
 		AC200008 /* PilotKeychainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotKeychainTests.swift; sourceTree = "<group>"; };
 		AC200009 /* PilotFeedReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pilot/PilotFeedReader.swift; sourceTree = "<group>"; };
@@ -173,6 +175,7 @@
 				A2000001 /* EngPulseApp.swift */,
 				AC200007 /* PilotSignInView.swift */,
 				AC200006 /* PilotBuild.swift */,
+				PN200001 /* PilotPush.swift */,
 				AC200005 /* PilotKeychain.swift */,
 				AC200004 /* PilotAccountModel.swift */,
 				FB200001 /* PilotFeedback.swift */,
@@ -385,6 +388,7 @@
 				A1000001 /* EngPulseApp.swift in Sources */,
 				AC100007 /* PilotSignInView.swift in Sources */,
 				AC100006 /* PilotBuild.swift in Sources */,
+				PN100001 /* PilotPush.swift in Sources */,
 				AC100005 /* PilotKeychain.swift in Sources */,
 				AC100004 /* PilotAccountModel.swift in Sources */,
 				FB100001 /* PilotFeedback.swift in Sources */,
