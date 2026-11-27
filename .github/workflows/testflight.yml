@@ -1,0 +1,100 @@
+name: TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: "CFBundleVersion. Leave empty to use this workflow's run number."
+        required: false
+        type: string
+      include_carplay:
+        description: "Include the CarPlay audio entitlement. Leave off until Apple grants com.apple.developer.carplay-audio."
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: testflight
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Prepare signing material
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          GOOGLE_CLOUD_TTS_API_KEY: ${{ secrets.GOOGLE_CLOUD_TTS_API_KEY }}
+          BUILD_NUMBER_INPUT: ${{ inputs.build_number }}
+          RUN_NUMBER: ${{ github.run_number }}
+          INCLUDE_CARPLAY: ${{ inputs.include_carplay }}
+        run: |
+          set -euo pipefail
+          python3 scripts/prepare_testflight.py \
+            --app-dir apps/mobile-swift \
+            --key-dir "$HOME/private_keys" \
+            --export-options "$RUNNER_TEMP/ExportOptions.plist" \
+            --result "$RUNNER_TEMP/testflight.env"
+
+      # Archive unsigned. A development profile needs a registered device, which
+      # this runner does not have. Export cloud-signs for App Store distribution.
+      - name: Archive Release
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          . "$RUNNER_TEMP/testflight.env"
+          echo "Archiving Release build $BUILD_NUMBER"
+          xcodebuild archive \
+            -project EngPulse.xcodeproj \
+            -scheme EngPulse \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/EngPulse.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
+          xcent="$RUNNER_TEMP/EngPulse.xcarchive/Products/Applications/EngPulse.app/archived-expanded-entitlements.xcent"
+          if [ ! -f "$xcent" ]; then
+            echo "Archive has no expanded entitlements, so export would drop Sign in with Apple and Push."
+            find "$RUNNER_TEMP/EngPulse.xcarchive" -iname '*entitle*' -print
+            exit 1
+          fi
+          push_env=$(/usr/libexec/PlistBuddy -c 'Print :aps-environment' "$xcent")
+          [ "$push_env" = "production" ] || { echo "Push entitlement is '$push_env'"; exit 1; }
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.applesignin' "$xcent" >/dev/null
+          if [ "$INCLUDE_CARPLAY" = "true" ]; then
+            /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.carplay-audio' "$xcent" >/dev/null
+          elif /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.carplay-audio' "$xcent" >/dev/null 2>&1; then
+            echo "CarPlay entitlement is still in the archive"
+            exit 1
+          fi
+        working-directory: apps/mobile-swift
+
+      - name: Sign and upload to TestFlight
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          . "$RUNNER_TEMP/testflight.env"
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/EngPulse.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+        working-directory: apps/mobile-swift

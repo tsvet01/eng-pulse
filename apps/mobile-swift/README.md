@@ -102,6 +102,10 @@ xcodebuild -scheme EngPulse -sdk iphoneos -configuration Debug
 3. Open project in Xcode, select your team in **Signing & Capabilities**
 4. Build and run on device
 
+### TestFlight
+
+A manual GitHub Actions workflow archives a Release build and uploads it to TestFlight. Secret names, App Store Connect setup, and the external-tester public link are in [TestFlight](../../docs/testflight.md).
+
 ### Push Notifications
 
 The app uses native APNs (not Firebase). To enable:
